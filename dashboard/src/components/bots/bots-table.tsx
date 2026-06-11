@@ -13,7 +13,13 @@ import {
 } from "@/components/ui/table";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { formatSupabaseError } from "@/lib/errors";
-import type { BotRow } from "@/lib/types/database";
+
+type BotListItem = {
+  id: string;
+  name: string;
+  status: string;
+  campaignName: string;
+};
 
 function botStatus(status: string) {
   const map: Record<string, { label: string; variant: "live" | "warning" | "info" | "default" }> = {
@@ -28,13 +34,13 @@ function botStatus(status: string) {
 }
 
 export function BotsTable() {
-  const [bots, setBots] = useState<BotRow[]>([]);
+  const [bots, setBots] = useState<BotListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const loadBots = useCallback(async () => {
     if (!isSupabaseConfigured()) {
-      setError("Add Supabase keys to .env.local and restart the dev server.");
+      setError("Supabase is not configured. Add env vars on Vercel and redeploy.");
       setLoading(false);
       return;
     }
@@ -44,13 +50,37 @@ export function BotsTable() {
 
     try {
       const supabase = createClient();
-      const { data, error: botsError } = await supabase
+
+      const { data: botRows, error: botsError } = await supabase
         .from("bots")
-        .select("id, name, status, campaign_id, campaigns(name)")
+        .select("id, name, status, campaign_id")
         .order("name", { ascending: true });
 
       if (botsError) throw botsError;
-      setBots((data ?? []) as BotRow[]);
+
+      const campaignIds = [
+        ...new Set((botRows ?? []).map((b) => b.campaign_id).filter(Boolean)),
+      ] as string[];
+
+      let campaignNames: Record<string, string> = {};
+      if (campaignIds.length > 0) {
+        const { data: campaigns, error: campaignsError } = await supabase
+          .from("campaigns")
+          .select("id, name")
+          .in("id", campaignIds);
+
+        if (campaignsError) throw campaignsError;
+        campaignNames = Object.fromEntries((campaigns ?? []).map((c) => [c.id, c.name]));
+      }
+
+      setBots(
+        (botRows ?? []).map((bot) => ({
+          id: bot.id,
+          name: bot.name,
+          status: bot.status,
+          campaignName: bot.campaign_id ? (campaignNames[bot.campaign_id] ?? "—") : "—",
+        })),
+      );
     } catch (err) {
       setError(formatSupabaseError(err, "Could not load bots."));
     } finally {
@@ -94,9 +124,7 @@ export function BotsTable() {
               {bots.map((bot) => (
                 <TableRow key={bot.id}>
                   <TableCell className="font-medium text-zinc-200">{bot.name}</TableCell>
-                  <TableCell className="text-zinc-500">
-                    {bot.campaigns?.name ?? "—"}
-                  </TableCell>
+                  <TableCell className="text-zinc-500">{bot.campaignName}</TableCell>
                   <TableCell>{botStatus(bot.status)}</TableCell>
                   <TableCell className="text-right tabular-nums text-zinc-500">—</TableCell>
                   <TableCell className="text-right font-mono text-zinc-400">—</TableCell>

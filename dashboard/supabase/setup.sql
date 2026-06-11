@@ -133,5 +133,11 @@ create policy "org bots select" on bots for select using (org_id = auth_org_id()
 drop policy if exists "org bots insert" on bots;
 create policy "org bots insert" on bots for insert with check (org_id = auth_org_id());
 
+drop policy if exists "org bots update" on bots;
+create policy "org bots update" on bots for update using (org_id = auth_org_id());
+
+drop policy if exists "org bots delete" on bots;
+create policy "org bots delete" on bots for delete using (org_id = auth_org_id());
+
 -- 5. Reload API cache
 notify pgrst, 'reload schema';

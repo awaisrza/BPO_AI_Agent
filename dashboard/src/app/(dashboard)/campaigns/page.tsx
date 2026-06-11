@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -11,12 +10,10 @@ export default function CampaignsPage() {
         title="Campaigns"
         description="Manage outbound campaigns, scripts, and bot assignments."
         action={
-          <Link href="/campaigns/new">
-            <Button>
-              <Plus className="h-4 w-4" />
-              New campaign
-            </Button>
-          </Link>
+          <Button href="/campaigns/new">
+            <Plus className="h-4 w-4" />
+            New campaign
+          </Button>
         }
       />
 

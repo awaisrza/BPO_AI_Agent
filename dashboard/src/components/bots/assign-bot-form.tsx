@@ -47,7 +47,7 @@ export function AssignBotForm() {
     }
 
     if (!isSupabaseConfigured()) {
-      setError("Add Supabase keys to .env.local and restart the dev server.");
+      setError("Supabase is not configured. Add env vars on Vercel (or .env.local locally) and redeploy.");
       return;
     }
 

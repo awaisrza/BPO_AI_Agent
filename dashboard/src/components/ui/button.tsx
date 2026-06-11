@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 const variants = {
@@ -14,26 +15,33 @@ const sizes = {
   md: "px-3.5 py-2 text-sm",
 };
 
+const baseClass =
+  "inline-flex items-center justify-center gap-2 rounded-lg border font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-400 disabled:pointer-events-none disabled:opacity-40";
+
 export function Button({
   children,
   variant = "primary",
   size = "md",
   className,
+  href,
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: keyof typeof variants;
   size?: keyof typeof sizes;
+  href?: string;
 }) {
+  const styles = cn(baseClass, variants[variant], sizes[size], className);
+
+  if (href) {
+    return (
+      <Link href={href} className={styles}>
+        {children}
+      </Link>
+    );
+  }
+
   return (
-    <button
-      className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg border font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-400 disabled:pointer-events-none disabled:opacity-40",
-        variants[variant],
-        sizes[size],
-        className,
-      )}
-      {...props}
-    >
+    <button className={styles} {...props}>
       {children}
     </button>
   );
