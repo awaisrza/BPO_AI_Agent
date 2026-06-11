@@ -4,30 +4,63 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
-import { createCampaign } from "@/lib/campaigns";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { buildNewCampaignPayload } from "@/lib/campaigns";
+import { formatSupabaseError } from "@/lib/errors";
+import { getOrgId } from "@/lib/get-org-id";
+import type { CampaignStatus } from "@/lib/types/database";
 
 export function NewCampaignForm() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [script, setScript] = useState("");
-  const [status, setStatus] = useState<"paused" | "running">("paused");
+  const [status, setStatus] = useState<CampaignStatus>("paused");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+
+    if (!isSupabaseConfigured()) {
+      setError("Add Supabase keys to .env.local and restart the dev server.");
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      const campaign = createCampaign({
-        name,
-        script: script || undefined,
-        status,
-      });
+      const supabase = createClient();
+      const orgId = await getOrgId(supabase);
+
+      const { data: campaign, error: insertError } = await supabase
+        .from("campaigns")
+        .insert(
+          buildNewCampaignPayload({
+            orgId,
+            name,
+            scriptLabel: script || undefined,
+            status,
+          }),
+        )
+        .select("id")
+        .single();
+
+      if (insertError) {
+        throw new Error(formatSupabaseError(insertError, "Could not create campaign."));
+      }
+      if (!campaign?.id) {
+        throw new Error("Campaign was not created.");
+      }
+
       router.push(`/campaigns/${campaign.id}`);
+      router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create campaign.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatSupabaseError(err, "Could not create campaign."),
+      );
       setSubmitting(false);
     }
   }
@@ -61,7 +94,7 @@ export function NewCampaignForm() {
       <Field label="Status" description="New campaigns start paused until you assign bots.">
         <Select
           value={status}
-          onChange={(e) => setStatus(e.target.value as "paused" | "running")}
+          onChange={(e) => setStatus(e.target.value as CampaignStatus)}
         >
           <option value="paused">Paused</option>
           <option value="running">Running</option>
