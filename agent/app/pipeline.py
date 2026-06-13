@@ -13,7 +13,7 @@ from loguru import logger
 from .config import settings, ScriptConfig
 from .conversation import Action, ConversationEngine
 from .fish_tts import FishAudioTTSService
-from .gemini import answer_offscript
+from .knowledge import answer_offscript
 from .vicidial import ViciDialClient
 
 try:
@@ -92,11 +92,16 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 if self._mic_test:
                     logger.info("MIC TEST -> qualified lead (warm transfer simulated)")
                 else:
-                    preset = (
-                        self._engine.script.transfer_preset or settings.vicidial_transfer_preset
-                    )
-                    logger.info(f"FSM -> warm transfer (preset={preset})")
-                    await self._vici.warm_transfer(self._agent_user, preset=preset)
+                    closer = self._engine.script.transfer_closer_user
+                    if closer:
+                        logger.info(f"FSM -> warm transfer to closer {closer}")
+                        await self._vici.warm_transfer(self._agent_user, closer_user=closer)
+                    else:
+                        preset = (
+                            self._engine.script.transfer_preset or settings.vicidial_transfer_preset
+                        )
+                        logger.info(f"FSM -> warm transfer (preset={preset})")
+                        await self._vici.warm_transfer(self._agent_user, preset=preset)
                     await self._vici.set_disposition(self._agent_user, "XFER")
                 await self.push_frame(EndFrame())
             elif turn.action == Action.HANGUP:
@@ -158,7 +163,7 @@ def build_pipeline(
 
     engine = ConversationEngine(
         script=script,
-        answer_offscript=lambda q, ctx: answer_offscript(q, ctx),
+        answer_offscript=lambda q, ctx: answer_offscript(q, ctx, script.knowledge_base),
     )
     vici = None if mic_test else ViciDialClient()
     fronter = FronterProcessor(engine, vici, agent_user, mic_test=mic_test)

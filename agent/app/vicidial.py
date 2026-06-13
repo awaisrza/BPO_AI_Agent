@@ -37,8 +37,25 @@ class ViciDialClient:
         logger.debug(f"ViciDial agent_api {params.get('function')}: {resp.text.strip()}")
         return resp.text.strip()
 
-    async def warm_transfer(self, agent_user: str, preset: str | None = None) -> str:
-        """Transfer the live call to a closer group/preset, keeping the prospect on the line."""
+    async def warm_transfer(
+        self,
+        agent_user: str,
+        *,
+        preset: str | None = None,
+        closer_user: str | None = None,
+    ) -> str:
+        """Transfer the live call to a closer queue or a specific logged-in agent."""
+        if closer_user:
+            return await self._agent_api(
+                {
+                    "function": "transfer_conference",
+                    "agent_user": agent_user,
+                    "value": "LOCAL_CLOSER",
+                    "ingroup_choices": "AGENTDIRECT",
+                    "phone_number": closer_user,
+                }
+            )
+
         preset = preset or settings.vicidial_transfer_preset
         return await self._agent_api(
             {

@@ -36,8 +36,9 @@ def test_qualified_lead_transfers():
     e = make_engine()
     e.open()
     e.handle("ok")                 # pitch delivered, enter QUALIFY
-    e.handle("yes")                # answer q1 (positive)
-    turn = e.handle("yes")         # answer q2 (positive) -> qualified
+    e.handle("yes")                # ask q1
+    e.handle("yes")                # ask q2
+    turn = e.handle("yes")         # all qualifiers answered -> qualified
     assert turn.action == Action.TRANSFER
 
 
@@ -45,6 +46,7 @@ def test_unqualified_lead_ends():
     e = make_engine()
     e.open()
     e.handle("ok")                 # enter QUALIFY
-    e.handle("hmm")                # q1, unclear
-    turn = e.handle("hmm")         # q2, unclear -> not qualified
+    e.handle("hmm")                # ask q1, unclear
+    e.handle("hmm")                # ask q2, unclear
+    turn = e.handle("hmm")         # not qualified
     assert turn.action == Action.HANGUP

@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 import os
 
+from .models import KnowledgeEntry
+
 _AGENT_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _AGENT_ROOT.parent
 for _env_path in (
@@ -37,10 +39,15 @@ class ScriptConfig(BaseModel):
     transfer_line: str = "Perfect — let me connect you with a specialist right now, one moment."
     not_interested_line: str = "No problem at all, thanks for your time. Have a great day!"
     transfer_preset: str | None = None
+    transfer_closer_user: str | None = None
+    transfer_closer_name: str | None = None
+    knowledge_base: list[KnowledgeEntry] = Field(default_factory=list)
 
     @classmethod
     def from_script_json(cls, data: dict) -> "ScriptConfig":
         """Build from dashboard `campaigns.script_json`."""
+        from .knowledge import parse_knowledge_base
+
         questions = data.get("qualifying_questions") or []
         if isinstance(questions, list):
             questions = [str(q).strip() for q in questions if str(q).strip()]
@@ -55,6 +62,9 @@ class ScriptConfig(BaseModel):
                 data.get("not_interested_line") or "No problem at all, thanks for your time. Have a great day!"
             ),
             transfer_preset=data.get("transfer_preset"),
+            transfer_closer_user=data.get("transfer_closer_user"),
+            transfer_closer_name=data.get("transfer_closer_name"),
+            knowledge_base=parse_knowledge_base(data.get("knowledge_base")),
         )
 
     @classmethod

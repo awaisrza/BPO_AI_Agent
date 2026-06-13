@@ -1,4 +1,4 @@
-"""Gemini helper for off-script caller questions."""
+"""Gemini helper for off-script caller questions (used after KB lookup misses)."""
 
 from __future__ import annotations
 
@@ -14,29 +14,33 @@ not_interested: Understood. I will remove your number. Have a great day.
 call_me_back: Sure — what time works best for you tomorrow?
 """
 
+FALLBACK_REPLY = "Let me connect you with a specialist who can answer that."
 
-def answer_offscript(question: str, context: str = "", knowledge: str = DEFAULT_KNOWLEDGE) -> str:
-    """Return a short spoken reply for an unexpected caller question."""
+
+def generate_gemini_reply(question: str, context: str = "", knowledge: str = "") -> str:
+    """Return a short spoken reply using Gemini, grounded on the campaign knowledge base."""
     if not settings.google_api_key:
-        return "That's a great question — let me connect you with a specialist who can help."
+        return FALLBACK_REPLY
 
     try:
         import google.generativeai as genai
     except ImportError:
         logger.warning("google-generativeai not installed; using fallback off-script reply")
-        return "Let me connect you with a specialist who can answer that."
+        return FALLBACK_REPLY
 
     genai.configure(api_key=settings.google_api_key)
     model = genai.GenerativeModel(settings.gemini_model)
 
+    knowledge_block = (knowledge or DEFAULT_KNOWLEDGE).strip()
     prompt = f"""You are a friendly outbound fronter on a live US phone call.
 Reply in ONE short sentence (max 20 words). Sound natural, not salesy.
-Only use facts from the knowledge base. If unsure, offer to connect a specialist.
+Use ONLY facts from the knowledge base below. Do NOT invent offers, prices, or guarantees.
+If the knowledge base does not cover the question, say you will connect them with a specialist.
 
 CURRENT SCRIPT STEP: {context}
 
-KNOWLEDGE:
-{knowledge.strip()}
+KNOWLEDGE BASE:
+{knowledge_block}
 
 CALLER SAID: {question}
 
@@ -45,7 +49,7 @@ YOUR REPLY:"""
     try:
         response = model.generate_content(prompt)
         reply = (response.text or "").strip()
-        return reply or "Let me connect you with a specialist who can answer that."
+        return reply or FALLBACK_REPLY
     except Exception as exc:  # noqa: BLE001
         logger.error(f"Gemini off-script error: {exc}")
-        return "Let me connect you with a specialist who can answer that."
+        return FALLBACK_REPLY
