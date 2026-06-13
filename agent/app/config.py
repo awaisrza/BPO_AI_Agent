@@ -7,7 +7,17 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 import os
 
-load_dotenv()
+_AGENT_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = _AGENT_ROOT.parent
+for _env_path in (
+    _AGENT_ROOT / ".env.example",
+    _REPO_ROOT / ".env.local",
+    _REPO_ROOT / "dashboard" / ".env.local",
+    _AGENT_ROOT / ".env",
+    _AGENT_ROOT / ".env.local",
+):
+    if _env_path.exists():
+        load_dotenv(_env_path, override=True)
 
 
 class ScriptConfig(BaseModel):
@@ -24,14 +34,36 @@ class ScriptConfig(BaseModel):
             "Is your average monthly electric bill over 100 dollars?",
         ]
     )
-    # If the lead is qualified + interested, transfer to a human closer.
     transfer_line: str = "Perfect — let me connect you with a specialist right now, one moment."
     not_interested_line: str = "No problem at all, thanks for your time. Have a great day!"
+    transfer_preset: str | None = None
+
+    @classmethod
+    def from_script_json(cls, data: dict) -> "ScriptConfig":
+        """Build from dashboard `campaigns.script_json`."""
+        questions = data.get("qualifying_questions") or []
+        if isinstance(questions, list):
+            questions = [str(q).strip() for q in questions if str(q).strip()]
+        return cls(
+            greeting=str(data.get("greeting", "")).strip(),
+            pitch=str(data.get("pitch", "")).strip(),
+            qualifying_questions=questions,
+            transfer_line=str(
+                data.get("transfer_line") or "Perfect — let me connect you with a specialist right now, one moment."
+            ),
+            not_interested_line=str(
+                data.get("not_interested_line") or "No problem at all, thanks for your time. Have a great day!"
+            ),
+            transfer_preset=data.get("transfer_preset"),
+        )
 
     @classmethod
     def load(cls, path: str | None = None) -> "ScriptConfig":
         if path and Path(path).exists():
-            return cls(**json.loads(Path(path).read_text(encoding="utf-8")))
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            if "greeting" in raw:
+                return cls.from_script_json(raw)
+            return cls(**raw)
         return cls()
 
 
@@ -52,6 +84,14 @@ class Settings(BaseModel):
 
     host: str = Field(default_factory=lambda: os.getenv("AGENT_HOST", "0.0.0.0"))
     port: int = Field(default_factory=lambda: int(os.getenv("AGENT_PORT", "8765")))
+
+    supabase_url: str = Field(
+        default_factory=lambda: os.getenv("SUPABASE_URL")
+        or os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
+    )
+    supabase_service_role_key: str = Field(
+        default_factory=lambda: os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    )
 
 
 settings = Settings()

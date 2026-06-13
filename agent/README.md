@@ -33,7 +33,62 @@ If `pip install -r requirements.txt` is slow or fails, install simulation deps o
 .\.venv\Scripts\python.exe -m pip install httpx python-dotenv pydantic loguru pytest pytest-asyncio
 ```
 
-Copy `cp .env.example .env` (fill API keys later — not needed for text simulation).
+Put API keys in **`agent/.env.local`** or **`dashboard/.env.local`** (same file as Supabase is fine).
+
+### Test APIs (after keys are in `.env.local`)
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install httpx python-dotenv google-generativeai
+
+# One at a time
+.\.venv\Scripts\python.exe scripts/test_fish.py
+.\.venv\Scripts\python.exe scripts/test_gemini.py
+.\.venv\Scripts\python.exe scripts/test_deepgram.py
+
+# Or all three
+.\.venv\Scripts\python.exe scripts/test_all.py
+```
+
+`test_fish_balance.py` — check API wallet (separate from platform credits).
+`test_fish_voices.py` — list valid voice IDs if you get "Reference not found".
+`test_fish.py` saves `greeting.mp3` in `agent/` — play it to hear your voice.
+`test_deepgram.py` uses `test.wav` if present, else a public Deepgram sample.
+
+### Live mic test (full voice pipeline)
+
+Requires API keys in `dashboard/.env.local` or `agent/.env.local`.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install "pipecat-ai[deepgram,local,silero]" pyaudio
+
+.\.venv\Scripts\python.exe -m app.main --live
+```
+
+Speak into your mic. The bot greets you, follows the script, answers off-script questions via Gemini, then transfers or hangs up. Ctrl-C to quit.
+
+### Load script from dashboard (Supabase)
+
+1. Add to `dashboard/.env.local` (same file as API keys):
+   ```env
+   SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+   ```
+   Get it from Supabase → **Project Settings → API → service_role** (secret — never commit).
+
+2. List campaign/bot IDs:
+   ```powershell
+   .\.venv\Scripts\python.exe scripts\list_supabase.py
+   ```
+
+3. Run with your campaign script:
+   ```powershell
+   .\.venv\Scripts\python.exe -m app.main --live --campaign-id YOUR-CAMPAIGN-UUID
+   ```
+   Or via assigned bot:
+   ```powershell
+   .\.venv\Scripts\python.exe -m app.main --live --bot-id YOUR-BOT-UUID
+   ```
+
+Edit script in dashboard → **Campaigns → Save** → re-run the agent command (loads fresh each start).
 
 ### macOS / Linux
 
