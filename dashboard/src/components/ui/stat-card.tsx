@@ -19,24 +19,24 @@ export function StatCard({
   return (
     <div
       className={cn(
-        "rounded-xl border border-surface-border bg-surface-raised p-5",
+        "rounded-lg border border-surface-border bg-surface-raised p-4",
         className,
       )}
     >
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-zinc-500">{label}</p>
-        {Icon && <Icon className="h-4 w-4 text-zinc-600" aria-hidden />}
+      <div className="flex items-center justify-between gap-2">
+        <p className="data-label">{label}</p>
+        {Icon && (
+          <Icon className="h-3.5 w-3.5 text-foreground-faint" strokeWidth={1.75} aria-hidden />
+        )}
       </div>
-      <p className="mt-3 text-2xl font-semibold tracking-tightest text-zinc-50">
-        {value}
-      </p>
+      <p className="metric-value mt-2">{value}</p>
       {hint && (
         <p
           className={cn(
-            "mt-1.5 text-xs",
-            trend === "up" && "text-emerald-400/90",
-            trend === "down" && "text-red-400/90",
-            (!trend || trend === "neutral") && "text-zinc-500",
+            "mt-1 text-caption",
+            trend === "up" && "text-status-success",
+            trend === "down" && "text-status-danger",
+            (!trend || trend === "neutral") && "text-foreground-faint",
           )}
         >
           {hint}

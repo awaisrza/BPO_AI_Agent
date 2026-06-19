@@ -1,7 +1,17 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { bootstrapUserProfile } from "@/lib/bootstrap-profile";
 import { formatSupabaseError } from "@/lib/errors";
 
 export async function getOrgId(supabase: SupabaseClient): Promise<string> {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    throw new Error("Not signed in.");
+  }
+
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("org_id")
@@ -12,23 +22,24 @@ export async function getOrgId(supabase: SupabaseClient): Promise<string> {
   }
 
   if (profile?.org_id) {
-    return profile.org_id;
+    const { data: org, error: orgError } = await supabase
+      .from("organizations")
+      .select("id")
+      .eq("id", profile.org_id)
+      .maybeSingle();
+
+    if (!orgError && org) {
+      return profile.org_id;
+    }
   }
 
-  const { data: orgId, error: rpcError } = await supabase.rpc("ensure_user_profile");
-
-  if (rpcError) {
-    throw new Error(
-      formatSupabaseError(
-        rpcError,
-        "Your account has no organization. Run supabase/fix-missing-profile.sql in Supabase, then try again.",
-      ),
-    );
+  const result = await bootstrapUserProfile(user, supabase);
+  if (result.orgId) {
+    return result.orgId;
   }
 
-  if (!orgId) {
-    throw new Error("Could not set up your organization. Sign out and sign in again.");
-  }
-
-  return orgId as string;
+  throw new Error(
+    result.error ??
+      "Your account has no organization. Run dashboard/supabase/bootstrap-login.sql in Supabase, then try again.",
+  );
 }

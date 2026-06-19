@@ -1,17 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, supabaseConfigHelp } from "@/lib/supabase/client";
+import { getOrgId } from "@/lib/get-org-id";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 
 export function LoginForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const next = searchParams.get("next") ?? "/";
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -25,37 +21,59 @@ export function LoginForm() {
     try {
       const supabase = createClient();
       const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password,
       });
 
       if (signInError) {
-        setError(signInError.message);
+        const message = signInError.message.toLowerCase();
+        if (message.includes("email not confirmed")) {
+          setError("Confirm your email first. In Supabase → Authentication → Users → confirm your user.");
+        } else if (message.includes("invalid login credentials")) {
+          setError("Wrong email or password. Try again or create a new account.");
+        } else {
+          setError(signInError.message);
+        }
         setLoading(false);
         return;
       }
 
-      router.push(next);
-      router.refresh();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setError("Sign-in succeeded but no session was created. Refresh the page and try again.");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        await getOrgId(supabase);
+      } catch {
+        // Workspace not ready — dashboard layout will show setup page
+      }
+
+      window.location.assign("/");
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : "Could not reach Supabase. Check .env.local and restart npm run dev.",
+          : supabaseConfigHelp(),
       );
       setLoading(false);
     }
   }
 
   return (
-    <div className="rounded-xl border border-surface-border bg-surface-raised p-8">
-      <div className="mb-8">
-        <p className="text-xs font-medium uppercase tracking-wider text-zinc-600">AI Fronter</p>
-        <h1 className="mt-2 text-xl font-semibold text-zinc-50">Sign in</h1>
-        <p className="mt-2 text-sm text-zinc-500">Access your BPO dashboard.</p>
+    <div className="rounded-lg border border-surface-border bg-surface-raised p-6 sm:p-8">
+      <div className="mb-6 border-b border-surface-border-subtle pb-6">
+        <p className="data-label">AI Fronter</p>
+        <h1 className="mt-2 text-xl font-semibold text-foreground">Sign in</h1>
+        <p className="mt-1.5 text-body text-foreground-muted">Access your call center dashboard.</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <Field label="Email">
           <Input
             type="email"
@@ -77,20 +95,16 @@ export function LoginForm() {
           />
         </Field>
 
-        {error && (
-          <p className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-            {error}
-          </p>
-        )}
+        {error && <p className="text-caption text-status-danger">{error}</p>}
 
         <Button type="submit" className="w-full" disabled={loading}>
           {loading ? "Signing in…" : "Sign in"}
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-zinc-500">
+      <p className="mt-6 text-center text-caption text-foreground-muted">
         No account?{" "}
-        <Link href="/signup" className="text-zinc-300 hover:text-white">
+        <Link href="/signup" className="font-medium text-brand hover:text-brand-hover">
           Create one
         </Link>
       </p>

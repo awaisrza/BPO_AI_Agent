@@ -2,11 +2,12 @@
 
 Default mode runs an OFFLINE TEXT SIMULATION of the conversation FSM so you can iterate on scripts
 immediately without telephony or API keys. Pass `--live` to run the real Pipecat pipeline with your
-laptop microphone and speakers.
+laptop microphone and speakers. Pass `--phone` for real PSTN calls via Twilio.
 
 Load scripts from the dashboard (Supabase):
   python -m app.main --campaign-id <uuid>
   python -m app.main --live --bot-id <uuid>
+  python -m app.main --phone --campaign-id <uuid> --dial +14155551234
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from loguru import logger
 from .config import ScriptConfig
 from .conversation import Action, ConversationEngine
 from .supabase_scripts import ScriptLoadError, resolve_script
+from .phone_server import run_phone_server
 
 
 def _load_script_from_args(args: argparse.Namespace) -> tuple[ScriptConfig, str]:
@@ -119,6 +121,16 @@ def main() -> None:
         help="Run live voice test (mic -> Deepgram -> FSM -> Fish -> speakers)",
     )
     parser.add_argument(
+        "--phone",
+        action="store_true",
+        help="Start phone-test server (Twilio -> real cell/landline call)",
+    )
+    parser.add_argument(
+        "--dial",
+        metavar="E164",
+        help="With --phone: place an outbound call to this number on startup (e.g. +14155551234)",
+    )
+    parser.add_argument(
         "--campaign-id",
         metavar="UUID",
         help="Load script from Supabase campaign (dashboard → Campaigns → URL id)",
@@ -131,7 +143,12 @@ def main() -> None:
     args = parser.parse_args()
 
     script, agent_user = _load_script_from_args(args)
-    if args.live:
+    if args.phone:
+        if args.live:
+            print("Use --phone or --live, not both.", file=sys.stderr)
+            sys.exit(1)
+        run_phone_server(script, agent_user, dial_to=args.dial)
+    elif args.live:
         run_live(script, agent_user)
     else:
         run_simulation(script)

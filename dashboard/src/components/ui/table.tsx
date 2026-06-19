@@ -2,8 +2,8 @@ import { cn } from "@/lib/utils";
 
 export function Table({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn("overflow-x-auto", className)}>
-      <table className="w-full text-left text-sm">{children}</table>
+    <div className={cn("overflow-x-auto scrollbar-thin", className)}>
+      <table className="w-full text-left text-body">{children}</table>
     </div>
   );
 }
@@ -11,7 +11,7 @@ export function Table({ children, className }: { children: React.ReactNode; clas
 export function TableHead({ children }: { children: React.ReactNode }) {
   return (
     <thead>
-      <tr className="border-b border-surface-border text-xs text-zinc-500">
+      <tr className="border-b border-surface-border bg-surface-overlay/50 text-caption text-foreground-faint">
         {children}
       </tr>
     </thead>
@@ -26,31 +26,39 @@ export function TableHeaderCell({
   className?: string;
 }) {
   return (
-    <th className={cn("px-6 py-3 font-medium first:pl-6 last:pr-6", className)}>
+    <th
+      className={cn(
+        "px-4 py-2.5 font-medium first:pl-5 last:pr-5",
+        className,
+      )}
+    >
       {children}
     </th>
   );
 }
 
 export function TableBody({ children }: { children: React.ReactNode }) {
-  return <tbody>{children}</tbody>;
+  return <tbody className="divide-y divide-surface-border-subtle">{children}</tbody>;
 }
 
 export function TableRow({
   children,
   className,
   onClick,
+  selected,
 }: {
   children: React.ReactNode;
   className?: string;
   onClick?: () => void;
+  selected?: boolean;
 }) {
   return (
     <tr
       onClick={onClick}
       className={cn(
-        "border-b border-surface-border/60 transition-colors last:border-0 hover:bg-white/[0.02]",
+        "transition-colors hover:bg-surface-overlay/40",
         onClick && "cursor-pointer",
+        selected && "bg-brand-muted/40",
         className,
       )}
     >
@@ -67,7 +75,7 @@ export function TableCell({
   className?: string;
 }) {
   return (
-    <td className={cn("px-6 py-4 first:pl-6 last:pr-6", className)}>
+    <td className={cn("px-4 py-3 first:pl-5 last:pr-5", className)}>
       {children}
     </td>
   );

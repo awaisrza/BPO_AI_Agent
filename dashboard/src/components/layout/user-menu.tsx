@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LogOut } from "lucide-react";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 export function UserMenu() {
@@ -52,17 +53,22 @@ export function UserMenu() {
   }
 
   return (
-    <div className="relative flex items-center gap-2">
+    <div className="flex items-center gap-3 pl-2">
       {email && (
-        <span className="hidden text-xs text-zinc-600 sm:inline">{email}</span>
+        <span className="hidden max-w-[160px] truncate text-caption text-foreground-faint md:inline">
+          {email}
+        </span>
       )}
       <button
         type="button"
         onClick={handleLogout}
         title="Sign out"
-        className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.06] text-xs font-medium text-zinc-400 transition-colors hover:bg-white/[0.1] hover:text-zinc-200"
+        className="group flex items-center gap-2 rounded-md border border-surface-border bg-surface-overlay px-2 py-1.5 transition-colors hover:border-surface-border hover:bg-surface-raised"
       >
-        {initials}
+        <span className="flex h-6 w-6 items-center justify-center rounded-sm bg-brand-muted text-2xs font-semibold text-brand">
+          {initials}
+        </span>
+        <LogOut className="hidden h-3.5 w-3.5 text-foreground-faint group-hover:text-foreground-muted sm:block" strokeWidth={1.75} />
       </button>
     </div>
   );

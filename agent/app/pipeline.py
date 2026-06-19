@@ -139,6 +139,7 @@ def build_pipeline(
     agent_user: str = "MIC-TEST",
     script: ScriptConfig | None = None,
     mic_test: bool = False,
+    sample_rate: int = 16000,
 ) -> Pipeline:
     """Assemble the live pipeline. `transport` provides audio in/out frames."""
     if not PIPECAT_AVAILABLE:
@@ -157,7 +158,7 @@ def build_pipeline(
         api_key=settings.fish_api_key,
         model=settings.fish_model,
         reference_id=settings.fish_reference_id,
-        sample_rate=16000,
+        sample_rate=sample_rate,
     )
     vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)))
 

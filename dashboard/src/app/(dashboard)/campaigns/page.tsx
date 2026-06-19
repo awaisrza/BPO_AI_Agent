@@ -8,7 +8,8 @@ export default function CampaignsPage() {
     <>
       <PageHeader
         title="Campaigns"
-        description="Manage outbound campaigns, scripts, and bot assignments."
+        description="Manage outbound campaigns, scripts, and agent assignments."
+        eyebrow="Management"
         action={
           <Button href="/campaigns/new">
             <Plus className="h-4 w-4" />

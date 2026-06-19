@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, supabaseConfigHelp } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 
@@ -52,21 +52,21 @@ export function SignupForm() {
       setError(
         err instanceof Error
           ? err.message
-          : "Could not reach Supabase. Check .env.local and restart npm run dev.",
+          : supabaseConfigHelp(),
       );
       setLoading(false);
     }
   }
 
   return (
-    <div className="rounded-xl border border-surface-border bg-surface-raised p-8">
-      <div className="mb-8">
-        <p className="text-xs font-medium uppercase tracking-wider text-zinc-600">AI Fronter</p>
-        <h1 className="mt-2 text-xl font-semibold text-zinc-50">Create account</h1>
-        <p className="mt-2 text-sm text-zinc-500">Set up your call center workspace.</p>
+    <div className="rounded-lg border border-surface-border bg-surface-raised p-6 sm:p-8">
+      <div className="mb-6 border-b border-surface-border-subtle pb-6">
+        <p className="data-label">AI Fronter</p>
+        <h1 className="mt-2 text-xl font-semibold text-foreground">Create account</h1>
+        <p className="mt-1.5 text-body text-foreground-muted">Set up your call center workspace.</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <Field label="Company name">
           <Input
             value={orgName}
@@ -107,20 +107,16 @@ export function SignupForm() {
           />
         </Field>
 
-        {error && (
-          <p className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-            {error}
-          </p>
-        )}
+        {error && <p className="text-caption text-status-danger">{error}</p>}
 
         <Button type="submit" className="w-full" disabled={loading}>
           {loading ? "Creating account…" : "Create account"}
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-zinc-500">
+      <p className="mt-6 text-center text-caption text-foreground-muted">
         Already have an account?{" "}
-        <Link href="/login" className="text-zinc-300 hover:text-white">
+        <Link href="/login" className="font-medium text-brand hover:text-brand-hover">
           Sign in
         </Link>
       </p>

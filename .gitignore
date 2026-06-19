@@ -19,6 +19,9 @@ build/
 .env.local
 .env.*.local
 *.pem
+scripts/eth-quest/wallets.json
+scripts/eth-quest/quest-state.json
+scripts/eth-quest/.env
 
 # Logs / OS
 *.log
@@ -27,3 +30,7 @@ Thumbs.db
 
 # Audio cache (pre-synthesized script lines)
 agent/audio_cache/
+
+# ngrok binary (download via agent/tools/download-ngrok.bat)
+agent/tools/ngrok.exe
+agent/tools/ngrok.zip

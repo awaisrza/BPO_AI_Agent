@@ -3,14 +3,17 @@ import { cn } from "@/lib/utils";
 export function Card({
   children,
   className,
+  padding = "default",
 }: {
   children: React.ReactNode;
   className?: string;
+  padding?: "none" | "default" | "compact";
 }) {
   return (
     <div
       className={cn(
-        "rounded-xl border border-surface-border bg-surface-raised",
+        "rounded-lg border border-surface-border bg-surface-raised",
+        padding === "compact" && "p-4",
         className,
       )}
     >
@@ -23,20 +26,27 @@ export function CardHeader({
   title,
   description,
   action,
+  className,
 }: {
   title: string;
   description?: string;
   action?: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 px-6 py-5">
-      <div>
-        <h3 className="text-sm font-medium text-zinc-100">{title}</h3>
+    <div
+      className={cn(
+        "flex items-start justify-between gap-4 border-b border-surface-border-subtle px-5 py-4",
+        className,
+      )}
+    >
+      <div className="min-w-0">
+        <h3 className="text-body font-medium text-foreground">{title}</h3>
         {description && (
-          <p className="mt-1 text-sm text-zinc-500">{description}</p>
+          <p className="mt-1 text-caption text-foreground-muted">{description}</p>
         )}
       </div>
-      {action}
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }
@@ -48,7 +58,7 @@ export function CardBody({
   children: React.ReactNode;
   className?: string;
 }) {
-  return <div className={cn("px-6 pb-6", className)}>{children}</div>;
+  return <div className={cn("px-5 py-4", className)}>{children}</div>;
 }
 
 export function CardFooter({
@@ -61,7 +71,7 @@ export function CardFooter({
   return (
     <div
       className={cn(
-        "border-t border-surface-border px-6 py-4",
+        "border-t border-surface-border-subtle px-5 py-3",
         className,
       )}
     >

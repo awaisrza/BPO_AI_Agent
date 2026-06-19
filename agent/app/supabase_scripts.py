@@ -22,7 +22,7 @@ def _supabase_config() -> tuple[str, str]:
             "Supabase not configured for the agent. Add to dashboard/.env.local or agent/.env:\n"
             "  NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co\n"
             "  SUPABASE_SERVICE_ROLE_KEY=your-service-role-key\n"
-            "(Project Settings → API → service_role — keep secret, never commit)"
+            "(Project Settings -> API -> service_role - keep secret, never commit)"
         )
     return url, key
 

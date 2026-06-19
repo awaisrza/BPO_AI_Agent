@@ -16,20 +16,20 @@ export function ProgressBar({
   const pct = Math.min(100, Math.round((value / max) * 100));
 
   return (
-    <div className={cn("space-y-3", className)}>
+    <div className={cn("space-y-2", className)}>
       <div className="flex items-baseline justify-between gap-4">
-        <span className="text-sm text-zinc-400">{label}</span>
-        <span className="text-sm tabular-nums text-zinc-500">
+        <span className="text-body text-foreground-secondary">{label}</span>
+        <span className="text-caption tabular-nums text-foreground-muted">
           {value.toLocaleString()}
-          <span className="text-zinc-600"> / {max.toLocaleString()}</span>
+          <span className="text-foreground-faint"> / {max.toLocaleString()}</span>
           {sublabel && (
-            <span className="ml-2 text-xs text-zinc-600">{sublabel}</span>
+            <span className="ml-2 text-foreground-faint">{sublabel}</span>
           )}
         </span>
       </div>
-      <div className="h-1 overflow-hidden rounded-full bg-white/[0.06]">
+      <div className="h-1.5 overflow-hidden rounded-sm bg-surface-overlay">
         <div
-          className="h-full rounded-full bg-zinc-100 transition-all"
+          className="h-full rounded-sm bg-brand transition-all duration-300"
           style={{ width: `${pct}%` }}
         />
       </div>

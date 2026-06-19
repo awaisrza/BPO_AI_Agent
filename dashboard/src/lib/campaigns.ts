@@ -1,5 +1,31 @@
-import type { CampaignRow, CampaignStatus } from "@/lib/types/database";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { BotStatus, CampaignRow, CampaignStatus } from "@/lib/types/database";
 import { DEFAULT_SCRIPT_JSON } from "@/lib/types/database";
+
+export function botStatusForCampaign(status: CampaignStatus): BotStatus {
+  return status === "running" ? "idle" : "offline";
+}
+
+/** Toggle campaign status and sync all assigned agents to match. */
+export async function setCampaignRunningStatus(
+  supabase: SupabaseClient,
+  campaignId: string,
+  status: CampaignStatus,
+) {
+  const { error: campaignError } = await supabase
+    .from("campaigns")
+    .update({ status })
+    .eq("id", campaignId);
+
+  if (campaignError) throw campaignError;
+
+  const { error: botsError } = await supabase
+    .from("bots")
+    .update({ status: botStatusForCampaign(status) })
+    .eq("campaign_id", campaignId);
+
+  if (botsError) throw botsError;
+}
 
 export type CampaignListItem = {
   id: string;

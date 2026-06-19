@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Bot } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Alert } from "@/components/ui/alert";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/input";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -11,14 +17,24 @@ import {
   TableHeaderCell,
   TableRow,
 } from "@/components/ui/table";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { botStatusForCampaign } from "@/lib/campaigns";
+import { createClient, isSupabaseConfigured, supabaseConfigHelp } from "@/lib/supabase/client";
 import { formatSupabaseError } from "@/lib/errors";
+import type { BotStatus, CampaignStatus } from "@/lib/types/database";
+
+type CampaignOption = {
+  id: string;
+  name: string;
+  status: CampaignStatus;
+};
 
 type BotListItem = {
   id: string;
   name: string;
-  status: string;
+  status: BotStatus;
+  campaignId: string | null;
   campaignName: string;
+  campaignStatus: CampaignStatus | null;
 };
 
 function botStatus(status: string) {
@@ -26,7 +42,7 @@ function botStatus(status: string) {
     live: { label: "On call", variant: "live" },
     ringing: { label: "Ringing", variant: "warning" },
     dialing: { label: "Dialing", variant: "info" },
-    idle: { label: "Idle", variant: "default" },
+    idle: { label: "Ready", variant: "live" },
     offline: { label: "Offline", variant: "default" },
   };
   const s = map[status] ?? map.offline;
@@ -35,12 +51,15 @@ function botStatus(status: string) {
 
 export function BotsTable() {
   const [bots, setBots] = useState<BotListItem[]>([]);
+  const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [busyBotId, setBusyBotId] = useState<string | null>(null);
 
   const loadBots = useCallback(async () => {
     if (!isSupabaseConfigured()) {
-      setError("Supabase is not configured. Add env vars on Vercel and redeploy.");
+      setError(supabaseConfigHelp());
       setLoading(false);
       return;
     }
@@ -51,35 +70,39 @@ export function BotsTable() {
     try {
       const supabase = createClient();
 
-      const { data: botRows, error: botsError } = await supabase
-        .from("bots")
-        .select("id, name, status, campaign_id")
-        .order("name", { ascending: true });
+      const [{ data: botRows, error: botsError }, { data: campaignRows, error: campaignsError }] =
+        await Promise.all([
+          supabase.from("bots").select("id, name, status, campaign_id").order("name", { ascending: true }),
+          supabase.from("campaigns").select("id, name, status").order("name"),
+        ]);
 
       if (botsError) throw botsError;
+      if (campaignsError) throw campaignsError;
 
-      const campaignIds = [
-        ...new Set((botRows ?? []).map((b) => b.campaign_id).filter(Boolean)),
-      ] as string[];
+      const campaignMap = Object.fromEntries(
+        (campaignRows ?? []).map((c) => [c.id, { name: c.name, status: c.status as CampaignStatus }]),
+      );
 
-      let campaignNames: Record<string, string> = {};
-      if (campaignIds.length > 0) {
-        const { data: campaigns, error: campaignsError } = await supabase
-          .from("campaigns")
-          .select("id, name")
-          .in("id", campaignIds);
-
-        if (campaignsError) throw campaignsError;
-        campaignNames = Object.fromEntries((campaigns ?? []).map((c) => [c.id, c.name]));
-      }
+      setCampaigns(
+        (campaignRows ?? []).map((c) => ({
+          id: c.id,
+          name: c.name,
+          status: c.status as CampaignStatus,
+        })),
+      );
 
       setBots(
-        (botRows ?? []).map((bot) => ({
-          id: bot.id,
-          name: bot.name,
-          status: bot.status,
-          campaignName: bot.campaign_id ? (campaignNames[bot.campaign_id] ?? "—") : "—",
-        })),
+        (botRows ?? []).map((bot) => {
+          const campaign = bot.campaign_id ? campaignMap[bot.campaign_id] : null;
+          return {
+            id: bot.id,
+            name: bot.name,
+            status: bot.status as BotStatus,
+            campaignId: bot.campaign_id,
+            campaignName: campaign?.name ?? "—",
+            campaignStatus: campaign?.status ?? null,
+          };
+        }),
       );
     } catch (err) {
       setError(formatSupabaseError(err, "Could not load bots."));
@@ -92,48 +115,135 @@ export function BotsTable() {
     loadBots();
   }, [loadBots]);
 
+  async function reassignCampaign(botId: string, campaignId: string) {
+    setActionError("");
+    setBusyBotId(botId);
+
+    try {
+      const campaign = campaigns.find((c) => c.id === campaignId);
+      const nextStatus = campaign ? botStatusForCampaign(campaign.status) : "offline";
+
+      const supabase = createClient();
+      const { error: updateError } = await supabase
+        .from("bots")
+        .update({ campaign_id: campaignId, status: nextStatus })
+        .eq("id", botId);
+
+      if (updateError) throw updateError;
+
+      setBots((prev) =>
+        prev.map((bot) =>
+          bot.id === botId
+            ? {
+                ...bot,
+                campaignId,
+                campaignName: campaign?.name ?? "—",
+                campaignStatus: campaign?.status ?? null,
+                status: nextStatus,
+              }
+            : bot,
+        ),
+      );
+    } catch (err) {
+      setActionError(formatSupabaseError(err, "Could not reassign agent."));
+    } finally {
+      setBusyBotId(null);
+    }
+  }
+
   return (
-    <Card>
-      <CardHeader title="All bots" description="Live status across campaigns" />
-      <CardBody className="px-0 pb-0 pt-0">
-        {loading && <p className="px-6 py-8 text-sm text-zinc-500">Loading bots…</p>}
+    <div className="space-y-4">
+      <Alert variant="info">
+        <strong className="text-foreground">How to go live:</strong> (1) Assign each agent to a
+        campaign below. (2) Open <strong>Campaigns</strong> and click <strong>Run</strong> — all
+        assigned agents go live automatically. Dialing starts when ViciDial is connected under
+        Integrations.
+      </Alert>
 
-        {error && (
-          <p className="mx-6 my-6 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-            {error}
-          </p>
-        )}
+      <Card>
+        <CardHeader
+          title="Agent roster"
+          description={`${bots.length} agent${bots.length === 1 ? "" : "s"} · real-time status`}
+        />
+        <CardBody className="px-0 pb-0 pt-0">
+          {loading && <TableSkeleton rows={5} cols={5} />}
 
-        {!loading && !error && bots.length === 0 && (
-          <p className="px-6 py-8 text-sm text-zinc-500">
-            No bots assigned yet. Click{" "}
-            <strong className="text-zinc-300">Assign to campaign</strong> to add one.
-          </p>
-        )}
+          {error && (
+            <div className="p-5">
+              <Alert>{error}</Alert>
+            </div>
+          )}
 
-        {!loading && !error && bots.length > 0 && (
-          <Table>
-            <TableHead>
-              <TableHeaderCell>Bot ID</TableHeaderCell>
-              <TableHeaderCell>Campaign</TableHeaderCell>
-              <TableHeaderCell>Status</TableHeaderCell>
-              <TableHeaderCell className="text-right">Calls/hr</TableHeaderCell>
-              <TableHeaderCell className="text-right">Active now</TableHeaderCell>
-            </TableHead>
-            <TableBody>
-              {bots.map((bot) => (
-                <TableRow key={bot.id}>
-                  <TableCell className="font-medium text-zinc-200">{bot.name}</TableCell>
-                  <TableCell className="text-zinc-500">{bot.campaignName}</TableCell>
-                  <TableCell>{botStatus(bot.status)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-zinc-500">—</TableCell>
-                  <TableCell className="text-right font-mono text-zinc-400">—</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardBody>
-    </Card>
+          {actionError && (
+            <div className="px-5 pb-4">
+              <Alert variant="error">{actionError}</Alert>
+            </div>
+          )}
+
+          {!loading && !error && bots.length === 0 && (
+            <EmptyState
+              icon={Bot}
+              title="No agents assigned"
+              description="Assign AI agents to campaigns to start handling outbound calls."
+              action={
+                <Button href="/bots/assign" variant="secondary" size="sm">
+                  Assign to campaign
+                </Button>
+              }
+            />
+          )}
+
+          {!loading && !error && bots.length > 0 && (
+            <Table>
+              <TableHead>
+                <TableHeaderCell>Agent ID</TableHeaderCell>
+                <TableHeaderCell>Campaign</TableHeaderCell>
+                <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell className="text-right">Calls/hr</TableHeaderCell>
+                <TableHeaderCell className="text-right">Active now</TableHeaderCell>
+              </TableHead>
+              <TableBody>
+                {bots.map((bot) => {
+                  const isBusy = busyBotId === bot.id;
+
+                  return (
+                    <TableRow key={bot.id}>
+                      <TableCell className="font-medium text-foreground">{bot.name}</TableCell>
+                      <TableCell>
+                        {campaigns.length === 0 ? (
+                          <span className="text-foreground-muted">No campaigns</span>
+                        ) : (
+                          <Select
+                            className="w-full min-w-[10rem] text-sm"
+                            value={bot.campaignId ?? ""}
+                            disabled={isBusy}
+                            onChange={(e) => reassignCampaign(bot.id, e.target.value)}
+                          >
+                            {!bot.campaignId && (
+                              <option value="" disabled>
+                                Select campaign
+                              </option>
+                            )}
+                            {campaigns.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                                {c.status === "running" ? " · Running" : ""}
+                              </option>
+                            ))}
+                          </Select>
+                        )}
+                      </TableCell>
+                      <TableCell>{botStatus(bot.status)}</TableCell>
+                      <TableCell className="text-right tabular-nums text-foreground-faint">—</TableCell>
+                      <TableCell className="text-right font-mono text-caption text-foreground-faint">—</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardBody>
+      </Card>
+    </div>
   );
 }

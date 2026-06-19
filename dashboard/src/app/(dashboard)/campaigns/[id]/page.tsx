@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { PageBack } from "@/components/ui/page-back";
 import { CampaignEditorForm } from "@/components/campaigns/campaign-editor-form";
 
 export default async function CampaignEditorPage({
@@ -11,14 +10,7 @@ export default async function CampaignEditorPage({
 
   return (
     <>
-      <Link
-        href="/campaigns"
-        className="mb-6 inline-flex items-center gap-1.5 text-sm text-zinc-600 transition-colors hover:text-zinc-400"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Campaigns
-      </Link>
-
+      <PageBack href="/campaigns" label="Campaigns" />
       <CampaignEditorForm id={id} />
     </>
   );

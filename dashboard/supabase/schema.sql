@@ -14,6 +14,7 @@ create table if not exists organizations (
   transfer_preset text default 'CLOSER',
   bots_included integer default 10,
   minutes_included integer default 35000,
+  settings_json jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 

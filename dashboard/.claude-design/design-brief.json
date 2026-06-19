@@ -1,0 +1,22 @@
+{
+  "scope": "page",
+  "isRedesign": false,
+  "targetPath": "src/app/(dashboard)/**",
+  "targetName": "FullDashboardUI",
+  "painPoints": ["Outdated look"],
+  "inspiration": { "visual": ["Stripe"], "functional": [] },
+  "brand": { "adjectives": ["premium"], "density": "comfortable", "darkMode": "nice-to-have" },
+  "persona": {
+    "primary": "Call center ops manager",
+    "context": "both",
+    "keyTasks": ["Monitor fleet", "Manage campaigns", "Manage bots", "Configure integrations", "Org settings"]
+  },
+  "constraints": {
+    "mustKeep": ["existing copy/labels"],
+    "technical": ["use existing components"]
+  },
+  "framework": "nextjs-app",
+  "packageManager": "npm",
+  "stylingSystem": "tailwind",
+  "labFocus": "App shell + Overview as pattern for all dashboard pages"
+}

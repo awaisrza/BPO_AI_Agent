@@ -1,12 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { normalizeSupabaseUrl, supabaseConfigHelp } from "@/lib/supabase/config";
 
-function assertSupabaseUrl(url: string) {
-  if (url.includes("supabase.com/dashboard") || !url.endsWith(".supabase.co")) {
+function resolveSupabaseUrl(url: string): string {
+  const normalized = normalizeSupabaseUrl(url);
+  if (!normalized.endsWith(".supabase.co")) {
     throw new Error(
       "Wrong Supabase URL in .env.local. Use https://YOUR_PROJECT.supabase.co from Settings → API.",
     );
   }
+  return normalized;
 }
 
 export async function createClient() {
@@ -14,16 +17,12 @@ export async function createClient() {
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !key) {
-    throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY. Copy .env.example to .env.local.",
-    );
+    throw new Error(supabaseConfigHelp());
   }
-
-  assertSupabaseUrl(url);
 
   const cookieStore = await cookies();
 
-  return createServerClient(url, key, {
+  return createServerClient(resolveSupabaseUrl(url), key, {
     cookies: {
       getAll() {
         return cookieStore.getAll();

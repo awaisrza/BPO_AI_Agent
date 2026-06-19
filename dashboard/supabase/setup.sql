@@ -15,6 +15,7 @@ create table if not exists organizations (
   transfer_preset text default 'CLOSER',
   bots_included integer default 10,
   minutes_included integer default 35000,
+  settings_json jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -138,6 +139,10 @@ create policy "org bots update" on bots for update using (org_id = auth_org_id()
 
 drop policy if exists "org bots delete" on bots;
 create policy "org bots delete" on bots for delete using (org_id = auth_org_id());
+
+-- 4b. Organization settings column (existing projects)
+alter table organizations
+  add column if not exists settings_json jsonb not null default '{}'::jsonb;
 
 -- 5. Reload API cache
 notify pgrst, 'reload schema';

@@ -16,7 +16,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { calls } from "@/lib/mock-data";
-import { cn } from "@/lib/utils";
 
 export default function CallsPage() {
   const [selected, setSelected] = useState(calls[0]);
@@ -55,15 +54,13 @@ export default function CallsPage() {
                   <TableRow
                     key={call.id}
                     onClick={() => setSelected(call)}
-                    className={cn(
-                      selected.id === call.id && "bg-white/[0.03]",
-                    )}
+                    selected={selected.id === call.id}
                   >
-                    <TableCell className="text-zinc-500">{call.time}</TableCell>
-                    <TableCell className="text-zinc-500">{call.campaign}</TableCell>
-                    <TableCell className="font-mono text-zinc-300">{call.phone}</TableCell>
-                    <TableCell className="text-zinc-500">{call.duration}</TableCell>
-                    <TableCell className="text-zinc-300">{call.outcome}</TableCell>
+                    <TableCell className="text-foreground-muted">{call.time}</TableCell>
+                    <TableCell className="text-foreground-muted">{call.campaign}</TableCell>
+                    <TableCell className="font-mono text-caption text-foreground-secondary">{call.phone}</TableCell>
+                    <TableCell className="text-foreground-muted">{call.duration}</TableCell>
+                    <TableCell className="text-foreground-secondary">{call.outcome}</TableCell>
                     <TableCell>
                       <Badge variant={call.transferred ? "success" : "default"}>
                         {call.transferred ? "Yes" : "No"}
@@ -99,17 +96,17 @@ export default function CallsPage() {
             </dl>
 
             <div>
-              <p className="mb-3 text-xs font-medium text-zinc-600">Transcript</p>
-              <div className="max-h-72 space-y-4 overflow-y-auto rounded-lg bg-surface-overlay/50 p-4 scrollbar-thin">
+              <p className="data-label mb-3">Transcript</p>
+              <div className="max-h-72 space-y-3 overflow-y-auto rounded-md border border-surface-border-subtle bg-surface-overlay p-4 scrollbar-thin">
                 {selected.transcript.length === 0 ? (
-                  <p className="text-sm text-zinc-600">No transcript — voicemail or short call</p>
+                  <p className="text-body text-foreground-faint">No transcript — voicemail or short call</p>
                 ) : (
                   selected.transcript.map((line, i) => (
                     <div key={i}>
-                      <p className="text-2xs font-medium uppercase tracking-wide text-zinc-600">
-                        {line.role === "bot" ? "Bot" : "Caller"}
+                      <p className="text-2xs font-medium uppercase tracking-wide text-foreground-faint">
+                        {line.role === "bot" ? "Agent" : "Caller"}
                       </p>
-                      <p className="mt-1 text-sm leading-relaxed text-zinc-300">{line.text}</p>
+                      <p className="mt-1 text-body leading-relaxed text-foreground-secondary">{line.text}</p>
                     </div>
                   ))
                 )}
@@ -133,8 +130,8 @@ function DetailItem({
 }) {
   return (
     <div>
-      <dt className="text-xs text-zinc-600">{label}</dt>
-      <dd className={`mt-1 text-zinc-300 ${mono ? "font-mono text-sm" : ""}`}>{value}</dd>
+      <dt className="data-label">{label}</dt>
+      <dd className={`mt-1 text-body text-foreground-secondary ${mono ? "font-mono text-caption" : ""}`}>{value}</dd>
     </div>
   );
 }

@@ -8,8 +8,9 @@ export default function BotsPage() {
   return (
     <>
       <PageHeader
-        title="Bot fleet"
-        description="Each bot is one concurrent line. Assign bots to campaigns to start dialing."
+        title="Agent fleet"
+        description="Assign agents to campaigns. Run the campaign to start all assigned agents."
+        eyebrow="Management"
         action={
           <Button variant="secondary" href="/bots/assign">
             <Plus className="h-4 w-4" />

@@ -1,21 +1,23 @@
 import { cn } from "@/lib/utils";
 
 const variants = {
-  default: "bg-white/[0.06] text-zinc-300",
-  success: "bg-emerald-500/10 text-emerald-400",
-  warning: "bg-amber-500/10 text-amber-400",
-  danger: "bg-red-500/10 text-red-400",
-  info: "bg-sky-500/10 text-sky-400",
-  live: "bg-emerald-500/10 text-emerald-400",
+  default: "bg-surface-overlay text-foreground-secondary border-surface-border",
+  success: "bg-status-success-muted text-status-success border-transparent",
+  warning: "bg-status-warning-muted text-status-warning border-transparent",
+  danger: "bg-status-danger-muted text-status-danger border-transparent",
+  info: "bg-status-info-muted text-status-info border-transparent",
+  live: "bg-status-success-muted text-status-success border-transparent",
+  brand: "bg-brand-muted text-brand border-transparent",
 };
 
 const dots: Partial<Record<keyof typeof variants, string>> = {
-  success: "bg-emerald-400",
-  warning: "bg-amber-400",
-  danger: "bg-red-400",
-  info: "bg-sky-400",
-  live: "bg-emerald-400",
-  default: "bg-zinc-500",
+  success: "bg-status-success",
+  warning: "bg-status-warning",
+  danger: "bg-status-danger",
+  info: "bg-status-info",
+  live: "bg-status-success",
+  brand: "bg-brand",
+  default: "bg-foreground-faint",
 };
 
 export function Badge({
@@ -32,7 +34,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium",
+        "inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-caption font-medium",
         variants[variant],
         className,
       )}

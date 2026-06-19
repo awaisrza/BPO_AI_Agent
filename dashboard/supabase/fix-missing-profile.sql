@@ -1,5 +1,8 @@
--- Run in Supabase SQL Editor if campaign create fails with permission / profile errors.
--- Safe to run multiple times.
+-- Fix login: create missing org + profile for existing users
+-- Safe to run multiple times. Paste in Supabase → SQL Editor → Run.
+
+alter table organizations
+  add column if not exists settings_json jsonb not null default '{}'::jsonb;
 
 do $$
 declare
@@ -26,7 +29,6 @@ begin
   end loop;
 end $$;
 
--- Also add the auto-fix function for future signups (if not already in schema.sql)
 create or replace function ensure_user_profile()
 returns uuid
 language plpgsql
@@ -70,3 +72,5 @@ end;
 $$;
 
 grant execute on function ensure_user_profile() to authenticated;
+
+notify pgrst, 'reload schema';

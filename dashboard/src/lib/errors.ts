@@ -18,6 +18,9 @@ export function formatSupabaseError(err: unknown, fallback: string): string {
       return "Permission denied. Run supabase/schema.sql in Supabase SQL Editor, then sign out and back in.";
     }
     if (e.message.includes("does not exist")) {
+      if (e.message.includes("settings_json")) {
+        return `${e.message} — Open Supabase → SQL Editor → run: dashboard/supabase/add-org-settings.sql (or click Copy SQL on Settings).`;
+      }
       return `${e.message} — Open Supabase → SQL Editor → run the full file: dashboard/supabase/setup.sql`;
     }
     return e.message;

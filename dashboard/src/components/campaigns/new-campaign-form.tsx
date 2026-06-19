@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { createClient, isSupabaseConfigured, supabaseConfigHelp } from "@/lib/supabase/client";
 import { buildNewCampaignPayload } from "@/lib/campaigns";
 import { formatSupabaseError } from "@/lib/errors";
 import { getOrgId } from "@/lib/get-org-id";
@@ -23,7 +23,7 @@ export function NewCampaignForm() {
     setError("");
 
     if (!isSupabaseConfigured()) {
-      setError("Add Supabase keys to .env.local and restart the dev server.");
+      setError(supabaseConfigHelp());
       return;
     }
 

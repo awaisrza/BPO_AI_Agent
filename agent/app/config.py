@@ -95,6 +95,12 @@ class Settings(BaseModel):
     host: str = Field(default_factory=lambda: os.getenv("AGENT_HOST", "0.0.0.0"))
     port: int = Field(default_factory=lambda: int(os.getenv("AGENT_PORT", "8765")))
 
+    twilio_account_sid: str = Field(default_factory=lambda: os.getenv("TWILIO_ACCOUNT_SID", ""))
+    twilio_auth_token: str = Field(default_factory=lambda: os.getenv("TWILIO_AUTH_TOKEN", ""))
+    twilio_from_number: str = Field(default_factory=lambda: os.getenv("TWILIO_FROM_NUMBER", ""))
+    # Public HTTPS URL (ngrok/cloudflare tunnel) — Twilio webhooks cannot reach localhost
+    local_server_url: str = Field(default_factory=lambda: os.getenv("LOCAL_SERVER_URL", ""))
+
     supabase_url: str = Field(
         default_factory=lambda: os.getenv("SUPABASE_URL")
         or os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")

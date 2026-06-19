@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { createClient, isSupabaseConfigured, supabaseConfigHelp } from "@/lib/supabase/client";
 import { formatSupabaseError } from "@/lib/errors";
 import { getOrgId } from "@/lib/get-org-id";
 
@@ -47,7 +47,7 @@ export function AssignBotForm() {
     }
 
     if (!isSupabaseConfigured()) {
-      setError("Supabase is not configured. Add env vars on Vercel (or .env.local locally) and redeploy.");
+      setError(supabaseConfigHelp());
       return;
     }
 
