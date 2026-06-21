@@ -4,6 +4,11 @@ The FronterProcessor turns final transcriptions into bot replies via the convers
 triggers ViciDial actions (warm transfer / disposition) when the FSM decides to.
 
 For local testing, pass ``mic_test=True`` to skip ViciDial and use your laptop mic/speakers.
+
+Voice backends (``VOICE_BACKEND`` env):
+  - ``managed`` (default): Deepgram STT + Fish Audio TTS — pilot / no GPU
+  - ``chatterbox``: faster-whisper STT + Chatterbox Turbo TTS — recommended GPU stack
+  - ``gpu``: faster-whisper STT + Piper TTS — legacy / low-quality voice
 """
 
 from __future__ import annotations
@@ -117,20 +122,133 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         await self.push_frame(frame, direction)
 
 
+def _script_cache_lines(script: ScriptConfig) -> list[str]:
+    lines = [script.greeting, script.pitch, *script.qualifying_questions]
+    lines.extend([script.transfer_line, script.not_interested_line])
+    return [line.strip() for line in lines if line and line.strip()]
+
+
+def _is_chatterbox_backend() -> bool:
+    return settings.voice_backend == "chatterbox"
+
+
+def _is_piper_backend() -> bool:
+    return settings.voice_backend == "gpu"
+
+
+def _is_local_gpu_backend() -> bool:
+    return _is_chatterbox_backend() or _is_piper_backend()
+
+
 def _require_api_keys() -> None:
     missing = []
-    if not settings.deepgram_api_key:
-        missing.append("DEEPGRAM_API_KEY")
-    if not settings.fish_api_key:
-        missing.append("FISH_AUDIO_API_KEY")
     if not settings.google_api_key:
         missing.append("GOOGLE_API_KEY")
+    if _is_local_gpu_backend():
+        if _is_chatterbox_backend():
+            try:
+                from .chatterbox_paths import resolve_chatterbox_reference
+
+                resolve_chatterbox_reference(settings.chatterbox_reference_audio or None)
+            except FileNotFoundError as exc:
+                raise RuntimeError(str(exc)) from exc
+        elif _is_piper_backend():
+            try:
+                from .piper_paths import resolve_piper_exe, resolve_piper_model
+
+                resolve_piper_exe(settings.piper_exe or None)
+                resolve_piper_model(settings.piper_model or None)
+            except FileNotFoundError as exc:
+                raise RuntimeError(str(exc)) from exc
+    else:
+        if not settings.deepgram_api_key:
+            missing.append("DEEPGRAM_API_KEY")
+        if not settings.fish_api_key:
+            missing.append("FISH_AUDIO_API_KEY")
     if missing:
         raise RuntimeError(
             "Missing API keys for live mode: "
             + ", ".join(missing)
             + ". Add them to dashboard/.env.local or agent/.env.local."
         )
+
+
+def _build_stt():
+    if _is_local_gpu_backend():
+        from pipecat.services.whisper.stt import WhisperSTTService
+
+        logger.info(
+            f"STT: faster-whisper ({settings.whisper_model}, "
+            f"device={settings.whisper_device}, compute={settings.whisper_compute_type})"
+        )
+        return WhisperSTTService(
+            device=settings.whisper_device,
+            compute_type=settings.whisper_compute_type,
+            settings=WhisperSTTService.Settings(model=settings.whisper_model),
+        )
+
+    logger.info("STT: Deepgram Nova-3")
+    return DeepgramSTTService(
+        api_key=settings.deepgram_api_key,
+        audio_passthrough=False,
+    )
+
+
+def _build_tts(*, script: ScriptConfig, sample_rate: int):
+    if _is_chatterbox_backend():
+        from .chatterbox_paths import resolve_chatterbox_device, resolve_chatterbox_reference
+        from .chatterbox_tts import ChatterboxTTSService, warm_chatterbox_cache_sync
+
+        reference = resolve_chatterbox_reference(settings.chatterbox_reference_audio or None)
+        device = resolve_chatterbox_device(
+            settings.chatterbox_device or settings.whisper_device or None
+        )
+        logger.info(f"TTS: Chatterbox Turbo (device={device}, ref={reference.name})")
+        cache = warm_chatterbox_cache_sync(
+            texts=_script_cache_lines(script),
+            reference_path=reference,
+            device=device,
+            exaggeration=settings.chatterbox_exaggeration,
+            cfg_weight=settings.chatterbox_cfg_weight,
+            sample_rate=sample_rate,
+        )
+        logger.info(f"Chatterbox cache warmed: {len(cache)} script line(s)")
+        return ChatterboxTTSService(
+            reference_audio=str(reference),
+            device=device,
+            exaggeration=settings.chatterbox_exaggeration,
+            cfg_weight=settings.chatterbox_cfg_weight,
+            sample_rate=sample_rate,
+            cache=cache,
+        )
+
+    if _is_piper_backend():
+        from .piper_tts import PiperTTSService, warm_piper_cache_sync
+
+        logger.info("TTS: Piper (local)")
+        cache = warm_piper_cache_sync(
+            texts=_script_cache_lines(script),
+            piper_exe=settings.piper_exe or None,
+            model_path=settings.piper_model or None,
+            speaker=settings.piper_speaker,
+            sample_rate=sample_rate,
+        )
+        logger.info(f"Piper cache warmed: {len(cache)} script line(s)")
+        return PiperTTSService(
+            piper_exe=settings.piper_exe or None,
+            model_path=settings.piper_model or None,
+            speaker=settings.piper_speaker,
+            sample_rate=sample_rate,
+            cache=cache,
+        )
+
+    logger.info("TTS: Fish Audio")
+    return FishAudioTTSService(
+        api_key=settings.fish_api_key,
+        model=settings.fish_model,
+        reference_id=settings.fish_reference_id,
+        sample_rate=sample_rate,
+    )
 
 
 def build_pipeline(
@@ -143,23 +261,24 @@ def build_pipeline(
 ) -> Pipeline:
     """Assemble the live pipeline. `transport` provides audio in/out frames."""
     if not PIPECAT_AVAILABLE:
+        extra = "whisper" if _is_local_gpu_backend() else "deepgram"
         raise RuntimeError(
-            'Pipecat is not installed. Run: pip install "pipecat-ai[deepgram,local,silero]" pyaudio'
+            f'Pipecat is not installed. Run: pip install "pipecat-ai[{extra},local,silero]" pyaudio'
         )
 
     _require_api_keys()
 
     script = script or ScriptConfig.load()
-    stt = DeepgramSTTService(
-        api_key=settings.deepgram_api_key,
-        audio_passthrough=False,
-    )
-    tts = FishAudioTTSService(
-        api_key=settings.fish_api_key,
-        model=settings.fish_model,
-        reference_id=settings.fish_reference_id,
-        sample_rate=sample_rate,
-    )
+    if _is_chatterbox_backend():
+        backend = "Chatterbox (Whisper + Chatterbox Turbo)"
+    elif _is_piper_backend():
+        backend = "GPU (Whisper + Piper)"
+    else:
+        backend = "managed (Deepgram + Fish)"
+    logger.info(f"Voice backend: {backend}")
+
+    stt = _build_stt()
+    tts = _build_tts(script=script, sample_rate=sample_rate)
     vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)))
 
     engine = ConversationEngine(

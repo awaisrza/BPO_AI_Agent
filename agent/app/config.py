@@ -78,12 +78,44 @@ class ScriptConfig(BaseModel):
 
 
 class Settings(BaseModel):
+    # managed = Deepgram + Fish. chatterbox = Whisper + Chatterbox (GPU). gpu = Whisper + Piper.
+    voice_backend: str = Field(
+        default_factory=lambda: os.getenv("VOICE_BACKEND", "managed").strip().lower()
+    )
+
     deepgram_api_key: str = Field(default_factory=lambda: os.getenv("DEEPGRAM_API_KEY", ""))
     google_api_key: str = Field(default_factory=lambda: os.getenv("GOOGLE_API_KEY", ""))
     fish_api_key: str = Field(default_factory=lambda: os.getenv("FISH_AUDIO_API_KEY", ""))
     fish_model: str = Field(default_factory=lambda: os.getenv("FISH_AUDIO_MODEL", "s1"))
     fish_reference_id: str = Field(default_factory=lambda: os.getenv("FISH_AUDIO_REFERENCE_ID", ""))
     gemini_model: str = Field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"))
+
+    whisper_model: str = Field(
+        default_factory=lambda: os.getenv("WHISPER_MODEL", "distil-large-v2")
+    )
+    whisper_device: str = Field(default_factory=lambda: os.getenv("WHISPER_DEVICE", "auto"))
+    whisper_compute_type: str = Field(
+        default_factory=lambda: os.getenv("WHISPER_COMPUTE_TYPE", "int8_float16")
+    )
+
+    piper_exe: str = Field(default_factory=lambda: os.getenv("PIPER_EXE", ""))
+    piper_model: str = Field(default_factory=lambda: os.getenv("PIPER_MODEL", ""))
+    piper_speaker: int = Field(
+        default_factory=lambda: int(os.getenv("PIPER_SPEAKER", "0") or "0")
+    )
+
+    chatterbox_reference_audio: str = Field(
+        default_factory=lambda: os.getenv("CHATTERBOX_REFERENCE_AUDIO", "")
+    )
+    chatterbox_device: str = Field(
+        default_factory=lambda: os.getenv("CHATTERBOX_DEVICE", "auto")
+    )
+    chatterbox_exaggeration: float = Field(
+        default_factory=lambda: float(os.getenv("CHATTERBOX_EXAGGERATION", "0.35") or "0.35")
+    )
+    chatterbox_cfg_weight: float = Field(
+        default_factory=lambda: float(os.getenv("CHATTERBOX_CFG_WEIGHT", "0.5") or "0.5")
+    )
 
     vicidial_base_url: str = Field(default_factory=lambda: os.getenv("VICIDIAL_BASE_URL", ""))
     vicidial_user: str = Field(default_factory=lambda: os.getenv("VICIDIAL_API_USER", ""))
