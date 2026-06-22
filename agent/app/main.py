@@ -2,11 +2,13 @@
 
 Default mode runs an OFFLINE TEXT SIMULATION of the conversation FSM so you can iterate on scripts
 immediately without telephony or API keys. Pass `--live` to run the real Pipecat pipeline with your
-laptop microphone and speakers. Pass `--phone` for real PSTN calls via Twilio.
+laptop microphone and speakers. Pass `--browser` for WebRTC calls from a phone browser
+(no Twilio/KYC). Pass `--phone` for real PSTN calls via Twilio.
 
 Load scripts from the dashboard (Supabase):
   python -m app.main --campaign-id <uuid>
   python -m app.main --live --bot-id <uuid>
+  python -m app.main --browser --campaign-id <uuid>
   python -m app.main --phone --campaign-id <uuid> --dial +14155551234
 """
 
@@ -21,6 +23,7 @@ from loguru import logger
 from .config import ScriptConfig
 from .conversation import Action, ConversationEngine
 from .supabase_scripts import ScriptLoadError, resolve_script
+from .browser_call_server import run_browser_server
 from .phone_server import run_phone_server
 
 
@@ -118,7 +121,12 @@ def main() -> None:
     parser.add_argument(
         "--live",
         action="store_true",
-        help="Run live voice test (mic -> Deepgram -> FSM -> Fish -> speakers)",
+        help="Run live voice test (mic -> STT -> FSM -> TTS -> speakers; backend from VOICE_BACKEND)",
+    )
+    parser.add_argument(
+        "--browser",
+        action="store_true",
+        help="Start browser WebRTC server (phone/laptop mic — no Twilio/KYC)",
     )
     parser.add_argument(
         "--phone",
@@ -143,10 +151,13 @@ def main() -> None:
     args = parser.parse_args()
 
     script, agent_user = _load_script_from_args(args)
-    if args.phone:
-        if args.live:
-            print("Use --phone or --live, not both.", file=sys.stderr)
-            sys.exit(1)
+    modes = sum(bool(x) for x in (args.live, args.browser, args.phone))
+    if modes > 1:
+        print("Use only one of --live, --browser, or --phone.", file=sys.stderr)
+        sys.exit(1)
+    if args.browser:
+        run_browser_server(script, agent_user)
+    elif args.phone:
         run_phone_server(script, agent_user, dial_to=args.dial)
     elif args.live:
         run_live(script, agent_user)
