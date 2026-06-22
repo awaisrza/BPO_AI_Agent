@@ -1,7 +1,10 @@
-"""Pipecat pipeline wiring: VAD -> STT -> FronterProcessor (FSM) -> TTS.
+"""Pipecat pipeline wiring: VAD -> STT -> FronterProcessor -> SpeechRenderer -> TTS.
 
 The FronterProcessor turns final transcriptions into bot replies via the conversation engine and
 triggers ViciDial actions (warm transfer / disposition) when the FSM decides to.
+
+All bot speech passes through SpeechRendererNode (short spoken chunks + pauses) before TTS.
+BargeInProcessor stops TTS when the caller speaks over the bot.
 
 For local testing, pass ``mic_test=True`` to skip ViciDial and use your laptop mic/speakers.
 
@@ -19,6 +22,14 @@ from .config import settings, ScriptConfig
 from .conversation import Action, ConversationEngine
 from .fish_tts import FishAudioTTSService
 from .knowledge import answer_offscript
+from .speech_renderer import (
+    BargeInProcessor,
+    CallController,
+    CallState,
+    SpeechRendererNode,
+    iter_chunk_texts,
+    render_speech,
+)
 from .vicidial import ViciDialClient
 
 try:
@@ -52,6 +63,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         agent_user: str,
         *,
         mic_test: bool = False,
+        call_controller: CallController | None = None,
     ):
         super().__init__()
         self._engine = engine
@@ -59,6 +71,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._agent_user = agent_user
         self._mic_test = mic_test
         self._opened = False
+        self._call = call_controller or CallController()
 
     async def process_frame(self, frame, direction):  # type: ignore[override]
         await super().process_frame(frame, direction)
@@ -70,8 +83,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if isinstance(frame, StartFrame):
             if not self._opened:
                 self._opened = True
+                self._call.state = CallState.LISTENING
                 opening = self._engine.open()
-                logger.info(f"BOT: {opening.reply}")
+                spoken = render_speech(opening.reply)
+                logger.info(f"BOT: {' | '.join(c.text for c in spoken) or opening.reply}")
                 await self.push_frame(TTSSpeakFrame(opening.reply))
             await self.push_frame(frame, direction)
             return
@@ -84,13 +99,19 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, TranscriptionFrame) and frame.text:
+            if self._call.state == CallState.SPEAKING and not self._call.interrupted:
+                logger.debug("Ignoring caller text while bot is speaking (no barge-in yet)")
+                return
+
             text = frame.text.strip()
             if not text:
                 return
 
+            self._call.on_processing()
             logger.info(f"CALLER: {text}")
             turn = self._engine.handle(text)
-            logger.info(f"BOT: {turn.reply}")
+            spoken = render_speech(turn.reply)
+            logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")
             await self.push_frame(TTSSpeakFrame(turn.reply))
 
             if turn.action == Action.TRANSFER:
@@ -125,7 +146,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 def _script_cache_lines(script: ScriptConfig) -> list[str]:
     lines = [script.greeting, script.pitch, *script.qualifying_questions]
     lines.extend([script.transfer_line, script.not_interested_line])
-    return [line.strip() for line in lines if line and line.strip()]
+    raw = [line.strip() for line in lines if line and line.strip()]
+    return iter_chunk_texts(
+        raw,
+        max_words=settings.speech_max_words,
+        pause_min_ms=settings.speech_pause_min_ms,
+        pause_max_ms=settings.speech_pause_max_ms,
+    )
 
 
 def _is_chatterbox_backend() -> bool:
@@ -285,15 +312,31 @@ def build_pipeline(
         script=script,
         answer_offscript=lambda q, ctx: answer_offscript(q, ctx, script.knowledge_base),
     )
+    call_controller = CallController()
     vici = None if mic_test else ViciDialClient()
-    fronter = FronterProcessor(engine, vici, agent_user, mic_test=mic_test)
+    fronter = FronterProcessor(
+        engine,
+        vici,
+        agent_user,
+        mic_test=mic_test,
+        call_controller=call_controller,
+    )
+    barge_in = BargeInProcessor(call_controller)
+    speech_renderer = SpeechRendererNode(
+        call_controller,
+        max_words=settings.speech_max_words,
+        pause_min_ms=settings.speech_pause_min_ms,
+        pause_max_ms=settings.speech_pause_max_ms,
+    )
 
     return Pipeline(
         [
             transport.input(),
             vad,
+            barge_in,
             stt,
             fronter,
+            speech_renderer,
             tts,
             transport.output(),
         ]

@@ -12,6 +12,9 @@ from collections.abc import AsyncGenerator
 import httpx
 from loguru import logger
 
+from .speech_renderer import SpokenChunkFrame
+from .tts_spoken_chunk import handle_spoken_chunk_frame
+
 try:
     from pipecat.frames.frames import ErrorFrame, Frame, TTSAudioRawFrame
     from pipecat.services.settings import TTSSettings
@@ -55,6 +58,17 @@ class FishAudioTTSService(TTSService):
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    async def process_frame(self, frame, direction):  # type: ignore[override]
+        if isinstance(frame, SpokenChunkFrame):
+            await handle_spoken_chunk_frame(
+                self,
+                frame,
+                direction,
+                run_tts=self.run_tts,
+            )
+            return
+        await super().process_frame(frame, direction)
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         logger.debug(f"FishAudio TTS: {text!r}")

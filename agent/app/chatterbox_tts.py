@@ -6,10 +6,13 @@ import asyncio
 import audioop
 import threading
 from collections.abc import AsyncGenerator, Iterable
+from pathlib import Path
 
 from loguru import logger
 
 from .chatterbox_paths import resolve_chatterbox_device, resolve_chatterbox_reference
+from .speech_renderer import SpokenChunkFrame
+from .tts_spoken_chunk import handle_spoken_chunk_frame
 
 try:
     from pipecat.frames.frames import ErrorFrame, Frame, TTSAudioRawFrame
@@ -146,6 +149,17 @@ class ChatterboxTTSService(TTSService):
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    async def process_frame(self, frame, direction):  # type: ignore[override]
+        if isinstance(frame, SpokenChunkFrame):
+            await handle_spoken_chunk_frame(
+                self,
+                frame,
+                direction,
+                run_tts=self.run_tts,
+            )
+            return
+        await super().process_frame(frame, direction)
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         logger.debug(f"Chatterbox TTS: {text!r}")

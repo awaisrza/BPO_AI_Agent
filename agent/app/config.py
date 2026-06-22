@@ -117,6 +117,16 @@ class Settings(BaseModel):
         default_factory=lambda: float(os.getenv("CHATTERBOX_CFG_WEIGHT", "0.5") or "0.5")
     )
 
+    speech_max_words: int = Field(
+        default_factory=lambda: int(os.getenv("SPEECH_MAX_WORDS", "14") or "14")
+    )
+    speech_pause_min_ms: int = Field(
+        default_factory=lambda: int(os.getenv("SPEECH_PAUSE_MIN_MS", "400") or "400")
+    )
+    speech_pause_max_ms: int = Field(
+        default_factory=lambda: int(os.getenv("SPEECH_PAUSE_MAX_MS", "700") or "700")
+    )
+
     vicidial_base_url: str = Field(default_factory=lambda: os.getenv("VICIDIAL_BASE_URL", ""))
     vicidial_user: str = Field(default_factory=lambda: os.getenv("VICIDIAL_API_USER", ""))
     vicidial_pass: str = Field(default_factory=lambda: os.getenv("VICIDIAL_API_PASS", ""))

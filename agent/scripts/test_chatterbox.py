@@ -90,6 +90,7 @@ def main() -> None:
     sys.path.insert(0, str(AGENT_ROOT))
     from app.chatterbox_paths import resolve_chatterbox_device, resolve_chatterbox_reference
     from app.chatterbox_tts import synthesize_pcm_sync
+    from app.speech_renderer import render_speech, silence_pcm
 
     reference = resolve_chatterbox_reference(optional("CHATTERBOX_REFERENCE_AUDIO") or None)
     device = resolve_chatterbox_device(optional("CHATTERBOX_DEVICE") or None)
@@ -125,14 +126,23 @@ def main() -> None:
     text = args.text or DEFAULT_TEXT
     out_path = out_dir / "line.wav"
     print(f"Text: {text}\n")
-    pcm = synthesize_pcm_sync(
-        text=text,
-        reference_path=reference,
-        device=device,
-        exaggeration=exaggeration,
-        cfg_weight=cfg_weight,
-        sample_rate=sample_rate,
-    )
+    chunks = render_speech(text)
+    pcm_parts: list[bytes] = []
+    for chunk in chunks:
+        print(f"  chunk: {chunk.text!r} (+{chunk.pause_after_ms}ms)")
+        pcm_parts.append(
+            synthesize_pcm_sync(
+                text=chunk.text,
+                reference_path=reference,
+                device=device,
+                exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
+                sample_rate=sample_rate,
+            )
+        )
+        if chunk.pause_after_ms > 0:
+            pcm_parts.append(silence_pcm(chunk.pause_after_ms, sample_rate))
+    pcm = b"".join(pcm_parts)
     _write_wav(out_path, pcm, sample_rate)
     print("--- CHATTERBOX OK ---")
     print(f"Saved: {out_path}")

@@ -32,10 +32,16 @@ def generate_gemini_reply(question: str, context: str = "", knowledge: str = "")
     model = genai.GenerativeModel(settings.gemini_model)
 
     knowledge_block = (knowledge or DEFAULT_KNOWLEDGE).strip()
-    prompt = f"""You are a friendly outbound fronter on a live US phone call.
-Reply in ONE short sentence (max 20 words). Sound natural, not salesy.
-Use ONLY facts from the knowledge base below. Do NOT invent offers, prices, or guarantees.
-If the knowledge base does not cover the question, say you will connect them with a specialist.
+    prompt = f"""You are Sarah, a calm US Medicare outbound fronter on a live phone call.
+
+Reply rules (strict):
+- Spoken conversation only — never written/formal tone
+- ONE short sentence per idea (max 14 words)
+- Soft, helpful tone — not pushy or salesy
+- Qualify gently; clarity over completeness
+- Use ONLY facts from the knowledge base below
+- Do NOT invent prices, guarantees, or offers
+- If KB does not cover it, say a licensed specialist can explain on transfer
 
 CURRENT SCRIPT STEP: {context}
 
@@ -44,11 +50,15 @@ KNOWLEDGE BASE:
 
 CALLER SAID: {question}
 
-YOUR REPLY:"""
+YOUR SPOKEN REPLY (one or two short sentences max):"""
 
     try:
         response = model.generate_content(prompt)
         reply = (response.text or "").strip()
+        if reply:
+            from .speech_renderer import normalize_spoken_text
+
+            reply = normalize_spoken_text(reply)
         return reply or FALLBACK_REPLY
     except Exception as exc:  # noqa: BLE001
         logger.error(f"Gemini off-script error: {exc}")
