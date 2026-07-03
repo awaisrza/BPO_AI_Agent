@@ -9,13 +9,49 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
+import asyncio
+
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from loguru import logger
 
 from .browser_session import run_browser_call
 from .config import ScriptConfig, settings
+
+# Public TURN relay — needed when the GPU host (Vast) is behind NAT. HTTP tunnels only carry signaling.
+_DEFAULT_ICE_SERVERS_JS = """[
+  { urls: "stun:stun.l.google.com:19302" },
+  {
+    urls: [
+      "turn:openrelay.metered.ca:80",
+      "turn:openrelay.metered.ca:443",
+      "turns:openrelay.metered.ca:443",
+      "turn:openrelay.metered.ca:443?transport=tcp"
+    ],
+    username: "openrelayproject",
+    credential: "openrelayproject"
+  }
+]"""
+
+
+def _server_ice_servers():
+    from pipecat.transports.smallwebrtc.connection import IceServer
+
+    return [
+        IceServer(urls="stun:stun.l.google.com:19302"),
+        IceServer(
+            urls=[
+                "turn:openrelay.metered.ca:80",
+                "turn:openrelay.metered.ca:443",
+                "turns:openrelay.metered.ca:443",
+                "turn:openrelay.metered.ca:443?transport=tcp",
+            ],
+            username="openrelayproject",
+            credential="openrelayproject",
+        ),
+    ]
+
 
 _FALLBACK_CLIENT_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -38,9 +74,11 @@ _FALLBACK_CLIENT_HTML = """<!DOCTYPE html>
   <div id="status">Idle</div>
   <audio id="remote" autoplay playsinline></audio>
   <script>
+    const ICE_SERVERS = __ICE_SERVERS__;
     let pc = null;
     let pcId = null;
     let localStream = null;
+    const pendingCandidates = [];
     const statusEl = document.getElementById("status");
     const remoteEl = document.getElementById("remote");
     const connectBtn = document.getElementById("connect");
@@ -64,38 +102,67 @@ _FALLBACK_CLIENT_HTML = """<!DOCTYPE html>
       });
     }
 
+    async function flushCandidates() {
+      while (pendingCandidates.length && pcId) {
+        const candidate = pendingCandidates.shift();
+        await sendCandidate(candidate);
+      }
+    }
+
     async function startCall() {
       connectBtn.disabled = true;
       setStatus("Requesting microphone…");
       pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        iceServers: ICE_SERVERS,
+        iceTransportPolicy: "relay"
       });
       localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
 
       pc.ontrack = (event) => {
         remoteEl.srcObject = event.streams[0];
+        remoteEl.play().catch((err) => console.warn("autoplay:", err));
       };
       pc.onicecandidate = (event) => {
-        sendCandidate(event.candidate).catch((err) => console.error(err));
+        if (!event.candidate) return;
+        if (pcId) sendCandidate(event.candidate).catch((err) => console.error(err));
+        else pendingCandidates.push(event.candidate);
+      };
+      pc.oniceconnectionstatechange = () => {
+        const ice = pc.iceConnectionState;
+        if (ice === "connected" || ice === "completed") {
+          setStatus("Connected — speak when the bot greets you.");
+          hangupBtn.disabled = false;
+        } else if (ice === "failed") {
+          setStatus("ICE failed — refresh and try again (or check TURN/network).");
+          connectBtn.disabled = false;
+        } else {
+          setStatus("ICE: " + ice + " (negotiating audio path…)");
+        }
       };
       pc.onconnectionstatechange = () => {
-        setStatus("Connection: " + pc.connectionState);
-        if (pc.connectionState === "connected") hangupBtn.disabled = false;
-        if (pc.connectionState === "failed" || pc.connectionState === "closed") {
-          hangupBtn.disabled = true;
+        const state = pc.connectionState;
+        if (state === "failed") {
+          setStatus("Connection failed — tap End call, then Start call again.");
           connectBtn.disabled = false;
         }
       };
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      setStatus("Gathering network info…");
+      await new Promise((resolve) => {
+        if (pc.iceGatheringState === "complete") resolve();
+        else pc.onicegatheringstatechange = () => {
+          if (pc.iceGatheringState === "complete") resolve();
+        };
+      });
       setStatus("Connecting to bot…");
 
       const resp = await fetch("/api/offer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sdp: offer.sdp, type: offer.type })
+        body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
       });
       if (!resp.ok) {
         const detail = await resp.text();
@@ -104,7 +171,8 @@ _FALLBACK_CLIENT_HTML = """<!DOCTYPE html>
       const answer = await resp.json();
       pcId = answer.pc_id;
       await pc.setRemoteDescription(answer);
-      setStatus("Connected — speak when the bot greets you.");
+      await flushCandidates();
+      setStatus("Waiting for audio path (TURN relay)…");
     }
 
     function endCall() {
@@ -112,6 +180,7 @@ _FALLBACK_CLIENT_HTML = """<!DOCTYPE html>
       if (pc) pc.close();
       pc = null;
       pcId = null;
+      pendingCandidates.length = 0;
       localStream = null;
       remoteEl.srcObject = null;
       connectBtn.disabled = false;
@@ -128,7 +197,7 @@ _FALLBACK_CLIENT_HTML = """<!DOCTYPE html>
   </script>
 </body>
 </html>
-"""
+""".replace("__ICE_SERVERS__", _DEFAULT_ICE_SERVERS_JS)
 
 
 def _public_base_url(host: str, port: int) -> str:
@@ -147,7 +216,7 @@ def create_browser_app(script: ScriptConfig, agent_user: str) -> FastAPI:
         SmallWebRTCRequestHandler,
     )
 
-    webrtc_handler = SmallWebRTCRequestHandler()
+    webrtc_handler = SmallWebRTCRequestHandler(ice_servers=_server_ice_servers())
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -182,13 +251,12 @@ def create_browser_app(script: ScriptConfig, agent_user: str) -> FastAPI:
     @app.post("/api/offer")
     async def offer(
         request: Request,
-        background_tasks: BackgroundTasks,
     ) -> JSONResponse:
         body = await request.json()
         webrtc_request = SmallWebRTCRequest.from_dict(body)
 
         async def on_connection(connection) -> None:
-            background_tasks.add_task(run_browser_call, connection, script, agent_user)
+            asyncio.create_task(run_browser_call(connection, script, agent_user))
 
         answer = await webrtc_handler.handle_web_request(
             request=webrtc_request,
@@ -211,8 +279,16 @@ def create_browser_app(script: ScriptConfig, agent_user: str) -> FastAPI:
     return app
 
 
-def run_browser_server(script: ScriptConfig, agent_user: str) -> None:
+def run_browser_server(script: ScriptConfig, agent_user: str, *, prewarm: bool = True) -> None:
     """Start WebRTC server for phone/laptop browser calls (no Twilio)."""
+    if prewarm:
+        print("\nPre-warming Whisper + Chatterbox (2-3 min). Do NOT open the call page until this finishes…\n")
+        from .pipeline import prewarm_voice_stack
+
+        prewarm_voice_stack(script)
+
+    print("Models ready — safe to open the tunnel URL and tap Start call.\n")
+
     app = create_browser_app(script, agent_user)
     host = settings.host
     port = settings.port

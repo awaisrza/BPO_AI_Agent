@@ -41,6 +41,47 @@ def _chunk_pcm(pcm: bytes, chunk_bytes: int = 3200) -> Iterable[bytes]:
         yield pcm[offset : offset + chunk_bytes]
 
 
+def _apply_chatterbox_dtype_patch(model) -> None:
+    """Fix float64/float32 mismatches (numpy>=2 + librosa) in upstream chatterbox."""
+    import types
+
+    import numpy as np
+    import torch
+
+    tokenizer = getattr(getattr(model, "s3gen", None), "tokenizer", None)
+    if tokenizer is not None and hasattr(tokenizer, "log_mel_spectrogram"):
+        orig_mel = tokenizer.log_mel_spectrogram
+
+        def patched_log_mel(self, audio, padding=0):
+            if not torch.is_tensor(audio):
+                audio = torch.from_numpy(np.asarray(audio, dtype=np.float32))
+            else:
+                audio = audio.float()
+            return orig_mel(audio, padding)
+
+        tokenizer.log_mel_spectrogram = types.MethodType(patched_log_mel, tokenizer)
+
+    ve = getattr(model, "ve", None)
+    if ve is not None and hasattr(ve, "embeds_from_wavs"):
+        orig_embeds = ve.embeds_from_wavs
+
+        def patched_embeds(wavs, sample_rate):
+            fixed = [np.asarray(w, dtype=np.float32) for w in wavs]
+            return orig_embeds(fixed, sample_rate)
+
+        ve.embeds_from_wavs = patched_embeds
+
+    if hasattr(model, "norm_loudness"):
+        orig_norm = model.norm_loudness
+
+        def patched_norm(self, wav, sr, target_lufs=-27):
+            return orig_norm(np.asarray(wav, dtype=np.float32), sr, target_lufs)
+
+        model.norm_loudness = types.MethodType(patched_norm, model)
+
+    logger.debug("Applied Chatterbox dtype compatibility patch")
+
+
 def _load_model(device: str):
     global _shared_model, _shared_device
     with _model_lock:
@@ -50,6 +91,7 @@ def _load_model(device: str):
 
         logger.info(f"Loading Chatterbox Turbo on {device} (first run downloads weights)...")
         _shared_model = ChatterboxTurboTTS.from_pretrained(device=device)
+        _apply_chatterbox_dtype_patch(_shared_model)
         _shared_device = device
         logger.info(f"Chatterbox ready (sample_rate={_shared_model.sr})")
         return _shared_model
@@ -89,6 +131,7 @@ def synthesize_pcm_sync(
             audio_prompt_path=str(reference_path),
             exaggeration=exaggeration,
             cfg_weight=cfg_weight,
+            norm_loudness=False,
         )
     return _tensor_to_pcm16(wav, int(model.sr), sample_rate)
 
@@ -107,14 +150,17 @@ def warm_chatterbox_cache_sync(
         line = text.strip()
         if not line or line in cache:
             continue
-        cache[line] = synthesize_pcm_sync(
-            text=line,
-            reference_path=reference_path,
-            device=device,
-            exaggeration=exaggeration,
-            cfg_weight=cfg_weight,
-            sample_rate=sample_rate,
-        )
+        try:
+            cache[line] = synthesize_pcm_sync(
+                text=line,
+                reference_path=reference_path,
+                device=device,
+                exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
+                sample_rate=sample_rate,
+            )
+        except Exception as exc:
+            logger.warning(f"Chatterbox cache skip ({line[:48]!r}…): {exc}")
     return cache
 
 

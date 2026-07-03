@@ -92,17 +92,43 @@ WAV files land in `agent/piper-out/`. Play with `start agent\piper-out\greeting.
 
 Requires API keys in `dashboard/.env.local` or `agent/.env.local`.
 
+**Managed backend (default)** — Deepgram + Fish, no GPU:
+
 ```powershell
 .\.venv\Scripts\python.exe -m pip install "pipecat-ai[deepgram,local,silero]" pyaudio
 
 .\.venv\Scripts\python.exe -m app.main --live
 ```
 
+**GPU backend** — faster-whisper STT + Piper TTS. Add to `.env.local`:
+
+```env
+VOICE_BACKEND=gpu
+WHISPER_DEVICE=cuda
+WHISPER_MODEL=distil-large-v2
+PIPER_EXE=C:\piper\piper.exe
+PIPER_MODEL=C:\piper\models\en_US-libritts-high.onnx
+GOOGLE_API_KEY=...
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-gpu.txt pyaudio
+.\.venv\Scripts\python.exe -m app.main --live --campaign-id YOUR-CAMPAIGN-UUID
+```
+
+Static script lines are pre-cached at startup. Off-script Gemini replies use live Piper synthesis.
+
+On Windows without CUDA, use `WHISPER_DEVICE=cpu` to test Piper + cache (STT will be slow).
+
+### GPU production (RunPod)
+
+One **L4/A10** pod with `VOICE_BACKEND=gpu`: faster-whisper on CUDA, Piper TTS, Gemini stays cloud. ~40–50 bots per mid GPU. See `docs/architecture.md` for unit economics.
+
 Speak into your mic. The bot greets you, follows the script, answers off-script questions via Gemini, then transfers or hangs up. Ctrl-C to quit.
 
 ### Real phone test (Twilio PSTN)
 
-Same pipeline as `--live`, but audio goes over a **real phone call** to your cell. No GPU, no ViciDial required.
+Same pipeline as `--live`, but audio goes over a **real phone call** to your cell. Works with managed or GPU backend; no ViciDial required.
 
 **1. Twilio setup** (one time)
 
@@ -208,6 +234,8 @@ python -m app.main
 | `app/config.py`   | Env-backed settings + script config loading                               |
 | `app/conversation.py` | Pure conversation state machine (testable, no Pipecat dependency)     |
 | `app/fish_tts.py` | Custom Pipecat TTS service backed by the Fish Audio API                    |
+| `app/piper_tts.py` | Local Piper TTS + script-line cache (GPU backend)                       |
+| `app/piper_paths.py` | Piper binary/model resolution and synthesis helpers                     |
 | `app/vicidial.py` | ViciDial API client — disposition + warm transfer                         |
 | `app/pipeline.py` | Builds the Pipecat pipeline from the above                                 |
 | `app/phone_server.py` | Twilio phone-test server (real PSTN calls)                           |

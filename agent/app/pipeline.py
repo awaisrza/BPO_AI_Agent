@@ -231,14 +231,18 @@ def _build_tts(*, script: ScriptConfig, sample_rate: int):
             settings.chatterbox_device or settings.whisper_device or None
         )
         logger.info(f"TTS: Chatterbox Turbo (device={device}, ref={reference.name})")
-        cache = warm_chatterbox_cache_sync(
-            texts=_script_cache_lines(script),
-            reference_path=reference,
-            device=device,
-            exaggeration=settings.chatterbox_exaggeration,
-            cfg_weight=settings.chatterbox_cfg_weight,
-            sample_rate=sample_rate,
-        )
+        try:
+            cache = warm_chatterbox_cache_sync(
+                texts=_script_cache_lines(script),
+                reference_path=reference,
+                device=device,
+                exaggeration=settings.chatterbox_exaggeration,
+                cfg_weight=settings.chatterbox_cfg_weight,
+                sample_rate=sample_rate,
+            )
+        except Exception as exc:
+            logger.warning(f"Chatterbox cache warm failed (live synthesis only): {exc}")
+            cache = {}
         logger.info(f"Chatterbox cache warmed: {len(cache)} script line(s)")
         return ChatterboxTTSService(
             reference_audio=str(reference),
@@ -276,6 +280,16 @@ def _build_tts(*, script: ScriptConfig, sample_rate: int):
         reference_id=settings.fish_reference_id,
         sample_rate=sample_rate,
     )
+
+
+def prewarm_voice_stack(script: ScriptConfig | None = None, *, sample_rate: int = 16000) -> None:
+    """Load STT/TTS weights before the first browser call (avoids blocking WebRTC ICE)."""
+    _require_api_keys()
+    script = script or ScriptConfig.load()
+    logger.info("Pre-warming voice stack for browser calls...")
+    _build_stt()
+    _build_tts(script=script, sample_rate=sample_rate)
+    logger.info("Voice stack pre-warm complete.")
 
 
 def build_pipeline(

@@ -3,12 +3,14 @@
 Default mode runs an OFFLINE TEXT SIMULATION of the conversation FSM so you can iterate on scripts
 immediately without telephony or API keys. Pass `--live` to run the real Pipecat pipeline with your
 laptop microphone and speakers. Pass `--browser` for WebRTC calls from a phone browser
-(no Twilio/KYC). Pass `--phone` for real PSTN calls via Twilio.
+(no Twilio/KYC). Pass `--daily` for Daily.co room link on your phone (no US number).
+Pass `--phone` for real PSTN calls via Twilio.
 
 Load scripts from the dashboard (Supabase):
   python -m app.main --campaign-id <uuid>
   python -m app.main --live --bot-id <uuid>
   python -m app.main --browser --campaign-id <uuid>
+  python -m app.main --daily --campaign-id <uuid>
   python -m app.main --phone --campaign-id <uuid> --dial +14155551234
 """
 
@@ -24,6 +26,7 @@ from .config import ScriptConfig
 from .conversation import Action, ConversationEngine
 from .supabase_scripts import ScriptLoadError, resolve_script
 from .browser_call_server import run_browser_server
+from .daily_session import run_daily_call
 from .phone_server import run_phone_server
 
 
@@ -129,6 +132,11 @@ def main() -> None:
         help="Start browser WebRTC server (phone/laptop mic — no Twilio/KYC)",
     )
     parser.add_argument(
+        "--daily",
+        action="store_true",
+        help="Daily.co room call — open link on phone (no Twilio, no tunnel, no US number)",
+    )
+    parser.add_argument(
         "--phone",
         action="store_true",
         help="Start phone-test server (Twilio -> real cell/landline call)",
@@ -151,12 +159,17 @@ def main() -> None:
     args = parser.parse_args()
 
     script, agent_user = _load_script_from_args(args)
-    modes = sum(bool(x) for x in (args.live, args.browser, args.phone))
+    modes = sum(bool(x) for x in (args.live, args.browser, args.daily, args.phone))
     if modes > 1:
-        print("Use only one of --live, --browser, or --phone.", file=sys.stderr)
+        print("Use only one of --live, --browser, --daily, or --phone.", file=sys.stderr)
         sys.exit(1)
     if args.browser:
         run_browser_server(script, agent_user)
+    elif args.daily:
+        try:
+            asyncio.run(run_daily_call(script, agent_user))
+        except KeyboardInterrupt:
+            logger.info("Stopped.")
     elif args.phone:
         run_phone_server(script, agent_user, dial_to=args.dial)
     elif args.live:

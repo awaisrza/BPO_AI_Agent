@@ -143,6 +143,8 @@ class Settings(BaseModel):
     # Public HTTPS URL (ngrok/cloudflare tunnel) — Twilio webhooks cannot reach localhost
     local_server_url: str = Field(default_factory=lambda: os.getenv("LOCAL_SERVER_URL", ""))
 
+    daily_api_key: str = Field(default_factory=lambda: os.getenv("DAILY_API_KEY", ""))
+
     supabase_url: str = Field(
         default_factory=lambda: os.getenv("SUPABASE_URL")
         or os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
