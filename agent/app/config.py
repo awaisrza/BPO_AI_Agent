@@ -140,7 +140,15 @@ class Settings(BaseModel):
     twilio_account_sid: str = Field(default_factory=lambda: os.getenv("TWILIO_ACCOUNT_SID", ""))
     twilio_auth_token: str = Field(default_factory=lambda: os.getenv("TWILIO_AUTH_TOKEN", ""))
     twilio_from_number: str = Field(default_factory=lambda: os.getenv("TWILIO_FROM_NUMBER", ""))
-    # Public HTTPS URL (ngrok/cloudflare tunnel) — Twilio webhooks cannot reach localhost
+
+    telnyx_api_key: str = Field(default_factory=lambda: os.getenv("TELNYX_API_KEY", ""))
+    telnyx_account_sid: str = Field(default_factory=lambda: os.getenv("TELNYX_ACCOUNT_SID", ""))
+    telnyx_application_sid: str = Field(
+        default_factory=lambda: os.getenv("TELNYX_APPLICATION_SID", "")
+    )
+    telnyx_phone_number: str = Field(default_factory=lambda: os.getenv("TELNYX_PHONE_NUMBER", ""))
+
+    # Public HTTPS URL (ngrok/cloudflare tunnel) — telephony webhooks cannot reach localhost
     local_server_url: str = Field(default_factory=lambda: os.getenv("LOCAL_SERVER_URL", ""))
 
     daily_api_key: str = Field(default_factory=lambda: os.getenv("DAILY_API_KEY", ""))

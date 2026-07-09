@@ -4,7 +4,7 @@ Default mode runs an OFFLINE TEXT SIMULATION of the conversation FSM so you can 
 immediately without telephony or API keys. Pass `--live` to run the real Pipecat pipeline with your
 laptop microphone and speakers. Pass `--browser` for WebRTC calls from a phone browser
 (no Twilio/KYC). Pass `--daily` for Daily.co room link on your phone (no US number).
-Pass `--phone` for real PSTN calls via Twilio.
+Pass `--phone` for real PSTN calls via Twilio, or `--telnyx` for Telnyx.
 
 Load scripts from the dashboard (Supabase):
   python -m app.main --campaign-id <uuid>
@@ -12,6 +12,7 @@ Load scripts from the dashboard (Supabase):
   python -m app.main --browser --campaign-id <uuid>
   python -m app.main --daily --campaign-id <uuid>
   python -m app.main --phone --campaign-id <uuid> --dial +14155551234
+  python -m app.main --telnyx --campaign-id <uuid> --dial +923001234567
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from .supabase_scripts import ScriptLoadError, resolve_script
 from .browser_call_server import run_browser_server
 from .daily_session import run_daily_call
 from .phone_server import run_phone_server
+from .telnyx_server import run_telnyx_server
 
 
 def _load_script_from_args(args: argparse.Namespace) -> tuple[ScriptConfig, str]:
@@ -142,6 +144,11 @@ def main() -> None:
         help="Start phone-test server (Twilio -> real cell/landline call)",
     )
     parser.add_argument(
+        "--telnyx",
+        action="store_true",
+        help="Start phone-test server (Telnyx TeXML -> real cell/landline call)",
+    )
+    parser.add_argument(
         "--dial",
         metavar="E164",
         help="With --phone: place an outbound call to this number on startup (e.g. +14155551234)",
@@ -159,9 +166,9 @@ def main() -> None:
     args = parser.parse_args()
 
     script, agent_user = _load_script_from_args(args)
-    modes = sum(bool(x) for x in (args.live, args.browser, args.daily, args.phone))
+    modes = sum(bool(x) for x in (args.live, args.browser, args.daily, args.phone, args.telnyx))
     if modes > 1:
-        print("Use only one of --live, --browser, --daily, or --phone.", file=sys.stderr)
+        print("Use only one of --live, --browser, --daily, --phone, or --telnyx.", file=sys.stderr)
         sys.exit(1)
     if args.browser:
         run_browser_server(script, agent_user)
@@ -172,6 +179,8 @@ def main() -> None:
             logger.info("Stopped.")
     elif args.phone:
         run_phone_server(script, agent_user, dial_to=args.dial)
+    elif args.telnyx:
+        run_telnyx_server(script, agent_user, dial_to=args.dial)
     elif args.live:
         run_live(script, agent_user)
     else:

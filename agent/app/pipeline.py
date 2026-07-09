@@ -282,13 +282,18 @@ def _build_tts(*, script: ScriptConfig, sample_rate: int):
     )
 
 
+_cached_stt = None
+_cached_tts: dict[int, object] = {}
+
+
 def prewarm_voice_stack(script: ScriptConfig | None = None, *, sample_rate: int = 16000) -> None:
-    """Load STT/TTS weights before the first browser call (avoids blocking WebRTC ICE)."""
+    """Load STT/TTS weights before the first live call (avoids blocking on connect)."""
+    global _cached_stt, _cached_tts
     _require_api_keys()
     script = script or ScriptConfig.load()
-    logger.info("Pre-warming voice stack for browser calls...")
-    _build_stt()
-    _build_tts(script=script, sample_rate=sample_rate)
+    logger.info(f"Pre-warming voice stack (sample_rate={sample_rate})...")
+    _cached_stt = _build_stt()
+    _cached_tts[sample_rate] = _build_tts(script=script, sample_rate=sample_rate)
     logger.info("Voice stack pre-warm complete.")
 
 
@@ -318,8 +323,8 @@ def build_pipeline(
         backend = "managed (Deepgram + Fish)"
     logger.info(f"Voice backend: {backend}")
 
-    stt = _build_stt()
-    tts = _build_tts(script=script, sample_rate=sample_rate)
+    stt = _cached_stt or _build_stt()
+    tts = _cached_tts.get(sample_rate) or _build_tts(script=script, sample_rate=sample_rate)
     vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)))
 
     engine = ConversationEngine(
