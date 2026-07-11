@@ -13,10 +13,10 @@ import httpx
 from loguru import logger
 
 from .speech_renderer import SpokenChunkFrame
-from .tts_spoken_chunk import handle_spoken_chunk_frame
+from .tts_spoken_chunk import SpokenChunkTTSSupport, handle_spoken_chunk_frame
 
 try:
-    from pipecat.frames.frames import ErrorFrame, Frame, TTSAudioRawFrame
+    from pipecat.frames.frames import ErrorFrame, Frame, InterruptionFrame, TTSAudioRawFrame
     from pipecat.services.settings import TTSSettings
     from pipecat.services.tts_service import TTSService
 except Exception:  # pragma: no cover - import paths vary across Pipecat versions
@@ -28,7 +28,7 @@ except Exception:  # pragma: no cover - import paths vary across Pipecat version
 FISH_TTS_URL = "https://api.fish.audio/v1/tts"
 
 
-class FishAudioTTSService(TTSService):
+class FishAudioTTSService(SpokenChunkTTSSupport, TTSService):
     """Streams PCM audio from Fish Audio. Sample rate defaults to 16k for telephony pipelines."""
 
     def __init__(
@@ -60,6 +60,9 @@ class FishAudioTTSService(TTSService):
         return True
 
     async def process_frame(self, frame, direction):  # type: ignore[override]
+        if await self.handle_interruption_frame(frame, direction):
+            await super().process_frame(frame, direction)
+            return
         if isinstance(frame, SpokenChunkFrame):
             await handle_spoken_chunk_frame(
                 self,
@@ -94,6 +97,8 @@ class FishAudioTTSService(TTSService):
                 resp.raise_for_status()
                 first_chunk = True
                 async for chunk in resp.aiter_bytes():
+                    if self.speech_is_cancelled():
+                        return
                     if not chunk:
                         continue
                     if first_chunk:

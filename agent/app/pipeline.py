@@ -40,6 +40,7 @@ try:
         EndFrame,
         InputAudioRawFrame,
         InterimTranscriptionFrame,
+        InterruptionFrame,
         StartFrame,
         SystemFrame,
         TranscriptionFrame,
@@ -91,6 +92,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             await self.push_frame(frame, direction)
             return
 
+        if isinstance(frame, InterruptionFrame):
+            await self.push_frame(frame, direction)
+            return
+
         if isinstance(frame, InterimTranscriptionFrame):
             return
 
@@ -100,7 +105,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
         if isinstance(frame, TranscriptionFrame) and frame.text:
             if self._call.state == CallState.SPEAKING and not self._call.interrupted:
-                logger.debug("Ignoring caller text while bot is speaking (no barge-in yet)")
+                logger.debug("Ignoring caller text while bot is speaking")
                 return
 
             text = frame.text.strip()

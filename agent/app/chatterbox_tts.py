@@ -12,10 +12,10 @@ from loguru import logger
 
 from .chatterbox_paths import resolve_chatterbox_device, resolve_chatterbox_reference
 from .speech_renderer import SpokenChunkFrame
-from .tts_spoken_chunk import handle_spoken_chunk_frame
+from .tts_spoken_chunk import SpokenChunkTTSSupport, handle_spoken_chunk_frame
 
 try:
-    from pipecat.frames.frames import ErrorFrame, Frame, TTSAudioRawFrame
+    from pipecat.frames.frames import ErrorFrame, Frame, InterruptionFrame, TTSAudioRawFrame
     from pipecat.services.settings import TTSSettings
     from pipecat.services.tts_service import TTSService
 except Exception:  # pragma: no cover
@@ -82,11 +82,31 @@ def _apply_chatterbox_dtype_patch(model) -> None:
     logger.debug("Applied Chatterbox dtype compatibility patch")
 
 
+def _patch_perth_watermarker() -> None:
+    """Chatterbox calls perth.PerthImplicitWatermarker(); PyPI perth often sets it to None."""
+    try:
+        import perth
+    except ImportError:
+        return
+
+    cls = getattr(perth, "PerthImplicitWatermarker", None)
+    if cls is not None and callable(cls):
+        return
+
+    class _NoOpWatermarker:
+        def apply_watermark(self, wav, sample_rate):  # noqa: ANN001
+            return wav
+
+    perth.PerthImplicitWatermarker = _NoOpWatermarker
+    logger.warning("Perth watermarker unavailable — using no-op stub (install Perth from GitHub for watermarking)")
+
+
 def _load_model(device: str):
     global _shared_model, _shared_device
     with _model_lock:
         if _shared_model is not None and _shared_device == device:
             return _shared_model
+        _patch_perth_watermarker()
         from chatterbox.tts_turbo import ChatterboxTurboTTS
 
         logger.info(f"Loading Chatterbox Turbo on {device} (first run downloads weights)...")
@@ -164,7 +184,7 @@ def warm_chatterbox_cache_sync(
     return cache
 
 
-class ChatterboxTTSService(TTSService):
+class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
     """Chatterbox Turbo with script-line cache and zero-shot voice clone."""
 
     def __init__(
@@ -197,6 +217,9 @@ class ChatterboxTTSService(TTSService):
         return True
 
     async def process_frame(self, frame, direction):  # type: ignore[override]
+        if await self.handle_interruption_frame(frame, direction):
+            await super().process_frame(frame, direction)
+            return
         if isinstance(frame, SpokenChunkFrame):
             await handle_spoken_chunk_frame(
                 self,
@@ -214,6 +237,8 @@ class ChatterboxTTSService(TTSService):
             if cached is not None:
                 await self.stop_ttfb_metrics()
                 for chunk in _chunk_pcm(cached):
+                    if self.speech_is_cancelled():
+                        return
                     yield TTSAudioRawFrame(
                         audio=chunk,
                         sample_rate=self.sample_rate,
@@ -225,6 +250,8 @@ class ChatterboxTTSService(TTSService):
 
             loop = asyncio.get_running_loop()
             async with self._infer_lock:
+                if self.speech_is_cancelled():
+                    return
                 pcm = await loop.run_in_executor(
                     None,
                     lambda: synthesize_pcm_sync(
@@ -236,8 +263,12 @@ class ChatterboxTTSService(TTSService):
                         sample_rate=self.sample_rate,
                     ),
                 )
+            if self.speech_is_cancelled():
+                return
             await self.stop_ttfb_metrics()
             for chunk in _chunk_pcm(pcm):
+                if self.speech_is_cancelled():
+                    return
                 yield TTSAudioRawFrame(
                     audio=chunk,
                     sample_rate=self.sample_rate,

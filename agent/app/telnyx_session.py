@@ -15,7 +15,6 @@ _CRASH_LOG = Path("/tmp/telnyx_events.log")
 
 
 def _event(msg: str) -> None:
-    """Write one line to disk immediately (no buffering)."""
     line = msg.rstrip() + "\n"
     try:
         with _CRASH_LOG.open("a", encoding="utf-8") as fh:
@@ -91,7 +90,6 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
                 audio_out_sample_rate=sample_rate,
             ),
         }
-        # Pipecat versions differ on these kwargs — try full, then minimal.
         try:
             worker = PipelineWorker(
                 pipeline,

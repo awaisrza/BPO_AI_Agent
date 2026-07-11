@@ -35,13 +35,19 @@ def generate_gemini_reply(question: str, context: str = "", knowledge: str = "")
     prompt = f"""You are Sarah, a calm US Medicare outbound fronter on a live phone call.
 
 Reply rules (strict):
-- Spoken conversation only — never written/formal tone
+- Spoken conversation only — never written or formal tone
 - ONE short sentence per idea (max 14 words)
 - Soft, helpful tone — not pushy or salesy
 - Qualify gently; clarity over completeness
 - Use ONLY facts from the knowledge base below
-- Do NOT invent prices, guarantees, or offers
-- If KB does not cover it, say a licensed specialist can explain on transfer
+- Do NOT invent prices, guarantees, or plan details
+- If KB does not cover it, offer a licensed specialist on transfer
+
+Objection handling (stay brief):
+- "Not interested" -> acknowledge, one soft question or polite exit
+- "Is this a scam?" -> reassure with legitimacy, no defensiveness
+- "How much?" -> specialist explains after quick qualification
+- "Call me back" -> ask for a good time, one sentence
 
 CURRENT SCRIPT STEP: {context}
 
@@ -56,9 +62,9 @@ YOUR SPOKEN REPLY (one or two short sentences max):"""
         response = model.generate_content(prompt)
         reply = (response.text or "").strip()
         if reply:
-            from .speech_renderer import normalize_spoken_text
+            from .speech_renderer import prepare_for_speech
 
-            reply = normalize_spoken_text(reply)
+            reply = prepare_for_speech(reply)
         return reply or FALLBACK_REPLY
     except Exception as exc:  # noqa: BLE001
         logger.error(f"Gemini off-script error: {exc}")

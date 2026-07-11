@@ -1,4 +1,14 @@
-"""Telnyx phone-test server — real PSTN calls through the fronter pipeline.
+#!/usr/bin/env python3
+"""Install Telnyx integration files on GPU when git pull does not have them yet."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+FILES = {
+    "app/telnyx_server.py": '''"""Telnyx phone-test server — real PSTN calls through the fronter pipeline.
 
 Outbound: pass --dial on the CLI or POST /dialout.
 TeXML webhook: {LOCAL_SERVER_URL}/answer
@@ -26,7 +36,7 @@ _CRASH_LOG = Path("/tmp/telnyx_events.log")
 
 
 def _event(msg: str) -> None:
-    line = msg.rstrip() + "\n"
+    line = msg.rstrip() + "\\n"
     try:
         with _CRASH_LOG.open("a", encoding="utf-8") as fh:
             fh.write(line)
@@ -54,7 +64,7 @@ def _require_telnyx() -> None:
         missing.append("LOCAL_SERVER_URL (your ngrok/cloudflare https URL)")
     if missing:
         raise RuntimeError(
-            "Telnyx phone mode needs these in agent/.env.local:\n  " + "\n  ".join(missing)
+            "Telnyx phone mode needs these in agent/.env.local:\\n  " + "\\n  ".join(missing)
         )
 
 
@@ -168,7 +178,7 @@ def create_telnyx_app(script: ScriptConfig, agent_user: str) -> FastAPI:
         try:
             await run_telnyx_call(websocket, script, agent_user)
         except Exception as exc:
-            _event(f"=== /ws ERROR: {exc} ===\n{traceback.format_exc()}")
+            _event(f"=== /ws ERROR: {exc} ===\\n{traceback.format_exc()}")
             try:
                 await websocket.close()
             except Exception:
@@ -224,14 +234,14 @@ def run_telnyx_server(
     host = settings.host
     port = settings.port
 
-    print("\n=== AI FRONTER — TELNYX PHONE TEST ===")
+    print("\\n=== AI FRONTER — TELNYX PHONE TEST ===")
     print(f"Public URL:  {settings.local_server_url}")
     print(f"TeXML:       {settings.local_server_url.rstrip('/')}/answer")
     print(f"WebSocket:   {_websocket_url()}")
     print(f"Local bind:  http://{host}:{port}")
     print(f"Event log:   {_CRASH_LOG}")
     print(f"Script:      {script.greeting[:60]}...")
-    print("\nPress Ctrl-C to stop.\n")
+    print("\\nPress Ctrl-C to stop.\\n")
 
     def _dial_after_ready() -> None:
         try:
@@ -248,12 +258,198 @@ def run_telnyx_server(
                 answer_url=answer_url,
             )
             _event(f"=== DIALED {dial_to} result={result} ===")
-            print(f"Dialing {dial_to} now — answer your phone.\n")
+            print(f"Dialing {dial_to} now — answer your phone.\\n")
         except Exception:
-            _event("=== DIAL FAILED ===\n" + traceback.format_exc())
+            _event("=== DIAL FAILED ===\\n" + traceback.format_exc())
             print("DIAL FAILED — see /tmp/telnyx_events.log")
 
     if dial_to:
         threading.Thread(target=_dial_after_ready, daemon=True).start()
 
     uvicorn.run(app, host=host, port=port, log_level="info")
+''',
+    "app/telnyx_session.py": '''"""Run the fronter pipeline on a Telnyx Media Streams WebSocket (real PSTN call)."""
+
+from __future__ import annotations
+
+import os
+import traceback
+from pathlib import Path
+
+from loguru import logger
+
+from .config import ScriptConfig, settings
+from .pipeline import build_pipeline
+
+_CRASH_LOG = Path("/tmp/telnyx_events.log")
+
+
+def _event(msg: str) -> None:
+    line = msg.rstrip() + "\\n"
+    try:
+        with _CRASH_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except Exception:
+        pass
+    logger.info(line.strip())
+
+
+async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> None:
+    """Handle one inbound or outbound Telnyx call over Media Streams."""
+    from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+    from pipecat.runner.utils import parse_telephony_websocket
+    from pipecat.serializers.telnyx import TelnyxFrameSerializer
+    from pipecat.transports.websocket.fastapi import (
+        FastAPIWebsocketParams,
+        FastAPIWebsocketTransport,
+    )
+    from pipecat.workers.runner import WorkerRunner
+
+    _event("=== WS HANDLER ENTERED ===")
+    try:
+        await websocket.accept()
+        _event("=== WS ACCEPTED ===")
+
+        transport_type, call_data = await parse_telephony_websocket(websocket)
+        _event(f"=== PARSED type={transport_type} data={dict(call_data)} ===")
+
+        if transport_type != "telnyx":
+            raise RuntimeError(f"Expected telnyx, got {transport_type!r}")
+
+        stream_id = call_data.get("stream_id")
+        call_control_id = call_data.get("call_id")
+        outbound_encoding = call_data.get("outbound_encoding") or "PCMU"
+        if not stream_id:
+            raise RuntimeError(f"Missing stream_id in handshake: {call_data}")
+
+        os.environ.setdefault("TELNYX_API_KEY", settings.telnyx_api_key or "")
+
+        serializer = TelnyxFrameSerializer(
+            stream_id=stream_id,
+            outbound_encoding=outbound_encoding,
+            inbound_encoding="PCMU",
+            call_control_id=call_control_id,
+            api_key=settings.telnyx_api_key,
+            params=TelnyxFrameSerializer.InputParams(auto_hang_up=False),
+        )
+        transport = FastAPIWebsocketTransport(
+            websocket=websocket,
+            params=FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                add_wav_header=False,
+                serializer=serializer,
+            ),
+        )
+
+        sample_rate = 8000
+        _event("=== BUILDING PIPELINE ===")
+        pipeline = build_pipeline(
+            transport,
+            agent_user=agent_user,
+            script=script,
+            mic_test=True,
+            sample_rate=sample_rate,
+        )
+
+        worker_kwargs = {
+            "params": PipelineParams(
+                audio_in_sample_rate=sample_rate,
+                audio_out_sample_rate=sample_rate,
+            ),
+        }
+        try:
+            worker = PipelineWorker(
+                pipeline,
+                enable_rtvi=False,
+                idle_timeout_secs=None,
+                **worker_kwargs,
+            )
+        except TypeError:
+            _event("=== PipelineWorker fallback (no enable_rtvi/idle_timeout) ===")
+            worker = PipelineWorker(pipeline, **worker_kwargs)
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(_transport, _client) -> None:
+            _event("=== MEDIA READY — greeting should play ===")
+
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(_transport, _client) -> None:
+            _event("=== CALL ENDED ===")
+            await worker.cancel()
+
+        _event("=== STARTING RUNNER ===")
+        try:
+            runner = WorkerRunner(handle_sigint=False)
+        except TypeError:
+            runner = WorkerRunner()
+        await runner.add_workers(worker)
+        await runner.run()
+        _event("=== RUNNER FINISHED ===")
+    except Exception:
+        tb = traceback.format_exc()
+        _event("=== CRASH ===\\n" + tb)
+        raise
+''',
+    "run_telnyx.py": '''#!/usr/bin/env python3
+"""Place a Telnyx outbound call and run the fronter pipeline on the media stream."""
+
+from __future__ import annotations
+
+import argparse
+
+from app.config import ScriptConfig
+from app.supabase_scripts import ScriptLoadError, resolve_script
+from app.telnyx_server import run_telnyx_server
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="AI Fronter — Telnyx phone test")
+    parser.add_argument(
+        "--campaign-id",
+        required=True,
+        help="Supabase campaign UUID (loads script greeting/pitch/qualifiers)",
+    )
+    parser.add_argument(
+        "--dial",
+        metavar="E164",
+        help="Outbound number to dial, e.g. +923142222318",
+    )
+    parser.add_argument(
+        "--agent-user",
+        default="TELNYX-TEST",
+        help="ViciDial agent label (mic-test mode ignores ViciDial)",
+    )
+    args = parser.parse_args()
+
+    try:
+        script, agent_user = resolve_script(campaign_id=args.campaign_id)
+    except ScriptLoadError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    run_telnyx_server(script, args.agent_user or agent_user, dial_to=args.dial)
+
+
+if __name__ == "__main__":
+    main()
+''',
+}
+
+
+def main() -> None:
+    for relpath, content in FILES.items():
+        path = ROOT / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        print(f"Wrote {path} ({path.stat().st_size} bytes)")
+
+    print("\nDone. Verify with:")
+    print("  cd", ROOT)
+    print("  source .venv/bin/activate")
+    print('  python -c "from app.telnyx_server import run_telnyx_server; print(\'telnyx OK\')"')
+
+
+if __name__ == "__main__":
+    main()

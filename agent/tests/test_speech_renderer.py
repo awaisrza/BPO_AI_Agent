@@ -1,5 +1,8 @@
 from app.speech_renderer import (
+    CallController,
+    CallState,
     normalize_spoken_text,
+    prepare_for_speech,
     render_speech,
     split_spoken_sentences,
 )
@@ -8,6 +11,24 @@ from app.speech_renderer import (
 def test_normalize_contractions():
     text = normalize_spoken_text("I am calling to verify your Medicare eligibility.")
     assert "I'm calling about your Medicare plan" in text
+
+
+def test_prepare_for_speech_medicare_tone():
+    text = prepare_for_speech("Please be advised that I am calling regarding your Medicare plan.")
+    assert "just so you know" in text.lower()
+    assert "i'm calling about" in text.lower()
+
+
+def test_call_controller_barge_in_states():
+    ctrl = CallController()
+    ctrl.on_response_start()
+    assert ctrl.state == CallState.SPEAKING
+    assert ctrl.should_interrupt()
+    ctrl.on_interruption()
+    assert ctrl.state == CallState.LISTENING
+    assert ctrl.interrupted
+    ctrl.on_listening()
+    assert not ctrl.interrupted
 
 
 def test_split_long_sentence():

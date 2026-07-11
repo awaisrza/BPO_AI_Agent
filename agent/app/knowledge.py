@@ -9,6 +9,7 @@ from loguru import logger
 
 from .gemini import generate_gemini_reply
 from .models import KnowledgeEntry
+from .speech_renderer import prepare_for_speech
 
 
 def _normalize(text: str) -> str:
@@ -112,12 +113,12 @@ def answer_offscript(
     match = match_knowledge(question, kb_entries)
     if match:
         logger.info(f"Off-script KB hit: {match.topic or match.triggers}")
-        return match.answer
+        return prepare_for_speech(match.answer)
 
     if kb_entries:
         logger.info("Off-script KB miss -> Gemini")
         knowledge_text = format_knowledge_prompt(kb_entries)
-        return generate_gemini_reply(question, context, knowledge_text)
+        return prepare_for_speech(generate_gemini_reply(question, context, knowledge_text))
 
     logger.info("Off-script no KB -> Gemini defaults")
-    return generate_gemini_reply(question, context, "")
+    return prepare_for_speech(generate_gemini_reply(question, context, ""))

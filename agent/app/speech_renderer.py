@@ -41,6 +41,15 @@ _REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bin order to\b", re.I), "to"),
     (re.compile(r"\bWould you be able to\b", re.I), "Can you"),
     (re.compile(r"\bDo you have a moment to speak\b", re.I), "Do you have a quick moment"),
+    (re.compile(r"\bI am calling regarding\b", re.I), "I'm calling about"),
+    (re.compile(r"\bI am reaching out\b", re.I), "I'm calling"),
+    (re.compile(r"\bper our records\b", re.I), "from what we have"),
+    (re.compile(r"\bat this time\b", re.I), "right now"),
+    (re.compile(r"\bfor your information\b", re.I), "just so you know"),
+    (re.compile(r"\bPlease be advised\b", re.I), "Just so you know"),
+    (re.compile(r"\bI understand your concern\b", re.I), "I hear you"),
+    (re.compile(r"\bI completely understand\b", re.I), "I get it"),
+    (re.compile(r"\bNo problem at all\b", re.I), "No problem"),
     (re.compile(r"\bI am\b", re.I), "I'm"),
     (re.compile(r"\bWe are\b", re.I), "We're"),
     (re.compile(r"\bYou are\b", re.I), "You're"),
@@ -93,6 +102,15 @@ class CallController:
 
     def on_processing(self) -> None:
         self.state = CallState.PROCESSING
+
+    def on_listening(self) -> None:
+        self.interrupted = False
+        self.state = CallState.LISTENING
+
+
+def prepare_for_speech(text: str) -> str:
+    """Normalize any bot reply (FSM, KB, Gemini) before chunking/TTS."""
+    return normalize_spoken_text(text)
 
 
 def normalize_spoken_text(text: str) -> str:
@@ -201,6 +219,7 @@ if PIPECAT_AVAILABLE:
 
         text: str
         pause_after_ms: int = 0
+        reset_barge_in: bool = False
 
     class BargeInProcessor(FrameProcessor):  # type: ignore[misc]
         """Emit ``InterruptionFrame`` when the caller speaks over the bot."""
@@ -214,9 +233,11 @@ if PIPECAT_AVAILABLE:
 
             if isinstance(frame, (VADUserStartedSpeakingFrame, UserStartedSpeakingFrame)):
                 if self._controller.should_interrupt():
-                    logger.info("Barge-in: stopping bot speech")
+                    logger.info("Barge-in: caller speaking over bot — stopping TTS")
                     self._controller.on_interruption()
                     await self.push_frame(InterruptionFrame(), direction)
+                else:
+                    self._controller.on_listening()
 
             await self.push_frame(frame, direction)
 
@@ -265,11 +286,15 @@ if PIPECAT_AVAILABLE:
 
                 self._controller.on_response_start()
                 logger.debug(f"SpeechRenderer: {len(chunks)} chunk(s) from {frame.text[:48]!r}...")
-                for chunk in chunks:
+                for idx, chunk in enumerate(chunks):
                     if self._cancel_stream:
                         break
                     await self.push_frame(
-                        SpokenChunkFrame(text=chunk.text, pause_after_ms=chunk.pause_after_ms),
+                        SpokenChunkFrame(
+                            text=chunk.text,
+                            pause_after_ms=chunk.pause_after_ms,
+                            reset_barge_in=(idx == 0),
+                        ),
                         direction,
                     )
                 return

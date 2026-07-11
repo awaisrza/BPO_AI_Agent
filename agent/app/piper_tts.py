@@ -15,10 +15,10 @@ from .piper_paths import (
     synthesize_pcm_sync,
 )
 from .speech_renderer import SpokenChunkFrame
-from .tts_spoken_chunk import handle_spoken_chunk_frame
+from .tts_spoken_chunk import SpokenChunkTTSSupport, handle_spoken_chunk_frame
 
 try:
-    from pipecat.frames.frames import ErrorFrame, Frame, TTSAudioRawFrame
+    from pipecat.frames.frames import ErrorFrame, Frame, InterruptionFrame, TTSAudioRawFrame
     from pipecat.services.settings import TTSSettings
     from pipecat.services.tts_service import TTSService
 except Exception:  # pragma: no cover
@@ -96,7 +96,7 @@ def warm_piper_cache_sync(
     return cache
 
 
-class PiperTTSService(TTSService):
+class PiperTTSService(SpokenChunkTTSSupport, TTSService):
     """Local Piper TTS with optional in-memory cache for static script lines."""
 
     def __init__(
@@ -126,6 +126,9 @@ class PiperTTSService(TTSService):
         return True
 
     async def process_frame(self, frame, direction):  # type: ignore[override]
+        if await self.handle_interruption_frame(frame, direction):
+            await super().process_frame(frame, direction)
+            return
         if isinstance(frame, SpokenChunkFrame):
             await handle_spoken_chunk_frame(
                 self,
@@ -143,6 +146,8 @@ class PiperTTSService(TTSService):
             if cached is not None:
                 await self.stop_ttfb_metrics()
                 for chunk in _chunk_pcm(cached):
+                    if self.speech_is_cancelled():
+                        return
                     yield TTSAudioRawFrame(
                         audio=chunk,
                         sample_rate=self.sample_rate,
@@ -158,9 +163,13 @@ class PiperTTSService(TTSService):
                 text=text,
                 speaker=self._speaker,
             )
+            if self.speech_is_cancelled():
+                return
             pcm = _resample_pcm(pcm, self._model_rate, self.sample_rate)
             await self.stop_ttfb_metrics()
             for chunk in _chunk_pcm(pcm):
+                if self.speech_is_cancelled():
+                    return
                 yield TTSAudioRawFrame(
                     audio=chunk,
                     sample_rate=self.sample_rate,
