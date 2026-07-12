@@ -1,4 +1,4 @@
-from app.audio_resample import normalize_pcm16, resample_pcm16
+from app.audio_resample import enhance_for_telephony, normalize_pcm16, resample_pcm16
 
 
 def test_resample_identity():
@@ -10,3 +10,8 @@ def test_normalize_quiet_audio():
     quiet = b"\x00\x10" * 200
     loud = normalize_pcm16(quiet)
     assert loud != quiet
+
+
+def test_enhance_for_telephony():
+    pcm = b"\x00\x10" * 200
+    assert enhance_for_telephony(pcm) != pcm

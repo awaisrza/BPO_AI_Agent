@@ -148,15 +148,31 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         await self.push_frame(frame, direction)
 
 
-def _script_cache_lines(script: ScriptConfig) -> list[str]:
+def _speech_settings(*, telephony: bool = False) -> tuple[int, int, int]:
+    if telephony:
+        return (
+            settings.telephony_speech_max_words,
+            settings.telephony_pause_min_ms,
+            settings.telephony_pause_max_ms,
+        )
+    return (
+        settings.speech_max_words,
+        settings.speech_pause_min_ms,
+        settings.speech_pause_max_ms,
+    )
+
+
+def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> list[str]:
+    max_words, pause_min, pause_max = _speech_settings(telephony=telephony)
     lines = [script.greeting, script.pitch, *script.qualifying_questions]
     lines.extend([script.transfer_line, script.not_interested_line])
     raw = [line.strip() for line in lines if line and line.strip()]
     return iter_chunk_texts(
         raw,
-        max_words=settings.speech_max_words,
-        pause_min_ms=settings.speech_pause_min_ms,
-        pause_max_ms=settings.speech_pause_max_ms,
+        telephony=telephony,
+        max_words=max_words,
+        pause_min_ms=pause_min,
+        pause_max_ms=pause_max,
     )
 
 
@@ -226,24 +242,28 @@ def _build_stt():
     )
 
 
-def _build_tts(*, script: ScriptConfig, sample_rate: int):
+def _build_tts(*, script: ScriptConfig, sample_rate: int, telephony: bool = False):
     if _is_chatterbox_backend():
         from .chatterbox_paths import resolve_chatterbox_device, resolve_chatterbox_reference
-        from .chatterbox_tts import ChatterboxTTSService, warm_chatterbox_cache_sync
+        from .chatterbox_tts import ChatterboxTTSService, TELEPHONY_PIPELINE_RATE, warm_chatterbox_cache_sync
 
         reference = resolve_chatterbox_reference(settings.chatterbox_reference_audio or None)
         device = resolve_chatterbox_device(
             settings.chatterbox_device or settings.whisper_device or None
         )
-        logger.info(f"TTS: Chatterbox Turbo (device={device}, ref={reference.name})")
+        telephony = telephony or sample_rate == TELEPHONY_PIPELINE_RATE
+        logger.info(
+            f"TTS: Chatterbox Turbo (device={device}, ref={reference.name}, telephony={telephony})"
+        )
         try:
             cache = warm_chatterbox_cache_sync(
-                texts=_script_cache_lines(script),
+                texts=_script_cache_lines(script, telephony=telephony),
                 reference_path=reference,
                 device=device,
                 exaggeration=settings.chatterbox_exaggeration,
                 cfg_weight=settings.chatterbox_cfg_weight,
                 sample_rate=sample_rate,
+                telephony=telephony,
             )
         except Exception as exc:
             logger.warning(f"Chatterbox cache warm failed (live synthesis only): {exc}")
@@ -263,7 +283,7 @@ def _build_tts(*, script: ScriptConfig, sample_rate: int):
 
         logger.info("TTS: Piper (local)")
         cache = warm_piper_cache_sync(
-            texts=_script_cache_lines(script),
+            texts=_script_cache_lines(script, telephony=telephony),
             piper_exe=settings.piper_exe or None,
             model_path=settings.piper_model or None,
             speaker=settings.piper_speaker,
@@ -288,17 +308,30 @@ def _build_tts(*, script: ScriptConfig, sample_rate: int):
 
 
 _cached_stt = None
-_cached_tts: dict[int, object] = {}
+_cached_tts: dict[tuple[int, bool], object] = {}
 
 
-def prewarm_voice_stack(script: ScriptConfig | None = None, *, sample_rate: int = 16000) -> None:
+def prewarm_voice_stack(
+    script: ScriptConfig | None = None,
+    *,
+    sample_rate: int = 16000,
+    telephony: bool = False,
+) -> None:
     """Load STT/TTS weights before the first live call (avoids blocking on connect)."""
     global _cached_stt, _cached_tts
     _require_api_keys()
     script = script or ScriptConfig.load()
-    logger.info(f"Pre-warming voice stack (sample_rate={sample_rate})...")
+    from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
+
+    if sample_rate == TELEPHONY_PIPELINE_RATE:
+        telephony = True
+    logger.info(
+        f"Pre-warming voice stack (sample_rate={sample_rate}, telephony={telephony})..."
+    )
     _cached_stt = _build_stt()
-    _cached_tts[sample_rate] = _build_tts(script=script, sample_rate=sample_rate)
+    _cached_tts[(sample_rate, telephony)] = _build_tts(
+        script=script, sample_rate=sample_rate, telephony=telephony
+    )
     logger.info("Voice stack pre-warm complete.")
 
 
@@ -309,6 +342,7 @@ def build_pipeline(
     script: ScriptConfig | None = None,
     mic_test: bool = False,
     sample_rate: int = 16000,
+    telephony: bool = False,
 ) -> Pipeline:
     """Assemble the live pipeline. `transport` provides audio in/out frames."""
     if not PIPECAT_AVAILABLE:
@@ -319,6 +353,11 @@ def build_pipeline(
 
     _require_api_keys()
 
+    from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
+
+    if sample_rate == TELEPHONY_PIPELINE_RATE:
+        telephony = True
+
     script = script or ScriptConfig.load()
     if _is_chatterbox_backend():
         backend = "Chatterbox (Whisper + Chatterbox Turbo)"
@@ -326,10 +365,13 @@ def build_pipeline(
         backend = "GPU (Whisper + Piper)"
     else:
         backend = "managed (Deepgram + Fish)"
-    logger.info(f"Voice backend: {backend}")
+    mode = "telephony" if telephony else "local"
+    logger.info(f"Voice backend: {backend} ({mode}, {sample_rate} Hz)")
 
     stt = _cached_stt or _build_stt()
-    tts = _cached_tts.get(sample_rate) or _build_tts(script=script, sample_rate=sample_rate)
+    tts = _cached_tts.get((sample_rate, telephony)) or _build_tts(
+        script=script, sample_rate=sample_rate, telephony=telephony
+    )
     vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)))
 
     engine = ConversationEngine(
@@ -346,11 +388,14 @@ def build_pipeline(
         call_controller=call_controller,
     )
     barge_in = BargeInProcessor(call_controller)
+    max_words, pause_min, pause_max = _speech_settings(telephony=telephony)
     speech_renderer = SpeechRendererNode(
         call_controller,
-        max_words=settings.speech_max_words,
-        pause_min_ms=settings.speech_pause_min_ms,
-        pause_max_ms=settings.speech_pause_max_ms,
+        max_words=max_words,
+        pause_min_ms=pause_min,
+        pause_max_ms=pause_max,
+        telephony=telephony and settings.telephony_single_utterance,
+        telephony_max_words=settings.telephony_utterance_max_words,
     )
 
     return Pipeline(

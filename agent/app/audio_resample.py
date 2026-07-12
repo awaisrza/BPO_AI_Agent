@@ -37,6 +37,24 @@ def resample_pcm16(pcm: bytes, src_rate: int, dst_rate: int) -> bytes:
         return converted
 
 
+def telephony_preemphasis(pcm: bytes, *, coef: float = 0.95) -> bytes:
+    """Boost speech clarity before 8 kHz PCMU (helps consonants on phone lines)."""
+    if len(pcm) < 4:
+        return pcm
+    samples = memoryview(pcm).cast("h")
+    out = bytearray(len(pcm))
+    out_view = memoryview(out).cast("h")
+    out_view[0] = samples[0]
+    for i in range(1, len(samples)):
+        boosted = int(samples[i] - coef * samples[i - 1])
+        if boosted > 32767:
+            boosted = 32767
+        elif boosted < -32768:
+            boosted = -32768
+        out_view[i] = boosted
+    return bytes(out)
+
+
 def normalize_pcm16(pcm: bytes, *, target_peak: float = 0.92) -> bytes:
     """Lift quiet TTS output so phone codecs (PCMU) don't sound muffled."""
     if not pcm:
@@ -49,3 +67,8 @@ def normalize_pcm16(pcm: bytes, *, target_peak: float = 0.92) -> bytes:
         return pcm
     factor = max_peak / peak
     return audioop.mul(pcm, 2, factor)
+
+
+def enhance_for_telephony(pcm: bytes) -> bytes:
+    """Level-normalize for PSTN; skip harsh pre-emphasis (sounds thin/robotic)."""
+    return normalize_pcm16(pcm, target_peak=0.88)

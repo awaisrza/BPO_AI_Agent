@@ -9,7 +9,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from .audio_resample import normalize_pcm16, resample_pcm16
+from .audio_resample import enhance_for_telephony, resample_pcm16
+from .config import settings
 from .chatterbox_paths import resolve_chatterbox_device, resolve_chatterbox_reference
 from .speech_renderer import SpokenChunkFrame
 from .tts_spoken_chunk import SpokenChunkTTSSupport, handle_spoken_chunk_frame
@@ -140,17 +141,22 @@ def synthesize_pcm_sync(
     exaggeration: float,
     cfg_weight: float,
     sample_rate: int,
+    telephony: bool = False,
 ) -> bytes:
     model = _load_model(device)
+    if telephony:
+        exaggeration = settings.telephony_chatterbox_exaggeration
+        cfg_weight = settings.telephony_chatterbox_cfg_weight
     with _model_lock:
         wav = model.generate(
             text,
             audio_prompt_path=str(reference_path),
             exaggeration=exaggeration,
             cfg_weight=cfg_weight,
-            norm_loudness=False,
+            norm_loudness=settings.chatterbox_norm_loudness,
         )
-    return normalize_pcm16(_tensor_to_pcm16(wav, int(model.sr), sample_rate))
+    pcm = _tensor_to_pcm16(wav, int(model.sr), sample_rate)
+    return enhance_for_telephony(pcm) if telephony else pcm
 
 
 def warm_chatterbox_cache_sync(
@@ -161,6 +167,7 @@ def warm_chatterbox_cache_sync(
     exaggeration: float,
     cfg_weight: float,
     sample_rate: int = 16000,
+    telephony: bool = False,
 ) -> dict[str, bytes]:
     cache: dict[str, bytes] = {}
     for text in texts:
@@ -175,6 +182,7 @@ def warm_chatterbox_cache_sync(
                 exaggeration=exaggeration,
                 cfg_weight=cfg_weight,
                 sample_rate=sample_rate,
+                telephony=telephony,
             )
         except Exception as exc:
             logger.warning(f"Chatterbox cache skip ({line[:48]!r}…): {exc}")
@@ -206,6 +214,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
         self._device = resolve_chatterbox_device(device)
         self._exaggeration = exaggeration
         self._cfg_weight = cfg_weight
+        self._telephony = sample_rate == TELEPHONY_PIPELINE_RATE
         self._cache = cache or {}
         self._infer_lock = asyncio.Lock()
         _load_model(self._device)
@@ -258,6 +267,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
                         exaggeration=self._exaggeration,
                         cfg_weight=self._cfg_weight,
                         sample_rate=self.sample_rate,
+                        telephony=self._telephony,
                     ),
                 )
             if self.speech_is_cancelled():

@@ -4,6 +4,7 @@ from app.speech_renderer import (
     normalize_spoken_text,
     prepare_for_speech,
     render_speech,
+    render_speech_telephony,
     split_spoken_sentences,
 )
 
@@ -54,6 +55,24 @@ def test_render_speech_no_paragraph_chunks():
     )
     assert chunks
     assert all(len(c.text.split()) <= 14 for c in chunks)
+
+
+def test_render_speech_telephony_single_chunk():
+    greeting = (
+        "Hi, this is Alex calling on a recorded line. "
+        "How are you today? I'm calling about your Medicare plan."
+    )
+    chunks = render_speech_telephony(greeting)
+    assert len(chunks) == 1
+    assert chunks[0].pause_after_ms == 0
+    assert "Medicare" in chunks[0].text
+
+
+def test_render_speech_telephony_no_micro_pauses():
+    chunks = render_speech("Hi. How are you? Great.", pause_min_ms=400, pause_max_ms=700)
+    assert any(c.pause_after_ms > 0 for c in chunks)
+    phone = render_speech_telephony("Hi. How are you? Great.")
+    assert all(c.pause_after_ms == 0 for c in phone)
 
 
 def test_written_to_spoken_rewrite():

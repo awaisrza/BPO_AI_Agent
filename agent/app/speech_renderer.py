@@ -193,11 +193,46 @@ def render_speech(
     return chunks
 
 
-def iter_chunk_texts(texts: Iterable[str], **kwargs) -> list[str]:
+def render_speech_telephony(text: str, *, max_words: int = 40) -> list[SpeechChunk]:
+    """PSTN mode: one (or two) continuous TTS calls so Chatterbox keeps natural prosody."""
+    spoken = normalize_spoken_text(text)
+    if not spoken:
+        return []
+
+    words = spoken.split()
+    if len(words) <= max_words:
+        return [SpeechChunk(text=spoken, pause_after_ms=0)]
+
+    # Long off-script reply: split at sentence boundaries only, no artificial pauses.
+    sentences = split_spoken_sentences(spoken, max_words=max(14, max_words // 2))
+    chunks: list[SpeechChunk] = []
+    batch: list[str] = []
+    batch_words = 0
+    for sentence in sentences:
+        count = len(sentence.split())
+        if batch and batch_words + count > max_words:
+            chunks.append(SpeechChunk(text=" ".join(batch), pause_after_ms=0))
+            batch = [sentence]
+            batch_words = count
+        else:
+            batch.append(sentence)
+            batch_words += count
+    if batch:
+        chunks.append(SpeechChunk(text=" ".join(batch), pause_after_ms=0))
+    return chunks
+
+
+def iter_chunk_texts(texts: Iterable[str], *, telephony: bool = False, **kwargs) -> list[str]:
     """Flatten script lines into unique chunk texts (for TTS warm-cache)."""
     seen: set[str] = set()
     out: list[str] = []
     for text in texts:
+        if telephony:
+            line = normalize_spoken_text(text)
+            if line and line not in seen:
+                seen.add(line)
+                out.append(line)
+            continue
         for chunk in render_speech(text, **kwargs):
             line = chunk.text.strip()
             if line and line not in seen:
@@ -251,12 +286,16 @@ if PIPECAT_AVAILABLE:
             max_words: int = 14,
             pause_min_ms: int = 400,
             pause_max_ms: int = 700,
+            telephony: bool = False,
+            telephony_max_words: int = 40,
         ):
             super().__init__()
             self._controller = controller
             self._max_words = max_words
             self._pause_min_ms = pause_min_ms
             self._pause_max_ms = pause_max_ms
+            self._telephony = telephony
+            self._telephony_max_words = telephony_max_words
             self._cancel_stream = False
 
         async def process_frame(self, frame, direction):  # type: ignore[override]
@@ -275,12 +314,18 @@ if PIPECAT_AVAILABLE:
 
             if isinstance(frame, TTSSpeakFrame) and frame.text.strip():
                 self._cancel_stream = False
-                chunks = render_speech(
-                    frame.text,
-                    max_words=self._max_words,
-                    pause_min_ms=self._pause_min_ms,
-                    pause_max_ms=self._pause_max_ms,
-                )
+                if self._telephony:
+                    chunks = render_speech_telephony(
+                        frame.text,
+                        max_words=self._telephony_max_words,
+                    )
+                else:
+                    chunks = render_speech(
+                        frame.text,
+                        max_words=self._max_words,
+                        pause_min_ms=self._pause_min_ms,
+                        pause_max_ms=self._pause_max_ms,
+                    )
                 if not chunks:
                     return
 

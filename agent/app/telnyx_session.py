@@ -83,6 +83,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             script=script,
             mic_test=True,
             sample_rate=sample_rate,
+            telephony=True,
         )
 
         worker_kwargs = {

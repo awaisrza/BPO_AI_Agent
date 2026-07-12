@@ -116,6 +116,10 @@ class Settings(BaseModel):
     chatterbox_cfg_weight: float = Field(
         default_factory=lambda: float(os.getenv("CHATTERBOX_CFG_WEIGHT", "0.5") or "0.5")
     )
+    chatterbox_norm_loudness: bool = Field(
+        default_factory=lambda: os.getenv("CHATTERBOX_NORM_LOUDNESS", "true").strip().lower()
+        in ("1", "true", "yes")
+    )
 
     speech_max_words: int = Field(
         default_factory=lambda: int(os.getenv("SPEECH_MAX_WORDS", "14") or "14")
@@ -125,6 +129,30 @@ class Settings(BaseModel):
     )
     speech_pause_max_ms: int = Field(
         default_factory=lambda: int(os.getenv("SPEECH_PAUSE_MAX_MS", "700") or "700")
+    )
+
+    # Phone/PSTN — shorter pauses + slightly longer phrases (sounds like live speech, not bullet points)
+    telephony_speech_max_words: int = Field(
+        default_factory=lambda: int(os.getenv("TELEPHONY_SPEECH_MAX_WORDS", "16") or "16")
+    )
+    telephony_pause_min_ms: int = Field(
+        default_factory=lambda: int(os.getenv("TELEPHONY_PAUSE_MIN_MS", "120") or "120")
+    )
+    telephony_pause_max_ms: int = Field(
+        default_factory=lambda: int(os.getenv("TELEPHONY_PAUSE_MAX_MS", "220") or "220")
+    )
+    telephony_chatterbox_exaggeration: float = Field(
+        default_factory=lambda: float(os.getenv("TELEPHONY_CHATTERBOX_EXAGGERATION", "0.5") or "0.5")
+    )
+    telephony_chatterbox_cfg_weight: float = Field(
+        default_factory=lambda: float(os.getenv("TELEPHONY_CHATTERBOX_CFG_WEIGHT", "0.4") or "0.4")
+    )
+    telephony_single_utterance: bool = Field(
+        default_factory=lambda: os.getenv("TELEPHONY_SINGLE_UTTERANCE", "true").strip().lower()
+        in ("1", "true", "yes")
+    )
+    telephony_utterance_max_words: int = Field(
+        default_factory=lambda: int(os.getenv("TELEPHONY_UTTERANCE_MAX_WORDS", "40") or "40")
     )
 
     vicidial_base_url: str = Field(default_factory=lambda: os.getenv("VICIDIAL_BASE_URL", ""))
