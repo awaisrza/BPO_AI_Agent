@@ -71,13 +71,41 @@ def _public_base() -> str:
 def _texml_for_stream() -> str:
     stream_status = f"{_public_base()}/stream-status"
     ws_url = _websocket_url()
+    # Connect keeps the call alive until the WebSocket media path is up (Start can drop early).
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Start>
-    <Stream url="{ws_url}" bidirectionalMode="rtp" bidirectionalCodec="PCMU" bidirectionalSamplingRate="16000" statusCallback="{stream_status}" statusCallbackMethod="POST"/>
-  </Start>
+  <Connect>
+    <Stream url="{ws_url}" bidirectionalMode="rtp" bidirectionalCodec="PCMU" statusCallback="{stream_status}" statusCallbackMethod="POST"/>
+  </Connect>
   <Pause length="120"/>
 </Response>"""
+
+
+def _log_greeting_cache(script: ScriptConfig) -> None:
+    """Warn if the opening line is not pre-cached (Telnyx hangs up after ~3s silence)."""
+    try:
+        from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
+        from .pipeline import _cached_tts
+        from .speech_renderer import render_speech_telephony
+
+        tts = _cached_tts.get((TELEPHONY_PIPELINE_RATE, True))
+        cache = getattr(tts, "_cache", None) if tts else None
+        if not cache:
+            _event("WARNING: TTS cache empty — first speech may take 3-5s (call may drop)")
+            return
+        chunks = render_speech_telephony(script.greeting)
+        for idx, chunk in enumerate(chunks, start=1):
+            hit = chunk.text.strip() in cache
+            _event(
+                f"Greeting chunk {idx} cache={'HIT' if hit else 'MISS'}: {chunk.text[:72]!r}"
+            )
+            if not hit:
+                _event(
+                    "WARNING: cache MISS on greeting — Telnyx may hang up before bot speaks. "
+                    "Wait for pre-warm to finish before dialing."
+                )
+    except Exception as exc:
+        _event(f"Greeting cache check skipped: {exc}")
 
 
 def _place_telnyx_call(*, to_number: str, from_number: str, answer_url: str) -> dict:
@@ -214,6 +242,7 @@ def run_telnyx_server(
         from .pipeline import prewarm_voice_stack
 
         prewarm_voice_stack(script, sample_rate=TELEPHONY_PIPELINE_RATE, telephony=True)
+        _log_greeting_cache(script)
     except Exception:
         from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
         from .pipeline import _build_stt, _build_tts
@@ -242,6 +271,10 @@ def run_telnyx_server(
             try:
                 pub = httpx.get(answer_url, timeout=10.0)
                 _event(f"=== PUBLIC /answer status={pub.status_code} body={pub.text[:120]!r} ===")
+                ws_url = _websocket_url()
+                if "Connect" not in pub.text and "Stream" not in pub.text:
+                    _event("WARNING: /answer TeXML missing Connect/Stream")
+                _event(f"=== EXPECT WS URL: {ws_url} ===")
             except Exception as exc:
                 _event(f"=== PUBLIC /answer FAILED: {exc} ===")
             result = _place_telnyx_call(

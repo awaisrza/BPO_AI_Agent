@@ -105,11 +105,11 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(_transport, _client) -> None:
-            _event("=== MEDIA READY — greeting should play ===")
+            _event("=== MEDIA READY — greeting should play within 1s ===")
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client) -> None:
-            _event("=== CALL ENDED ===")
+            _event("=== CALL ENDED (remote hung up or stream closed) ===")
             await worker.cancel()
 
         _event("=== STARTING RUNNER ===")

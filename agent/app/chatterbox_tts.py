@@ -12,7 +12,7 @@ from loguru import logger
 from .audio_resample import enhance_for_telephony, resample_pcm16
 from .config import settings
 from .chatterbox_paths import resolve_chatterbox_device, resolve_chatterbox_reference
-from .speech_renderer import SpokenChunkFrame
+from .speech_renderer import SpokenChunkFrame, silence_pcm
 from .tts_spoken_chunk import SpokenChunkTTSSupport, handle_spoken_chunk_frame
 
 try:
@@ -221,7 +221,24 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
         self._cache = cache or {}
         self._infer_lock = asyncio.Lock()
         self._prefetch_tasks: set[asyncio.Task] = set()
+        self._comfort_sent = False
         _load_model(self._device)
+
+    async def _push_comfort_silence(self, direction) -> None:
+        """Telnyx drops calls after ~3s with no outbound RTP — send silence while TTS starts."""
+        if self._comfort_sent or not self._telephony:
+            return
+        self._comfort_sent = True
+        pcm = silence_pcm(600, self.sample_rate)
+        for chunk in _chunk_pcm(pcm, self.sample_rate):
+            await self.push_frame(
+                TTSAudioRawFrame(
+                    audio=chunk,
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                ),
+                direction,
+            )
 
     async def prefetch_line(self, text: str) -> None:
         """Synthesize upcoming speech while the caller hears the current line."""
@@ -281,6 +298,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
         try:
             cached = self._cache.get(text.strip())
             if cached is not None:
+                logger.info(f"Chatterbox cache HIT: {text[:48]!r}")
                 await self.stop_ttfb_metrics()
                 for chunk in _chunk_pcm(cached, self.sample_rate):
                     if self.speech_is_cancelled():
@@ -295,6 +313,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
                 return
 
             loop = asyncio.get_running_loop()
+            logger.info(f"Chatterbox cache MISS (GPU synth ~3-5s): {text[:48]!r}")
             async with self._infer_lock:
                 if self.speech_is_cancelled():
                     return
