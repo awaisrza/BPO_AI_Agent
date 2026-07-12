@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from loguru import logger
 
+from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
 from .config import ScriptConfig, settings
 from .pipeline import build_pipeline
 
@@ -42,7 +43,7 @@ async def run_twilio_call(websocket, script: ScriptConfig, agent_user: str) -> N
         ),
     )
 
-    sample_rate = 8000
+    sample_rate = TELEPHONY_PIPELINE_RATE
     pipeline = build_pipeline(
         transport,
         agent_user=agent_user,

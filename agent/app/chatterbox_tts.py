@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import audioop
 import threading
 from collections.abc import AsyncGenerator, Iterable
 from pathlib import Path
 
 from loguru import logger
 
+from .audio_resample import normalize_pcm16, resample_pcm16
 from .chatterbox_paths import resolve_chatterbox_device, resolve_chatterbox_reference
 from .speech_renderer import SpokenChunkFrame
 from .tts_spoken_chunk import SpokenChunkTTSSupport, handle_spoken_chunk_frame
@@ -28,12 +28,9 @@ _model_lock = threading.Lock()
 _shared_model = None
 _shared_device: str | None = None
 
-
-def _resample_pcm(pcm: bytes, src_rate: int, dst_rate: int) -> bytes:
-    if src_rate == dst_rate or not pcm:
-        return pcm
-    converted, _ = audioop.ratecv(pcm, 2, 1, src_rate, dst_rate, None)
-    return converted
+# Telephony (Telnyx PCMU) is 8 kHz on the wire; run the pipeline at 16 kHz and let
+# Pipecat's Telnyx serializer downsample once. Matches test_chatterbox.py clarity.
+TELEPHONY_PIPELINE_RATE = 16000
 
 
 def _chunk_pcm(pcm: bytes, chunk_bytes: int = 3200) -> Iterable[bytes]:
@@ -132,7 +129,7 @@ def _tensor_to_pcm16(wav, src_rate: int, dst_rate: int) -> bytes:
         .numpy()
         .tobytes()
     )
-    return _resample_pcm(pcm, src_rate, dst_rate)
+    return resample_pcm16(pcm, src_rate, dst_rate)
 
 
 def synthesize_pcm_sync(
@@ -153,7 +150,7 @@ def synthesize_pcm_sync(
             cfg_weight=cfg_weight,
             norm_loudness=False,
         )
-    return _tensor_to_pcm16(wav, int(model.sr), sample_rate)
+    return normalize_pcm16(_tensor_to_pcm16(wav, int(model.sr), sample_rate))
 
 
 def warm_chatterbox_cache_sync(

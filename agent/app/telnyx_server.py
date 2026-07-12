@@ -74,7 +74,7 @@ def _texml_for_stream() -> str:
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="{ws_url}" bidirectionalMode="rtp" bidirectionalCodec="PCMU" statusCallback="{stream_status}" statusCallbackMethod="POST"></Stream>
+    <Stream url="{ws_url}" bidirectionalMode="rtp" bidirectionalCodec="PCMU" bidirectionalSamplingRate="16000" statusCallback="{stream_status}" statusCallbackMethod="POST"></Stream>
   </Connect>
   <Pause length="120"/>
 </Response>"""
@@ -210,14 +210,16 @@ def run_telnyx_server(
 
     _event("Pre-warming voice stack (Chatterbox + Whisper)...")
     try:
+        from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
         from .pipeline import prewarm_voice_stack
 
-        prewarm_voice_stack(script, sample_rate=8000)
+        prewarm_voice_stack(script, sample_rate=TELEPHONY_PIPELINE_RATE)
     except Exception:
+        from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
         from .pipeline import _build_stt, _build_tts
 
         _build_stt()
-        _build_tts(script=script, sample_rate=8000)
+        _build_tts(script=script, sample_rate=TELEPHONY_PIPELINE_RATE)
     _event("Pre-warm complete.")
 
     app = create_telnyx_app(script, agent_user)

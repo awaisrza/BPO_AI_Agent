@@ -8,6 +8,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
 from .config import ScriptConfig, settings
 from .pipeline import build_pipeline
 
@@ -74,8 +75,8 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             ),
         )
 
-        sample_rate = 8000
-        _event("=== BUILDING PIPELINE ===")
+        sample_rate = TELEPHONY_PIPELINE_RATE
+        _event(f"=== BUILDING PIPELINE (sample_rate={sample_rate}) ===")
         pipeline = build_pipeline(
             transport,
             agent_user=agent_user,
