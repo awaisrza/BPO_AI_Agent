@@ -268,8 +268,16 @@ def run_telnyx_server(
         try:
             _wait_for_health(port)
             answer_url = f"{settings.local_server_url.rstrip('/')}/answer"
+            local_answer = f"http://127.0.0.1:{port}/answer"
             try:
-                pub = httpx.get(answer_url, timeout=10.0)
+                local = httpx.get(local_answer, timeout=3.0)
+                _event(f"=== LOCAL /answer status={local.status_code} ===")
+            except Exception as exc:
+                _event(f"=== LOCAL /answer FAILED: {exc} ===")
+                print("Server not responding locally — aborting dial.")
+                return
+            try:
+                pub = httpx.get(answer_url, timeout=20.0)
                 _event(f"=== PUBLIC /answer status={pub.status_code} body={pub.text[:120]!r} ===")
                 ws_url = _websocket_url()
                 if "Connect" not in pub.text and "Stream" not in pub.text:
@@ -277,6 +285,13 @@ def run_telnyx_server(
                 _event(f"=== EXPECT WS URL: {ws_url} ===")
             except Exception as exc:
                 _event(f"=== PUBLIC /answer FAILED: {exc} ===")
+                print(
+                    "\n*** NGROK TUNNEL NOT REACHABLE ***\n"
+                    "Restart ngrok, copy the new https URL into agent/.env.local "
+                    "(LOCAL_SERVER_URL=...), then restart run_telnyx.py.\n"
+                    "Dial aborted to avoid a silent call with no media.\n"
+                )
+                return
             result = _place_telnyx_call(
                 to_number=dial_to,
                 from_number=from_number,
