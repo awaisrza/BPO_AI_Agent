@@ -57,15 +57,21 @@ def test_render_speech_no_paragraph_chunks():
     assert all(len(c.text.split()) <= 14 for c in chunks)
 
 
-def test_render_speech_telephony_single_chunk():
+def test_render_speech_telephony_lead_sentence_first():
     greeting = (
         "Hi, this is Alex calling on a recorded line. "
         "How are you today? I'm calling about your Medicare plan."
     )
     chunks = render_speech_telephony(greeting)
-    assert len(chunks) == 1
+    assert len(chunks) >= 2
     assert chunks[0].pause_after_ms == 0
-    assert "Medicare" in chunks[0].text
+    assert "Hi" in chunks[0].text
+    assert all(c.pause_after_ms == 0 for c in chunks)
+
+
+def test_render_speech_telephony_single_sentence():
+    chunks = render_speech_telephony("Thanks for your time.")
+    assert len(chunks) == 1
 
 
 def test_render_speech_telephony_no_micro_pauses():

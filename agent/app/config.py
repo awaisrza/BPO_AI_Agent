@@ -142,10 +142,10 @@ class Settings(BaseModel):
         default_factory=lambda: int(os.getenv("TELEPHONY_PAUSE_MAX_MS", "220") or "220")
     )
     telephony_chatterbox_exaggeration: float = Field(
-        default_factory=lambda: float(os.getenv("TELEPHONY_CHATTERBOX_EXAGGERATION", "0.5") or "0.5")
+        default_factory=lambda: float(os.getenv("TELEPHONY_CHATTERBOX_EXAGGERATION", "0.6") or "0.6")
     )
     telephony_chatterbox_cfg_weight: float = Field(
-        default_factory=lambda: float(os.getenv("TELEPHONY_CHATTERBOX_CFG_WEIGHT", "0.4") or "0.4")
+        default_factory=lambda: float(os.getenv("TELEPHONY_CHATTERBOX_CFG_WEIGHT", "0.32") or "0.32")
     )
     telephony_single_utterance: bool = Field(
         default_factory=lambda: os.getenv("TELEPHONY_SINGLE_UTTERANCE", "true").strip().lower()

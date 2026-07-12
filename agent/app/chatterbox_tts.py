@@ -32,9 +32,12 @@ _shared_device: str | None = None
 # Telephony (Telnyx PCMU) is 8 kHz on the wire; run the pipeline at 16 kHz and let
 # Pipecat's Telnyx serializer downsample once. Matches test_chatterbox.py clarity.
 TELEPHONY_PIPELINE_RATE = 16000
+# 20 ms frames — smoother Telnyx streaming (less perceived buffering).
+STREAM_FRAME_MS = 20
 
 
-def _chunk_pcm(pcm: bytes, chunk_bytes: int = 3200) -> Iterable[bytes]:
+def _chunk_pcm(pcm: bytes, sample_rate: int = TELEPHONY_PIPELINE_RATE) -> Iterable[bytes]:
+    chunk_bytes = max(2, sample_rate * 2 * STREAM_FRAME_MS // 1000)
     for offset in range(0, len(pcm), chunk_bytes):
         yield pcm[offset : offset + chunk_bytes]
 
@@ -217,7 +220,42 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
         self._telephony = sample_rate == TELEPHONY_PIPELINE_RATE
         self._cache = cache or {}
         self._infer_lock = asyncio.Lock()
+        self._prefetch_tasks: set[asyncio.Task] = set()
         _load_model(self._device)
+
+    async def prefetch_line(self, text: str) -> None:
+        """Synthesize upcoming speech while the caller hears the current line."""
+        line = text.strip()
+        if not line or line in self._cache:
+            return
+        loop = asyncio.get_running_loop()
+        try:
+            async with self._infer_lock:
+                if line in self._cache:
+                    return
+                pcm = await loop.run_in_executor(
+                    None,
+                    lambda: synthesize_pcm_sync(
+                        text=line,
+                        reference_path=self._reference,
+                        device=self._device,
+                        exaggeration=self._exaggeration,
+                        cfg_weight=self._cfg_weight,
+                        sample_rate=self.sample_rate,
+                        telephony=self._telephony,
+                    ),
+                )
+                self._cache[line] = pcm
+                logger.debug(f"Chatterbox prefetched: {line[:48]!r}")
+        except Exception as exc:
+            logger.warning(f"Chatterbox prefetch failed ({line[:32]!r}…): {exc}")
+
+    def _start_prefetch(self, text: str) -> None:
+        if not text.strip():
+            return
+        task = asyncio.create_task(self.prefetch_line(text))
+        self._prefetch_tasks.add(task)
+        task.add_done_callback(self._prefetch_tasks.discard)
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -227,6 +265,8 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             await super().process_frame(frame, direction)
             return
         if isinstance(frame, SpokenChunkFrame):
+            if frame.prefetch_text:
+                self._start_prefetch(frame.prefetch_text)
             await handle_spoken_chunk_frame(
                 self,
                 frame,
@@ -242,7 +282,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             cached = self._cache.get(text.strip())
             if cached is not None:
                 await self.stop_ttfb_metrics()
-                for chunk in _chunk_pcm(cached):
+                for chunk in _chunk_pcm(cached, self.sample_rate):
                     if self.speech_is_cancelled():
                         return
                     yield TTSAudioRawFrame(
@@ -273,7 +313,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             if self.speech_is_cancelled():
                 return
             await self.stop_ttfb_metrics()
-            for chunk in _chunk_pcm(pcm):
+            for chunk in _chunk_pcm(pcm, self.sample_rate):
                 if self.speech_is_cancelled():
                     return
                 yield TTSAudioRawFrame(

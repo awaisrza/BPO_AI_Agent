@@ -194,32 +194,27 @@ def render_speech(
 
 
 def render_speech_telephony(text: str, *, max_words: int = 40) -> list[SpeechChunk]:
-    """PSTN mode: one (or two) continuous TTS calls so Chatterbox keeps natural prosody."""
+    """PSTN: lead sentence first (cached/instant), remainder prefetched while speaking."""
     spoken = normalize_spoken_text(text)
     if not spoken:
         return []
 
-    words = spoken.split()
-    if len(words) <= max_words:
+    sentences = split_spoken_sentences(spoken, max_words=18)
+    if len(sentences) <= 1:
         return [SpeechChunk(text=spoken, pause_after_ms=0)]
 
-    # Long off-script reply: split at sentence boundaries only, no artificial pauses.
-    sentences = split_spoken_sentences(spoken, max_words=max(14, max_words // 2))
-    chunks: list[SpeechChunk] = []
-    batch: list[str] = []
-    batch_words = 0
-    for sentence in sentences:
-        count = len(sentence.split())
-        if batch and batch_words + count > max_words:
-            chunks.append(SpeechChunk(text=" ".join(batch), pause_after_ms=0))
-            batch = [sentence]
-            batch_words = count
-        else:
-            batch.append(sentence)
-            batch_words += count
-    if batch:
-        chunks.append(SpeechChunk(text=" ".join(batch), pause_after_ms=0))
-    return chunks
+    first = sentences[0]
+    rest = " ".join(sentences[1:])
+    if len(rest.split()) > max_words:
+        rest_parts = split_spoken_sentences(rest, max_words=max_words)
+        chunks = [SpeechChunk(text=first, pause_after_ms=0)]
+        chunks.extend(SpeechChunk(text=part, pause_after_ms=0) for part in rest_parts)
+        return chunks
+
+    return [
+        SpeechChunk(text=first, pause_after_ms=0),
+        SpeechChunk(text=rest, pause_after_ms=0),
+    ]
 
 
 def iter_chunk_texts(texts: Iterable[str], *, telephony: bool = False, **kwargs) -> list[str]:
@@ -229,9 +224,13 @@ def iter_chunk_texts(texts: Iterable[str], *, telephony: bool = False, **kwargs)
     for text in texts:
         if telephony:
             line = normalize_spoken_text(text)
-            if line and line not in seen:
-                seen.add(line)
-                out.append(line)
+            candidates = [line] if line else []
+            candidates.extend(split_spoken_sentences(line, max_words=18) if line else [])
+            for candidate in candidates:
+                part = candidate.strip()
+                if part and part not in seen:
+                    seen.add(part)
+                    out.append(part)
             continue
         for chunk in render_speech(text, **kwargs):
             line = chunk.text.strip()
@@ -255,6 +254,7 @@ if PIPECAT_AVAILABLE:
         text: str
         pause_after_ms: int = 0
         reset_barge_in: bool = False
+        prefetch_text: str = ""
 
     class BargeInProcessor(FrameProcessor):  # type: ignore[misc]
         """Emit ``InterruptionFrame`` when the caller speaks over the bot."""
@@ -334,11 +334,13 @@ if PIPECAT_AVAILABLE:
                 for idx, chunk in enumerate(chunks):
                     if self._cancel_stream:
                         break
+                    prefetch = chunks[idx + 1].text if idx + 1 < len(chunks) else ""
                     await self.push_frame(
                         SpokenChunkFrame(
                             text=chunk.text,
                             pause_after_ms=chunk.pause_after_ms,
                             reset_barge_in=(idx == 0),
+                            prefetch_text=prefetch,
                         ),
                         direction,
                     )
