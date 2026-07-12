@@ -25,11 +25,24 @@ def test_opens_with_greeting():
     assert turn.action == Action.SPEAK
 
 
-def test_immediate_not_interested_hangs_up():
+def test_not_interested_soft_rebuttal_then_hangup():
     e = make_engine()
     e.open()
-    turn = e.handle("no, not interested")
-    assert turn.action == Action.HANGUP
+    turn = e.handle("not interested")
+    assert turn.action == Action.SPEAK
+    assert "eligibility" in turn.reply.lower()
+    turn2 = e.handle("no stop calling")
+    assert turn2.action == Action.HANGUP
+
+
+def test_unclear_during_qualify_repeats_question():
+    e = make_engine()
+    e.open()
+    e.handle("ok")
+    e.handle("yes")
+    turn = e.handle("wow")
+    assert turn.action == Action.SPEAK
+    assert turn.reply == "Do you own your home?"
 
 
 def test_qualified_lead_transfers():
@@ -45,8 +58,7 @@ def test_qualified_lead_transfers():
 def test_unqualified_lead_ends():
     e = make_engine()
     e.open()
-    e.handle("ok")                 # enter QUALIFY
-    e.handle("hmm")                # ask q1, unclear
-    e.handle("hmm")                # ask q2, unclear
-    turn = e.handle("hmm")         # not qualified
+    e.handle("ok")
+    e.handle("no")
+    turn = e.handle("no, not interested")
     assert turn.action == Action.HANGUP

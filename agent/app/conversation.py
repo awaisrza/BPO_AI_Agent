@@ -75,6 +75,25 @@ class ConversationEngine:
     _positives: int = 0
     _negatives: int = 0
 
+    def _objection_reply(self, utterance: str) -> str:
+        """One soft rebuttal before hangup — KB/Gemini first, then default."""
+        if self.answer_offscript is not None:
+            reply = self.answer_offscript(utterance, "objection")
+            if reply:
+                return reply
+        return (
+            "I totally get that — it's just a quick eligibility check. "
+            "Takes about thirty seconds, fair enough?"
+        )
+
+    def _repeat_current_qualifier(self) -> Turn:
+        """Don't advance the script when the caller didn't really answer."""
+        questions = self.script.qualifying_questions
+        if not questions:
+            return Turn("Sorry, could you repeat that?", Action.SPEAK)
+        idx = max(0, self._qualify_idx - 1)
+        return Turn(questions[idx], Action.SPEAK)
+
     def open(self) -> Turn:
         """First thing the bot says when the call connects."""
         self.state = State.PITCH
@@ -86,9 +105,10 @@ class ConversationEngine:
 
         if intent == Intent.NEGATIVE:
             self._negatives += 1
-            if self._negatives >= 2 or self.state in (State.GREETING, State.PITCH):
+            if self._negatives >= 2:
                 self.state = State.END
                 return Turn(self.script.not_interested_line, Action.HANGUP)
+            return Turn(self._objection_reply(utterance), Action.SPEAK)
 
         if intent == Intent.QUESTION and self.answer_offscript is not None:
             answer = self.answer_offscript(utterance, self.state.value)
@@ -102,7 +122,8 @@ class ConversationEngine:
         if self.state == State.QUALIFY:
             if intent == Intent.POSITIVE:
                 self._positives += 1
-            return self._next_qualifier()
+                return self._next_qualifier()
+            return self._repeat_current_qualifier()
 
         if self.state == State.TRANSFER:
             return Turn(self.script.transfer_line, Action.TRANSFER)
