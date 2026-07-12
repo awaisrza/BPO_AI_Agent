@@ -22,6 +22,7 @@ try:
         TTSSpeakFrame,
         UserStartedSpeakingFrame,
         VADUserStartedSpeakingFrame,
+        VADUserStoppedSpeakingFrame,
     )
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -266,13 +267,23 @@ if PIPECAT_AVAILABLE:
         async def process_frame(self, frame, direction):  # type: ignore[override]
             await super().process_frame(frame, direction)
 
-            if isinstance(frame, (VADUserStartedSpeakingFrame, UserStartedSpeakingFrame)):
+            if isinstance(frame, VADUserStartedSpeakingFrame):
+                logger.info("VAD: caller started speaking")
                 if self._controller.should_interrupt():
                     logger.info("Barge-in: caller speaking over bot — stopping TTS")
                     self._controller.on_interruption()
                     await self.push_frame(InterruptionFrame(), direction)
                 else:
                     self._controller.on_listening()
+            elif isinstance(frame, UserStartedSpeakingFrame):
+                if self._controller.should_interrupt():
+                    logger.info("Barge-in: caller speaking over bot — stopping TTS")
+                    self._controller.on_interruption()
+                    await self.push_frame(InterruptionFrame(), direction)
+                else:
+                    self._controller.on_listening()
+            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+                logger.info("VAD: caller stopped speaking — sending audio to STT")
 
             await self.push_frame(frame, direction)
 

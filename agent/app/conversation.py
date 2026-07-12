@@ -40,7 +40,24 @@ class Intent(str, Enum):
 Classifier = Callable[[str, str], Intent]
 
 
-_POSITIVE = {"yes", "yeah", "yep", "sure", "ok", "okay", "correct", "i do", "interested", "go ahead"}
+_POSITIVE = {
+    "yes",
+    "yeah",
+    "yep",
+    "sure",
+    "ok",
+    "okay",
+    "correct",
+    "i do",
+    "interested",
+    "go ahead",
+    "fine",
+    "good",
+    "well",
+    "doing well",
+    "i'm fine",
+    "im fine",
+}
 _NEGATIVE = {"no", "nope", "not interested", "stop", "remove me", "don't call", "busy", "later"}
 
 

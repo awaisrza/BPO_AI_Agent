@@ -13,6 +13,7 @@ def make_engine() -> ConversationEngine:
 
 def test_heuristic_classifier():
     assert heuristic_classifier("yes I do") == Intent.POSITIVE
+    assert heuristic_classifier("I'm fine") == Intent.POSITIVE
     assert heuristic_classifier("not interested") == Intent.NEGATIVE
     assert heuristic_classifier("how much does it cost?") == Intent.QUESTION
     assert heuristic_classifier("") == Intent.UNCLEAR

@@ -37,6 +37,7 @@ try:
     from pipecat.audio.vad.vad_analyzer import VADParams
     from pipecat.frames.frames import (
         AudioRawFrame,
+        BotStoppedSpeakingFrame,
         EndFrame,
         InputAudioRawFrame,
         InterimTranscriptionFrame,
@@ -99,13 +100,21 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if isinstance(frame, InterimTranscriptionFrame):
             return
 
+        if isinstance(frame, BotStoppedSpeakingFrame):
+            self._call.on_bot_stopped()
+            logger.info("Bot finished speaking — listening for caller")
+            await self.push_frame(frame, direction)
+            return
+
         if isinstance(frame, (EndFrame, SystemFrame)):
             await self.push_frame(frame, direction)
             return
 
         if isinstance(frame, TranscriptionFrame) and frame.text:
             if self._call.state == CallState.SPEAKING and not self._call.interrupted:
-                logger.debug("Ignoring caller text while bot is speaking")
+                logger.info(
+                    f"STT heard caller but bot still marked speaking — dropping: {frame.text[:64]!r}"
+                )
                 return
 
             text = frame.text.strip()
@@ -221,18 +230,43 @@ def _require_api_keys() -> None:
         )
 
 
-def _build_stt():
+def _telephony_vad_params() -> VADParams:
+    """PSTN audio is quieter and noisier than a laptop mic — relax Silero thresholds."""
+    return VADParams(
+        confidence=0.55,
+        start_secs=0.2,
+        stop_secs=0.9,
+        min_volume=0.35,
+    )
+
+
+def _build_vad(*, telephony: bool = False) -> VADProcessor:
+    params = _telephony_vad_params() if telephony else VADParams(stop_secs=0.5)
+    return VADProcessor(
+        vad_analyzer=SileroVADAnalyzer(params=params),
+        audio_idle_timeout=2.0 if telephony else 1.0,
+    )
+
+
+def _build_stt(*, telephony: bool = False):
     if _is_local_gpu_backend():
         from pipecat.services.whisper.stt import WhisperSTTService
+        from pipecat.transcriptions.language import Language
 
+        no_speech_prob = 0.65 if telephony else 0.4
         logger.info(
             f"STT: faster-whisper ({settings.whisper_model}, "
-            f"device={settings.whisper_device}, compute={settings.whisper_compute_type})"
+            f"device={settings.whisper_device}, compute={settings.whisper_compute_type}, "
+            f"telephony={telephony}, no_speech_prob={no_speech_prob})"
         )
         return WhisperSTTService(
             device=settings.whisper_device,
             compute_type=settings.whisper_compute_type,
-            settings=WhisperSTTService.Settings(model=settings.whisper_model),
+            settings=WhisperSTTService.Settings(
+                model=settings.whisper_model,
+                language=Language.EN,
+                no_speech_prob=no_speech_prob,
+            ),
         )
 
     logger.info("STT: Deepgram Nova-3")
@@ -328,7 +362,7 @@ def prewarm_voice_stack(
     logger.info(
         f"Pre-warming voice stack (sample_rate={sample_rate}, telephony={telephony})..."
     )
-    _cached_stt = _build_stt()
+    _cached_stt = _build_stt(telephony=telephony)
     _cached_tts[(sample_rate, telephony)] = _build_tts(
         script=script, sample_rate=sample_rate, telephony=telephony
     )
@@ -368,11 +402,11 @@ def build_pipeline(
     mode = "telephony" if telephony else "local"
     logger.info(f"Voice backend: {backend} ({mode}, {sample_rate} Hz)")
 
-    stt = _cached_stt or _build_stt()
+    stt = _cached_stt or _build_stt(telephony=telephony)
     tts = _cached_tts.get((sample_rate, telephony)) or _build_tts(
         script=script, sample_rate=sample_rate, telephony=telephony
     )
-    vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)))
+    vad = _build_vad(telephony=telephony)
 
     engine = ConversationEngine(
         script=script,

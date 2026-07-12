@@ -247,7 +247,7 @@ def run_telnyx_server(
         from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
         from .pipeline import _build_stt, _build_tts
 
-        _build_stt()
+        _build_stt(telephony=True)
         _build_tts(script=script, sample_rate=TELEPHONY_PIPELINE_RATE, telephony=True)
     _event("Pre-warm complete.")
 
