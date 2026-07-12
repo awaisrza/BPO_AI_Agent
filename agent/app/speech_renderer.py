@@ -260,28 +260,31 @@ if PIPECAT_AVAILABLE:
     class BargeInProcessor(FrameProcessor):  # type: ignore[misc]
         """Emit ``InterruptionFrame`` when the caller speaks over the bot."""
 
-        def __init__(self, controller: CallController):
+        def __init__(self, controller: CallController, *, telephony: bool = False):
             super().__init__()
             self._controller = controller
+            self._telephony = telephony
+
+        async def _on_caller_started(self, frame, direction) -> None:  # type: ignore[no-untyped-def]
+            if self._controller.should_interrupt():
+                if self._telephony:
+                    # PSTN echo often triggers false barge-in; let the bot finish the line.
+                    logger.info("VAD: caller speech during bot playback (telephony — no barge-in)")
+                    return
+                logger.info("Barge-in: caller speaking over bot — stopping TTS")
+                self._controller.on_interruption()
+                await self.push_frame(InterruptionFrame(), direction)
+            else:
+                self._controller.on_listening()
 
         async def process_frame(self, frame, direction):  # type: ignore[override]
             await super().process_frame(frame, direction)
 
             if isinstance(frame, VADUserStartedSpeakingFrame):
                 logger.info("VAD: caller started speaking")
-                if self._controller.should_interrupt():
-                    logger.info("Barge-in: caller speaking over bot — stopping TTS")
-                    self._controller.on_interruption()
-                    await self.push_frame(InterruptionFrame(), direction)
-                else:
-                    self._controller.on_listening()
+                await self._on_caller_started(frame, direction)
             elif isinstance(frame, UserStartedSpeakingFrame):
-                if self._controller.should_interrupt():
-                    logger.info("Barge-in: caller speaking over bot — stopping TTS")
-                    self._controller.on_interruption()
-                    await self.push_frame(InterruptionFrame(), direction)
-                else:
-                    self._controller.on_listening()
+                await self._on_caller_started(frame, direction)
             elif isinstance(frame, VADUserStoppedSpeakingFrame):
                 logger.info("VAD: caller stopped speaking — sending audio to STT")
 
@@ -325,6 +328,7 @@ if PIPECAT_AVAILABLE:
 
             if isinstance(frame, TTSSpeakFrame) and frame.text.strip():
                 self._cancel_stream = False
+                self._controller.interrupted = False
                 if self._telephony:
                     chunks = render_speech_telephony(
                         frame.text,

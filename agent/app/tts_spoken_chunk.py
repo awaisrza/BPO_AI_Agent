@@ -49,16 +49,13 @@ async def handle_spoken_chunk_frame(
     run_tts: RunTTS,
 ) -> None:
     """Synthesize one chunk, stream audio, then optional pause silence."""
-    if getattr(processor, "speech_is_cancelled", lambda: False)():
-        logger.debug(f"TTS chunk skipped (barge-in): {frame.text[:48]!r}")
-        return
-
     if frame.reset_barge_in and hasattr(processor, "reset_speech_cancellation"):
         processor.reset_speech_cancellation()
         if getattr(processor, "_telephony", False) and hasattr(processor, "_push_comfort_silence"):
             await processor._push_comfort_silence(direction)
 
     if getattr(processor, "speech_is_cancelled", lambda: False)():
+        logger.debug(f"TTS chunk skipped (barge-in): {frame.text[:48]!r}")
         return
 
     text = frame.text.strip()

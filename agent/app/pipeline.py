@@ -421,7 +421,7 @@ def build_pipeline(
         mic_test=mic_test,
         call_controller=call_controller,
     )
-    barge_in = BargeInProcessor(call_controller)
+    barge_in = BargeInProcessor(call_controller, telephony=telephony)
     max_words, pause_min, pause_max = _speech_settings(telephony=telephony)
     speech_renderer = SpeechRendererNode(
         call_controller,
