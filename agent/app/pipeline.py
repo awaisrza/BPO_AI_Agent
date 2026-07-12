@@ -28,6 +28,7 @@ from .speech_renderer import (
     CallState,
     SpeechRendererNode,
     iter_chunk_texts,
+    prepare_for_speech,
     render_speech,
 )
 from .vicidial import ViciDialClient
@@ -175,6 +176,10 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
     max_words, pause_min, pause_max = _speech_settings(telephony=telephony)
     lines = [script.greeting, script.pitch, *script.qualifying_questions]
     lines.extend([script.transfer_line, script.not_interested_line])
+    for entry in script.knowledge_base:
+        answer = prepare_for_speech(entry.answer)
+        if answer:
+            lines.append(answer)
     raw = [line.strip() for line in lines if line and line.strip()]
     return iter_chunk_texts(
         raw,

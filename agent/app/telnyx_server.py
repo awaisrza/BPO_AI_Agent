@@ -107,6 +107,31 @@ def _log_greeting_cache(script: ScriptConfig) -> None:
     except Exception as exc:
         _event(f"Greeting cache check skipped: {exc}")
 
+    try:
+        from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
+        from .pipeline import _cached_tts
+        from .speech_renderer import render_speech_telephony, prepare_for_speech
+
+        tts = _cached_tts.get((TELEPHONY_PIPELINE_RATE, True))
+        cache = getattr(tts, "_cache", None) if tts else None
+        if not cache:
+            return
+        kb_count = 0
+        for entry in script.knowledge_base:
+            spoken = prepare_for_speech(entry.answer)
+            if not spoken:
+                continue
+            kb_count += 1
+            for chunk in render_speech_telephony(spoken):
+                hit = chunk.text.strip() in cache
+                label = entry.topic or "KB"
+                _event(
+                    f"KB [{label}] cache={'HIT' if hit else 'MISS'}: {chunk.text[:64]!r}"
+                )
+        _event(f"Knowledge base: {kb_count} answer(s) checked in TTS cache")
+    except Exception as exc:
+        _event(f"KB cache check skipped: {exc}")
+
 
 def _place_telnyx_call(*, to_number: str, from_number: str, answer_url: str) -> dict:
     url = (
