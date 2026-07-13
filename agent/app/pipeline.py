@@ -21,6 +21,7 @@ from loguru import logger
 from .config import settings, ScriptConfig
 from .conversation import Action, ConversationEngine
 from .fish_tts import FishAudioTTSService
+from .gemini import TELEPHONY_KB_MISS_REPLY
 from .knowledge import answer_offscript
 from .speech_renderer import (
     BargeInProcessor,
@@ -191,6 +192,8 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
         answer = prepare_for_speech(entry.answer)
         if answer:
             lines.append(answer)
+    if telephony:
+        lines.append(TELEPHONY_KB_MISS_REPLY)
     raw = [line.strip() for line in lines if line and line.strip()]
     return iter_chunk_texts(
         raw,
@@ -436,7 +439,9 @@ def build_pipeline(
 
     engine = ConversationEngine(
         script=script,
-        answer_offscript=lambda q, ctx: answer_offscript(q, ctx, script.knowledge_base),
+        answer_offscript=lambda q, ctx: answer_offscript(
+            q, ctx, script.knowledge_base, telephony=telephony
+        ),
     )
     call_controller = CallController()
     vici = None if mic_test else ViciDialClient()

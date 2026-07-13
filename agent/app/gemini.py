@@ -16,8 +16,22 @@ call_me_back: Sure — what time works best for you tomorrow?
 
 FALLBACK_REPLY = "Let me connect you with a specialist who can answer that."
 
+# Spoken on live PSTN when KB misses — must stay short and pre-cacheable (no Gemini wait).
+TELEPHONY_KB_MISS_REPLY = (
+    "I'm not sure on that one — a licensed specialist can help. "
+    "Can we finish this quick eligibility check first?"
+)
 
-def generate_gemini_reply(question: str, context: str = "", knowledge: str = "") -> str:
+GEMINI_TIMEOUT_SECS = 4.0
+
+
+def generate_gemini_reply(
+    question: str,
+    context: str = "",
+    knowledge: str = "",
+    *,
+    timeout_secs: float = GEMINI_TIMEOUT_SECS,
+) -> str:
     """Return a short spoken reply using Gemini, grounded on the campaign knowledge base."""
     if not settings.google_api_key:
         return FALLBACK_REPLY
@@ -58,7 +72,7 @@ CALLER SAID: {question}
 
 YOUR SPOKEN REPLY (one or two short sentences max):"""
 
-    try:
+    def _call() -> str:
         response = model.generate_content(prompt)
         reply = (response.text or "").strip()
         if reply:
@@ -66,6 +80,16 @@ YOUR SPOKEN REPLY (one or two short sentences max):"""
 
             reply = prepare_for_speech(reply)
         return reply or FALLBACK_REPLY
+
+    try:
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_call)
+            return future.result(timeout=timeout_secs)
+    except FuturesTimeout:
+        logger.warning(f"Gemini timed out after {timeout_secs}s — using fallback")
+        return FALLBACK_REPLY
     except Exception as exc:  # noqa: BLE001
         logger.error(f"Gemini off-script error: {exc}")
         return FALLBACK_REPLY
