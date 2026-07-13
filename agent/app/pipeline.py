@@ -419,9 +419,15 @@ def build_pipeline(
     logger.info(f"Voice backend: {backend} ({mode}, {sample_rate} Hz)")
 
     stt = _cached_stt or _build_stt(telephony=telephony)
-    tts = _cached_tts.get((sample_rate, telephony)) or _build_tts(
+    tts_base = _cached_tts.get((sample_rate, telephony)) or _build_tts(
         script=script, sample_rate=sample_rate, telephony=telephony
     )
+    # Each call gets its own TTS instance (shared warm cache) so GPU locks from a
+    # prior call cannot block StartFrame on a Telnyx reconnect.
+    if telephony and hasattr(tts_base, "clone_with_shared_cache"):
+        tts = tts_base.clone_with_shared_cache()
+    else:
+        tts = tts_base
     vad = _build_vad(telephony=telephony)
 
     engine = ConversationEngine(

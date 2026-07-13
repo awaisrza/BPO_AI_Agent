@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import traceback
 from pathlib import Path
@@ -13,6 +14,8 @@ from .config import ScriptConfig, settings
 from .pipeline import build_pipeline
 
 _CRASH_LOG = Path("/tmp/telnyx_events.log")
+_active_call_ids: set[str] = set()
+_session_lock = asyncio.Lock()
 
 
 def _event(msg: str) -> None:
@@ -39,6 +42,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
     from pipecat.workers.runner import WorkerRunner
 
     _event("=== WS HANDLER ENTERED ===")
+    session_key: str | None = None
     try:
         await websocket.accept()
         _event("=== WS ACCEPTED ===")
@@ -54,6 +58,14 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
         outbound_encoding = call_data.get("outbound_encoding") or "PCMU"
         if not stream_id:
             raise RuntimeError(f"Missing stream_id in handshake: {call_data}")
+
+        session_key = call_control_id or stream_id
+        async with _session_lock:
+            if session_key in _active_call_ids:
+                _event(f"=== DUPLICATE WS REJECTED (active call {session_key}) ===")
+                await websocket.close(code=1000)
+                return
+            _active_call_ids.add(session_key)
 
         os.environ.setdefault("TELNYX_API_KEY", settings.telnyx_api_key or "")
 
@@ -85,6 +97,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             sample_rate=sample_rate,
             telephony=True,
         )
+        tts_for_cleanup = pipeline.processors[-2] if pipeline.processors else None
 
         worker_kwargs = {
             "params": PipelineParams(
@@ -110,6 +123,8 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client) -> None:
             _event("=== CALL ENDED (remote hung up or stream closed) ===")
+            if tts_for_cleanup is not None and hasattr(tts_for_cleanup, "cancel_background_work"):
+                await tts_for_cleanup.cancel_background_work()
             await worker.cancel()
 
         _event("=== STARTING RUNNER ===")
@@ -124,3 +139,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
         tb = traceback.format_exc()
         _event("=== CRASH ===\n" + tb)
         raise
+    finally:
+        if session_key:
+            async with _session_lock:
+                _active_call_ids.discard(session_key)

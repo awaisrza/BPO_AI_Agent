@@ -224,6 +224,24 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
         self._comfort_sent = False
         _load_model(self._device)
 
+    def clone_with_shared_cache(self) -> ChatterboxTTSService:
+        """Fresh per-call instance so infer_lock/prefetch do not block the next call."""
+        return ChatterboxTTSService(
+            reference_audio=str(self._reference),
+            device=self._device,
+            exaggeration=self._exaggeration,
+            cfg_weight=self._cfg_weight,
+            sample_rate=self.sample_rate,
+            cache=self._cache,
+        )
+
+    async def cancel_background_work(self) -> None:
+        """Stop prefetch/synthesis so the next call's StartFrame is not blocked."""
+        self.cancel_speech()
+        for task in list(self._prefetch_tasks):
+            task.cancel()
+        self._prefetch_tasks.clear()
+
     async def _push_comfort_silence(self, direction) -> None:
         """Telnyx drops calls after ~3s with no outbound RTP — send silence while TTS starts."""
         if self._comfort_sent or not self._telephony:
