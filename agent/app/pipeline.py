@@ -158,9 +158,21 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 return
 
             if self._call.state == CallState.SPEAKING and not self._call.interrupted:
-                self._pending_caller_text = text
+                prev = self._pending_caller_text
+                if prev:
+                    prev_s, new_s = prev.strip(), text.strip()
+                    pl, nl = prev_s.lower(), new_s.lower()
+                    if nl in pl:
+                        merged = prev_s
+                    elif pl in nl:
+                        merged = new_s
+                    else:
+                        merged = new_s if len(new_s) >= len(prev_s) else prev_s
+                    self._pending_caller_text = merged
+                else:
+                    self._pending_caller_text = text
                 logger.info(
-                    f"STT heard caller while bot speaking — queued: {text[:64]!r}"
+                    f"STT heard caller while bot speaking — queued: {self._pending_caller_text[:64]!r}"
                 )
                 return
 

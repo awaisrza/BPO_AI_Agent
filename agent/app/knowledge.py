@@ -7,7 +7,7 @@ from typing import Iterable
 
 from loguru import logger
 
-from .gemini import TELEPHONY_KB_MISS_REPLY, generate_gemini_reply
+from .gemini import generate_gemini_reply
 from .models import KnowledgeEntry
 from .speech_renderer import prepare_for_speech
 
@@ -126,8 +126,8 @@ def answer_offscript(
         return prepare_for_speech(match.answer)
 
     if telephony:
-        logger.info("Off-script KB miss -> telephony instant fallback (no Gemini wait)")
-        return prepare_for_speech(TELEPHONY_KB_MISS_REPLY)
+        logger.info("Off-script KB miss -> conversation will escalate (no Gemini on PSTN)")
+        return ""
 
     if kb_entries:
         logger.info("Off-script KB miss -> Gemini")

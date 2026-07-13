@@ -113,6 +113,23 @@ def test_thank_you_before_consent_reasks_eligibility():
     assert "Part A" not in turn.reply
 
 
+def test_offscript_miss_escalates_not_repeat():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare review. Do you have a moment?",
+        qualifying_questions=["Do you have Part A and B?"],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: "",
+    )
+    e.open()
+    e.handle("I'm good")
+    t1 = e.handle("what is the weather")
+    t2 = e.handle("tell me a joke")
+    assert t1.reply != t2.reply
+
+
 def test_third_kb_in_pitch_advances_to_pitch():
     from app.knowledge import answer_offscript as kb_answer
 
