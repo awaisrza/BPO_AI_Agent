@@ -1,0 +1,64 @@
+{
+  "label": "Medicare USA",
+  "greeting": "Hi, this is Alex calling on a recorded line. How are you today?",
+  "pitch": "Great — I'll be quick. I'm calling about your Medicare plan. Do you have a moment for a quick eligibility check?",
+  "qualifying_questions": [
+    "Do you have Medicare Part A and Part B?",
+    "Are you interested in reviewing your plan options this year?"
+  ],
+  "transfer_line": "Perfect — let me connect you with a licensed specialist right now, one moment.",
+  "not_interested_line": "No problem at all, thanks for your time. Have a great day!",
+  "transfer_preset": "closers-01",
+  "knowledge_base": [
+    {
+      "topic": "Who are you with",
+      "triggers": ["who are you", "who are you with", "what company", "who is this"],
+      "answer": "I'm Alex with ABC Benefits — a licensed Medicare benefits group. I'll keep this quick."
+    },
+    {
+      "topic": "Who is calling",
+      "triggers": ["who is calling", "why are you calling", "what do you want"],
+      "answer": "This is Alex from ABC Benefits on a recorded line — I'll be quick."
+    },
+    {
+      "topic": "How did you get my number",
+      "triggers": ["how did you get my number", "how did you get", "where did you get"],
+      "answer": "Your number came from a public Medicare outreach list. I can remove you if you'd like — it's just a thirty-second check first."
+    },
+    {
+      "topic": "Already have benefits",
+      "triggers": ["already have", "already on medicare", "have insurance"],
+      "answer": "That's great — a lot of folks still qualify for extra savings they didn't know about. Worth a quick thirty-second check?"
+    },
+    {
+      "topic": "Don't need benefits",
+      "triggers": ["don't need", "do not need", "not interested in benefits"],
+      "answer": "I hear you — this is just a free eligibility review. No cost and no obligation. Takes about thirty seconds."
+    },
+    {
+      "topic": "Not interested",
+      "triggers": ["not interested", "no thanks"],
+      "answer": "I totally get that — it's just a quick Medicare eligibility check. Takes about thirty seconds, fair enough?"
+    },
+    {
+      "topic": "Do not call again",
+      "triggers": ["do not call", "don't call again", "remove me", "stop calling"],
+      "answer": "I'm sorry about that — I can note that for you. Before I update it, it's just a thirty-second eligibility check — fair enough?"
+    },
+    {
+      "topic": "Is this a scam",
+      "triggers": ["scam", "spam", "legitimate", "fraud", "real company"],
+      "answer": "This is a legitimate call from a licensed Medicare benefits group. It may be recorded for quality assurance."
+    },
+    {
+      "topic": "How much does it cost",
+      "triggers": ["how much", "cost", "price", "free", "catch"],
+      "answer": "The review is free. A licensed specialist can go over exact numbers if you qualify."
+    },
+    {
+      "topic": "Call me back later",
+      "triggers": ["call me back", "not a good time", "busy", "later"],
+      "answer": "Sure — what time works best for you tomorrow?"
+    }
+  ]
+}

@@ -18,6 +18,10 @@ def main() -> None:
         help="Supabase campaign UUID (loads script greeting/pitch/qualifiers)",
     )
     parser.add_argument(
+        "--script-file",
+        help="Local script JSON (skips Supabase — use when GPU cannot reach Supabase)",
+    )
+    parser.add_argument(
         "--dial",
         metavar="E164",
         help="Outbound number to dial, e.g. +923142222318",
@@ -30,7 +34,10 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        script, agent_user = resolve_script(campaign_id=args.campaign_id)
+        script, agent_user = resolve_script(
+            campaign_id=args.campaign_id,
+            script_file=args.script_file,
+        )
     except ScriptLoadError as exc:
         raise SystemExit(str(exc)) from exc
 
