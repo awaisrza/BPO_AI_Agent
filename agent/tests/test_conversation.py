@@ -1,5 +1,6 @@
 from app.config import ScriptConfig
 from app.conversation import Action, ConversationEngine, Intent, heuristic_classifier
+from app.models import KnowledgeEntry
 
 
 def make_engine() -> ConversationEngine:
@@ -16,6 +17,9 @@ def test_heuristic_classifier():
     assert heuristic_classifier("I'm fine") == Intent.POSITIVE
     assert heuristic_classifier("not interested") == Intent.NEGATIVE
     assert heuristic_classifier("how much does it cost?") == Intent.QUESTION
+    assert heuristic_classifier("okay, what do you want?") == Intent.QUESTION
+    assert heuristic_classifier("why are you calling me") == Intent.QUESTION
+    assert heuristic_classifier("is this a scam") == Intent.QUESTION
     assert heuristic_classifier("") == Intent.UNCLEAR
 
 
@@ -63,3 +67,51 @@ def test_unqualified_lead_ends():
     e.handle("no")
     turn = e.handle("no, not interested")
     assert turn.action == Action.HANGUP
+
+
+def test_kb_question_during_qualify_not_repeat():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare review. Ready?",
+        qualifying_questions=["Do you have Part A and B?", "Interested in plan review?"],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic="How much does it cost",
+                triggers=["how much", "cost", "price"],
+                answer="The review is free.",
+            ),
+        ],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("ok")
+    e.handle("yes")
+    turn = e.handle("how much does it cost")
+    assert "free" in turn.reply.lower()
+    assert turn.reply != "Do you have Part A and B?"
+
+
+def test_third_kb_in_pitch_advances_to_pitch():
+    from app.knowledge import answer_offscript as kb_answer
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare review. Ready?",
+        qualifying_questions=["Do you have Part A and B?"],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic="Who are you with",
+                triggers=["who are you"],
+                answer="Alex from ABC Benefits.",
+            ),
+        ],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
+    )
+    e.open()
+    e.handle("who are you")
+    e.handle("who is calling")
+    turn = e.handle("why are you calling me")
+    assert "Medicare review" in turn.reply

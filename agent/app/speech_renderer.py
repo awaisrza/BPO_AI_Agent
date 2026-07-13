@@ -222,13 +222,11 @@ def iter_chunk_texts(texts: Iterable[str], *, telephony: bool = False, **kwargs)
     """Flatten script lines into unique chunk texts (for TTS warm-cache)."""
     seen: set[str] = set()
     out: list[str] = []
+    telephony_max_words = kwargs.get("max_words", 40)
     for text in texts:
         if telephony:
-            line = normalize_spoken_text(text)
-            candidates = [line] if line else []
-            candidates.extend(split_spoken_sentences(line, max_words=18) if line else [])
-            for candidate in candidates:
-                part = candidate.strip()
+            for chunk in render_speech_telephony(text, max_words=telephony_max_words):
+                part = chunk.text.strip()
                 if part and part not in seen:
                     seen.add(part)
                     out.append(part)

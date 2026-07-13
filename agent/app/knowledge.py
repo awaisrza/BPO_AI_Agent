@@ -12,6 +12,11 @@ from .models import KnowledgeEntry
 from .speech_renderer import prepare_for_speech
 
 
+_STOP_WORDS = frozenset(
+    {"a", "an", "are", "be", "do", "for", "i", "is", "it", "me", "my", "on", "the", "to", "you", "your"}
+)
+
+
 def _normalize(text: str) -> str:
     cleaned = re.sub(r"[^\w\s']", " ", text.lower())
     return re.sub(r"\s+", " ", cleaned).strip()
@@ -48,16 +53,19 @@ def match_knowledge(utterance: str, entries: Iterable[KnowledgeEntry]) -> Knowle
 
             score = 0
             if trigger in normalized or normalized in trigger:
-                score = max(len(trigger), len(normalized))
+                score = max(len(trigger), len(normalized)) * 2
             else:
                 trigger_words = set(trigger.split())
                 overlap = utter_words & trigger_words
                 if not overlap:
                     continue
-                if len(overlap) >= 2:
-                    score = len(overlap) * 10
-                elif len(trigger_words) == 1 and len(next(iter(overlap))) >= 4:
-                    score = 8
+                distinctive = {w for w in overlap if w not in _STOP_WORDS and len(w) >= 3}
+                if len(overlap) >= 2 and distinctive:
+                    score = len(distinctive) * 12 + len(overlap) * 4
+                elif len(trigger_words) == 1:
+                    word = next(iter(overlap))
+                    if len(word) >= 4:
+                        score = 10 + len(word)
 
             if score > best_score:
                 best_score = score

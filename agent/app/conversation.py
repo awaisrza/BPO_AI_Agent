@@ -12,6 +12,8 @@ from enum import Enum
 from typing import Callable, Optional
 
 from .config import ScriptConfig
+from .knowledge import match_knowledge
+from .speech_renderer import prepare_for_speech
 
 
 class State(str, Enum):
@@ -59,16 +61,51 @@ _POSITIVE = {
     "im fine",
 }
 _NEGATIVE = {"no", "nope", "not interested", "stop", "remove me", "don't call", "busy", "later"}
+_QUESTION_MARKERS = (
+    "what ",
+    "how ",
+    "why ",
+    "who ",
+    "when ",
+    "where ",
+    "which ",
+    "is this ",
+    "is it ",
+    "are you ",
+    "can you ",
+    "do you ",
+    "does ",
+    "tell me ",
+    "what do you want",
+    "why are you calling",
+    "who is calling",
+    "who are you",
+    "how did you get",
+    "how much ",
+    "is this a scam",
+    "are you a scam",
+)
+
+
+def _looks_like_question(utterance: str) -> bool:
+    u = utterance.strip().lower()
+    if not u:
+        return False
+    if u.endswith("?"):
+        return True
+    if u.startswith(("what", "how", "why", "who", "when", "where", "which", "is ", "are ", "can ", "do ")):
+        return True
+    return any(marker in u for marker in _QUESTION_MARKERS)
 
 
 def heuristic_classifier(utterance: str, _context: str = "") -> Intent:
     u = utterance.strip().lower()
     if not u:
         return Intent.UNCLEAR
+    if _looks_like_question(u):
+        return Intent.QUESTION
     if any(p in u for p in _NEGATIVE):
         return Intent.NEGATIVE
-    if u.endswith("?") or u.startswith(("what", "how", "why", "who", "when", "where")):
-        return Intent.QUESTION
     if any(p in u for p in _POSITIVE):
         return Intent.POSITIVE
     return Intent.UNCLEAR
@@ -91,6 +128,8 @@ class ConversationEngine:
     _qualify_idx: int = 0
     _positives: int = 0
     _negatives: int = 0
+    _pitch_kb_answers: int = 0
+    _max_pitch_kb_answers: int = 2
 
     def _objection_reply(self, utterance: str) -> str:
         """One soft rebuttal before hangup — KB/Gemini first, then default."""
@@ -102,6 +141,13 @@ class ConversationEngine:
             "I totally get that — it's just a quick eligibility check. "
             "Takes about thirty seconds, fair enough?"
         )
+
+    def _kb_only_answer(self, utterance: str) -> str | None:
+        """KB lookup without Gemini — used when qualify would otherwise repeat."""
+        match = match_knowledge(utterance, self.script.knowledge_base)
+        if not match:
+            return None
+        return prepare_for_speech(match.answer)
 
     def _repeat_current_qualifier(self) -> Turn:
         """Don't advance the script when the caller didn't really answer."""
@@ -128,10 +174,21 @@ class ConversationEngine:
             return Turn(self._objection_reply(utterance), Action.SPEAK)
 
         if intent == Intent.QUESTION and self.answer_offscript is not None:
+            if (
+                self.state == State.PITCH
+                and self._pitch_kb_answers >= self._max_pitch_kb_answers
+            ):
+                self._pitch_kb_answers = 0
+                self.state = State.QUALIFY
+                self._qualify_idx = 0
+                return Turn(self.script.pitch, Action.SPEAK)
             answer = self.answer_offscript(utterance, self.state.value)
+            if self.state == State.PITCH:
+                self._pitch_kb_answers += 1
             return Turn(answer, Action.SPEAK)
 
         if self.state == State.PITCH:
+            self._pitch_kb_answers = 0
             self.state = State.QUALIFY
             self._qualify_idx = 0
             return Turn(self.script.pitch, Action.SPEAK)
@@ -140,6 +197,12 @@ class ConversationEngine:
             if intent == Intent.POSITIVE:
                 self._positives += 1
                 return self._next_qualifier()
+            if intent == Intent.QUESTION and self.answer_offscript is not None:
+                answer = self.answer_offscript(utterance, self.state.value)
+                return Turn(answer, Action.SPEAK)
+            kb_answer = self._kb_only_answer(utterance)
+            if kb_answer:
+                return Turn(kb_answer, Action.SPEAK)
             return self._repeat_current_qualifier()
 
         if self.state == State.TRANSFER:

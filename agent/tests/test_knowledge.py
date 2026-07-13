@@ -29,6 +29,24 @@ def test_match_knowledge_finds_cost_question():
     assert hit.topic == "How much?"
 
 
+def test_match_knowledge_does_not_confuse_why_calling_with_who_are_you():
+    entries = [
+        KnowledgeEntry(
+            topic="Who are you with",
+            triggers=["who are you", "who are you with"],
+            answer="Alex from ABC Benefits.",
+        ),
+        KnowledgeEntry(
+            topic="Who is calling",
+            triggers=["who is calling", "why are you calling"],
+            answer="Medicare eligibility outreach.",
+        ),
+    ]
+    hit = match_knowledge("why are you calling me", entries)
+    assert hit is not None
+    assert hit.topic == "Who is calling"
+
+
 def test_match_knowledge_returns_none_when_no_hit():
     assert match_knowledge("my dog is barking", _entries()) is None
 
