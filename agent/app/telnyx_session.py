@@ -15,6 +15,7 @@ from .pipeline import build_pipeline
 
 _CRASH_LOG = Path("/tmp/telnyx_events.log")
 _active_call_ids: set[str] = set()
+_completed_call_ids: set[str] = set()
 _session_lock = asyncio.Lock()
 
 
@@ -61,6 +62,10 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
 
         session_key = call_control_id or stream_id
         async with _session_lock:
+            if session_key in _completed_call_ids:
+                _event(f"=== WS REJECTED (call already ended {session_key}) ===")
+                await websocket.close(code=1000)
+                return
             if session_key in _active_call_ids:
                 _event(f"=== DUPLICATE WS REJECTED (active call {session_key}) ===")
                 await websocket.close(code=1000)
@@ -143,3 +148,4 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
         if session_key:
             async with _session_lock:
                 _active_call_ids.discard(session_key)
+                _completed_call_ids.add(session_key)

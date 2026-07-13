@@ -418,7 +418,11 @@ def build_pipeline(
     mode = "telephony" if telephony else "local"
     logger.info(f"Voice backend: {backend} ({mode}, {sample_rate} Hz)")
 
-    stt = _cached_stt or _build_stt(telephony=telephony)
+    # Telephony: fresh STT per call — shared WhisperSTTService blocks StartFrame on reconnect.
+    if telephony:
+        stt = _build_stt(telephony=True)
+    else:
+        stt = _cached_stt or _build_stt(telephony=False)
     tts_base = _cached_tts.get((sample_rate, telephony)) or _build_tts(
         script=script, sample_rate=sample_rate, telephony=telephony
     )
