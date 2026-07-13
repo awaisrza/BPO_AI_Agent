@@ -84,6 +84,8 @@ class CallController:
     def __init__(self) -> None:
         self.state = CallState.IDLE
         self.interrupted = False
+        self._chunks_remaining = 0
+        self._user_turn_open = False
 
     def should_interrupt(self) -> bool:
         return self.state == CallState.SPEAKING
@@ -91,18 +93,46 @@ class CallController:
     def on_interruption(self) -> None:
         self.interrupted = True
         self.state = CallState.LISTENING
+        self._user_turn_open = False
         logger.debug("CallController: interrupted -> listening")
 
-    def on_response_start(self) -> None:
+    def begin_bot_reply(self, chunk_count: int) -> None:
         self.interrupted = False
+        self._chunks_remaining = max(1, chunk_count)
+        self._user_turn_open = False
         self.state = CallState.SPEAKING
 
+    def on_response_start(self) -> None:
+        self.begin_bot_reply(1)
+
+    def on_bot_chunk_finished(self) -> None:
+        if self._chunks_remaining > 0:
+            self._chunks_remaining -= 1
+        if self._chunks_remaining <= 0:
+            self.interrupted = False
+            self.state = CallState.LISTENING
+            self._user_turn_open = True
+        else:
+            self.state = CallState.SPEAKING
+            self._user_turn_open = False
+
     def on_bot_stopped(self) -> None:
-        self.interrupted = False
-        self.state = CallState.LISTENING
+        self.on_bot_chunk_finished()
+
+    def can_accept_caller(self) -> bool:
+        return (
+            self._user_turn_open
+            and self._chunks_remaining <= 0
+            and self.state == CallState.LISTENING
+            and not self.interrupted
+        )
+
+    def close_user_turn(self) -> None:
+        self._user_turn_open = False
 
     def on_processing(self) -> None:
         self.state = CallState.PROCESSING
+        self._user_turn_open = False
 
     def on_listening(self) -> None:
         self.interrupted = False
@@ -320,7 +350,7 @@ if PIPECAT_AVAILABLE:
                 return
 
             if isinstance(frame, BotStoppedSpeakingFrame):
-                self._controller.on_bot_stopped()
+                self._controller.on_bot_chunk_finished()
                 await self.push_frame(frame, direction)
                 return
 
@@ -342,7 +372,7 @@ if PIPECAT_AVAILABLE:
                 if not chunks:
                     return
 
-                self._controller.on_response_start()
+                self._controller.begin_bot_reply(len(chunks))
                 logger.debug(f"SpeechRenderer: {len(chunks)} chunk(s) from {frame.text[:48]!r}...")
                 for idx, chunk in enumerate(chunks):
                     if self._cancel_stream:

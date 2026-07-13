@@ -16,6 +16,8 @@ Voice backends (``VOICE_BACKEND`` env):
 
 from __future__ import annotations
 
+import asyncio
+
 from loguru import logger
 
 from .config import settings, ScriptConfig
@@ -48,6 +50,7 @@ try:
         SystemFrame,
         TranscriptionFrame,
         TTSSpeakFrame,
+        VADUserStoppedSpeakingFrame,
     )
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.processors.audio.vad_processor import VADProcessor
@@ -77,8 +80,60 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._opened = False
         self._call = call_controller or CallController()
         self._pending_caller_text: str | None = None
+        self._caller_buffer: str = ""
+        self._flush_task: asyncio.Task | None = None
+        self._caller_flush_delay_s = 0.75
+
+    def _merge_transcripts(self, prev: str, new: str) -> str:
+        prev_s, new_s = prev.strip(), new.strip()
+        if not prev_s:
+            return new_s
+        if not new_s:
+            return prev_s
+        pl, nl = prev_s.lower(), new_s.lower()
+        if nl in pl:
+            return prev_s
+        if pl in nl:
+            return new_s
+        return new_s if len(new_s) >= len(prev_s) else prev_s
+
+    def _buffer_caller_text(self, text: str) -> None:
+        if not text.strip():
+            return
+        self._caller_buffer = self._merge_transcripts(self._caller_buffer, text)
+
+    def _cancel_flush_task(self) -> None:
+        if self._flush_task and not self._flush_task.done():
+            self._flush_task.cancel()
+        self._flush_task = None
+
+    def _schedule_caller_flush(self) -> None:
+        if not PIPECAT_AVAILABLE:
+            return
+        self._cancel_flush_task()
+
+        async def _delayed_flush() -> None:
+            try:
+                await asyncio.sleep(self._caller_flush_delay_s)
+                await self._flush_caller_buffer()
+            except asyncio.CancelledError:
+                pass
+
+        self._flush_task = asyncio.create_task(_delayed_flush())
+
+    async def _flush_caller_buffer(self) -> None:
+        self._cancel_flush_task()
+        if not self._call.can_accept_caller():
+            return
+        text = self._caller_buffer.strip()
+        self._caller_buffer = ""
+        if not text:
+            return
+        self._call.close_user_turn()
+        await self._handle_caller(text)
 
     async def _handle_caller(self, text: str) -> None:
+        self._call.close_user_turn()
         self._call.on_processing()
         logger.info(f"CALLER: {text}")
         turn = self._engine.handle(text)
@@ -137,14 +192,19 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, BotStoppedSpeakingFrame):
-            self._call.on_bot_stopped()
-            logger.info("Bot finished speaking — listening for caller")
-            if self._pending_caller_text:
-                pending = self._pending_caller_text.strip()
-                self._pending_caller_text = None
-                if pending:
-                    logger.info(f"Processing queued caller text: {pending!r}")
-                    await self._handle_caller(pending)
+            self._call.on_bot_chunk_finished()
+            if self._call.can_accept_caller():
+                if self._pending_caller_text:
+                    self._buffer_caller_text(self._pending_caller_text)
+                    self._pending_caller_text = None
+                if self._caller_buffer:
+                    await self._flush_caller_buffer()
+            await self.push_frame(frame, direction)
+            return
+
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
+            if self._call.can_accept_caller() and self._caller_buffer:
+                await self._flush_caller_buffer()
             await self.push_frame(frame, direction)
             return
 
@@ -157,26 +217,21 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             if not text:
                 return
 
-            if self._call.state == CallState.SPEAKING and not self._call.interrupted:
-                prev = self._pending_caller_text
-                if prev:
-                    prev_s, new_s = prev.strip(), text.strip()
-                    pl, nl = prev_s.lower(), new_s.lower()
-                    if nl in pl:
-                        merged = prev_s
-                    elif pl in nl:
-                        merged = new_s
-                    else:
-                        merged = new_s if len(new_s) >= len(prev_s) else prev_s
-                    self._pending_caller_text = merged
-                else:
-                    self._pending_caller_text = text
-                logger.info(
-                    f"STT heard caller while bot speaking — queued: {self._pending_caller_text[:64]!r}"
-                )
+            if not self._call.can_accept_caller():
+                if self._call.state in (CallState.SPEAKING, CallState.PROCESSING):
+                    prev = self._pending_caller_text
+                    self._pending_caller_text = (
+                        self._merge_transcripts(prev, text) if prev else text
+                    )
+                    logger.info(
+                        "STT heard caller while bot speaking — queued: "
+                        f"{self._pending_caller_text[:64]!r}"
+                    )
                 return
 
-            await self._handle_caller(text)
+            self._buffer_caller_text(text)
+            logger.info(f"STT buffered caller text: {text[:64]!r}")
+            self._schedule_caller_flush()
             return
 
         await self.push_frame(frame, direction)

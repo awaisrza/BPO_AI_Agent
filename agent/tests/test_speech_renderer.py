@@ -20,16 +20,17 @@ def test_prepare_for_speech_medicare_tone():
     assert "i'm calling about" in text.lower()
 
 
-def test_call_controller_barge_in_states():
+def test_call_controller_turn_gating():
     ctrl = CallController()
-    ctrl.on_response_start()
+    ctrl.begin_bot_reply(2)
     assert ctrl.state == CallState.SPEAKING
-    assert ctrl.should_interrupt()
-    ctrl.on_interruption()
-    assert ctrl.state == CallState.LISTENING
-    assert ctrl.interrupted
-    ctrl.on_listening()
-    assert not ctrl.interrupted
+    assert not ctrl.can_accept_caller()
+    ctrl.on_bot_chunk_finished()
+    assert not ctrl.can_accept_caller()
+    ctrl.on_bot_chunk_finished()
+    assert ctrl.can_accept_caller()
+    ctrl.close_user_turn()
+    assert not ctrl.can_accept_caller()
 
 
 def test_split_long_sentence():

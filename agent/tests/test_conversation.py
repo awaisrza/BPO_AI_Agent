@@ -130,6 +130,25 @@ def test_offscript_miss_escalates_not_repeat():
     assert t1.reply != t2.reply
 
 
+def test_greeting_ack_does_not_advance_qualify():
+    e = make_engine()
+    e.open()
+    e.handle("ok")
+    e.handle("yes")
+    turn = e.handle("I'm fine")
+    assert turn.reply == "Do you own your home?"
+
+
+def test_loose_positive_does_not_skip_qualifiers():
+    e = make_engine()
+    e.open()
+    e.handle("ok")
+    e.handle("yes")
+    turn = e.handle("good")
+    assert turn.reply == "Do you own your home?"
+    assert "100 dollars" not in turn.reply
+
+
 def test_third_kb_in_pitch_advances_to_pitch():
     from app.knowledge import answer_offscript as kb_answer
 

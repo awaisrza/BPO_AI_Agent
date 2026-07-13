@@ -59,6 +59,7 @@ _POSITIVE = {
 }
 _GREETING_ACK = {"good", "fine", "well", "doing well", "i'm fine", "im fine", "great"}
 _CONSENT = {"yes", "yeah", "yep", "sure", "ok", "okay", "go ahead", "interested", "correct", "i do"}
+_QUALIFY_YES = {"yes", "yeah", "yep", "sure", "correct", "absolutely", "definitely"}
 _NEGATIVE = {"no", "nope", "not interested", "stop", "remove me", "don't call", "busy", "later"}
 _QUESTION_MARKERS = (
     "what ",
@@ -100,6 +101,16 @@ def _looks_like_question(utterance: str) -> bool:
 def _is_consent(utterance: str) -> bool:
     u = utterance.strip().lower()
     return any(p in u for p in _CONSENT)
+
+
+def _is_qualify_yes(utterance: str) -> bool:
+    u = utterance.strip().lower()
+    if not u:
+        return False
+    if "i do" in u or "i have" in u:
+        return True
+    words = set(u.replace(",", " ").replace(".", " ").split())
+    return bool(words & _QUALIFY_YES)
 
 
 def _is_greeting_ack_only(utterance: str) -> bool:
@@ -268,7 +279,7 @@ class ConversationEngine:
                     return turn
                 return self._escalate()
 
-            if intent == Intent.POSITIVE:
+            if _is_qualify_yes(utterance):
                 self._positives += 1
                 return self._next_qualifier()
 
