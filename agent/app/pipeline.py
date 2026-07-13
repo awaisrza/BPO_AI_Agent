@@ -75,6 +75,40 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._mic_test = mic_test
         self._opened = False
         self._call = call_controller or CallController()
+        self._pending_caller_text: str | None = None
+
+    async def _handle_caller(self, text: str) -> None:
+        self._call.on_processing()
+        logger.info(f"CALLER: {text}")
+        turn = self._engine.handle(text)
+        spoken = render_speech(turn.reply)
+        logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")
+        await self.push_frame(TTSSpeakFrame(turn.reply))
+
+        if turn.action == Action.TRANSFER:
+            if self._mic_test:
+                logger.info("MIC TEST -> qualified lead (warm transfer simulated)")
+            else:
+                closer = self._engine.script.transfer_closer_user
+                if closer:
+                    logger.info(f"FSM -> warm transfer to closer {closer}")
+                    await self._vici.warm_transfer(self._agent_user, closer_user=closer)
+                else:
+                    preset = (
+                        self._engine.script.transfer_preset or settings.vicidial_transfer_preset
+                    )
+                    logger.info(f"FSM -> warm transfer (preset={preset})")
+                    await self._vici.warm_transfer(self._agent_user, preset=preset)
+                await self._vici.set_disposition(self._agent_user, "XFER")
+            await self.push_frame(EndFrame())
+        elif turn.action == Action.HANGUP:
+            if self._mic_test:
+                logger.info("MIC TEST -> call ended (hangup simulated)")
+            else:
+                logger.info("FSM -> disposition + hangup")
+                await self._vici.set_disposition(self._agent_user, "NI")
+                await self._vici.hangup(self._agent_user)
+            await self.push_frame(EndFrame())
 
     async def process_frame(self, frame, direction):  # type: ignore[override]
         await super().process_frame(frame, direction)
@@ -104,6 +138,12 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if isinstance(frame, BotStoppedSpeakingFrame):
             self._call.on_bot_stopped()
             logger.info("Bot finished speaking — listening for caller")
+            if self._pending_caller_text:
+                pending = self._pending_caller_text.strip()
+                self._pending_caller_text = None
+                if pending:
+                    logger.info(f"Processing queued caller text: {pending!r}")
+                    await self._handle_caller(pending)
             await self.push_frame(frame, direction)
             return
 
@@ -112,47 +152,18 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, TranscriptionFrame) and frame.text:
-            if self._call.state == CallState.SPEAKING and not self._call.interrupted:
-                logger.info(
-                    f"STT heard caller but bot still marked speaking — dropping: {frame.text[:64]!r}"
-                )
-                return
-
             text = frame.text.strip()
             if not text:
                 return
 
-            self._call.on_processing()
-            logger.info(f"CALLER: {text}")
-            turn = self._engine.handle(text)
-            spoken = render_speech(turn.reply)
-            logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")
-            await self.push_frame(TTSSpeakFrame(turn.reply))
+            if self._call.state == CallState.SPEAKING and not self._call.interrupted:
+                self._pending_caller_text = text
+                logger.info(
+                    f"STT heard caller while bot speaking — queued: {text[:64]!r}"
+                )
+                return
 
-            if turn.action == Action.TRANSFER:
-                if self._mic_test:
-                    logger.info("MIC TEST -> qualified lead (warm transfer simulated)")
-                else:
-                    closer = self._engine.script.transfer_closer_user
-                    if closer:
-                        logger.info(f"FSM -> warm transfer to closer {closer}")
-                        await self._vici.warm_transfer(self._agent_user, closer_user=closer)
-                    else:
-                        preset = (
-                            self._engine.script.transfer_preset or settings.vicidial_transfer_preset
-                        )
-                        logger.info(f"FSM -> warm transfer (preset={preset})")
-                        await self._vici.warm_transfer(self._agent_user, preset=preset)
-                    await self._vici.set_disposition(self._agent_user, "XFER")
-                await self.push_frame(EndFrame())
-            elif turn.action == Action.HANGUP:
-                if self._mic_test:
-                    logger.info("MIC TEST -> call ended (hangup simulated)")
-                else:
-                    logger.info("FSM -> disposition + hangup")
-                    await self._vici.set_disposition(self._agent_user, "NI")
-                    await self._vici.hangup(self._agent_user)
-                await self.push_frame(EndFrame())
+            await self._handle_caller(text)
             return
 
         await self.push_frame(frame, direction)

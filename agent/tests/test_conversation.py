@@ -70,6 +70,8 @@ def test_unqualified_lead_ends():
 
 
 def test_kb_question_during_qualify_not_repeat():
+    from app.knowledge import answer_offscript as kb_answer
+
     script = ScriptConfig(
         greeting="Hi.",
         pitch="Medicare review. Ready?",
@@ -82,13 +84,33 @@ def test_kb_question_during_qualify_not_repeat():
             ),
         ],
     )
-    e = ConversationEngine(script=script)
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
+    )
     e.open()
     e.handle("ok")
     e.handle("yes")
     turn = e.handle("how much does it cost")
     assert "free" in turn.reply.lower()
     assert turn.reply != "Do you have Part A and B?"
+
+
+def test_thank_you_before_consent_reasks_eligibility():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "Great — I'll be quick. I'm calling about your Medicare plan. "
+            "Do you have a moment for a quick eligibility check?"
+        ),
+        qualifying_questions=["Do you have Part A and B?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("I'm good")
+    turn = e.handle("thank you")
+    assert "eligibility check" in turn.reply.lower()
+    assert "Part A" not in turn.reply
 
 
 def test_third_kb_in_pitch_advances_to_pitch():

@@ -60,6 +60,9 @@ _POSITIVE = {
     "i'm fine",
     "im fine",
 }
+# Greeting small-talk only — not consent to the Medicare pitch.
+_GREETING_ACK = {"good", "fine", "well", "doing well", "i'm fine", "im fine", "great"}
+_CONSENT = {"yes", "yeah", "yep", "sure", "ok", "okay", "go ahead", "interested", "correct", "i do"}
 _NEGATIVE = {"no", "nope", "not interested", "stop", "remove me", "don't call", "busy", "later"}
 _QUESTION_MARKERS = (
     "what ",
@@ -98,6 +101,19 @@ def _looks_like_question(utterance: str) -> bool:
     return any(marker in u for marker in _QUESTION_MARKERS)
 
 
+def _is_consent(utterance: str) -> bool:
+    u = utterance.strip().lower()
+    return any(p in u for p in _CONSENT)
+
+
+def _is_greeting_ack_only(utterance: str) -> bool:
+    """True when the caller is only answering 'how are you', not the pitch."""
+    u = utterance.strip().lower()
+    if _is_consent(u) or _looks_like_question(u):
+        return False
+    return any(p in u for p in _GREETING_ACK)
+
+
 def heuristic_classifier(utterance: str, _context: str = "") -> Intent:
     u = utterance.strip().lower()
     if not u:
@@ -106,6 +122,8 @@ def heuristic_classifier(utterance: str, _context: str = "") -> Intent:
         return Intent.QUESTION
     if any(p in u for p in _NEGATIVE):
         return Intent.NEGATIVE
+    if _is_consent(u):
+        return Intent.POSITIVE
     if any(p in u for p in _POSITIVE):
         return Intent.POSITIVE
     return Intent.UNCLEAR
@@ -130,6 +148,20 @@ class ConversationEngine:
     _negatives: int = 0
     _pitch_kb_answers: int = 0
     _max_pitch_kb_answers: int = 2
+    _pitch_confirmed: bool = False
+
+    def _consent_prompt(self) -> str:
+        """Re-ask eligibility before Medicare qualifying questions."""
+        pitch = prepare_for_speech(self.script.pitch)
+        if pitch:
+            sentences = [s.strip() for s in pitch.replace("!", ".").split(".") if s.strip()]
+            if sentences:
+                last = sentences[-1]
+                if "?" in last or last.lower().startswith(
+                    ("do you", "can you", "would you", "have you")
+                ):
+                    return last if last.endswith("?") else f"{last}?"
+        return "Do you have a moment for a quick eligibility check?"
 
     def _objection_reply(self, utterance: str) -> str:
         """One soft rebuttal before hangup — KB/Gemini first, then default."""
@@ -189,11 +221,24 @@ class ConversationEngine:
 
         if self.state == State.PITCH:
             self._pitch_kb_answers = 0
+            self._pitch_confirmed = False
             self.state = State.QUALIFY
             self._qualify_idx = 0
             return Turn(self.script.pitch, Action.SPEAK)
 
         if self.state == State.QUALIFY:
+            if not self._pitch_confirmed:
+                if intent == Intent.POSITIVE and _is_consent(utterance):
+                    self._pitch_confirmed = True
+                    return self._next_qualifier()
+                if intent == Intent.QUESTION and self.answer_offscript is not None:
+                    answer = self.answer_offscript(utterance, self.state.value)
+                    return Turn(answer, Action.SPEAK)
+                kb_answer = self._kb_only_answer(utterance)
+                if kb_answer:
+                    return Turn(kb_answer, Action.SPEAK)
+                return Turn(self._consent_prompt(), Action.SPEAK)
+
             if intent == Intent.POSITIVE:
                 self._positives += 1
                 return self._next_qualifier()
