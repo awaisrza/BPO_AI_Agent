@@ -16,6 +16,10 @@ def test_heuristic_classifier():
     assert heuristic_classifier("yes I do") == Intent.POSITIVE
     assert heuristic_classifier("I'm fine") == Intent.POSITIVE
     assert heuristic_classifier("not interested") == Intent.NEGATIVE
+    assert heuristic_classifier("no") == Intent.NEGATIVE
+    assert heuristic_classifier("not") == Intent.UNCLEAR
+    assert heuristic_classifier("nothing") == Intent.UNCLEAR
+    assert heuristic_classifier("know") == Intent.UNCLEAR
     assert heuristic_classifier("how much does it cost?") == Intent.QUESTION
     assert heuristic_classifier("okay, what do you want?") == Intent.QUESTION
     assert heuristic_classifier("why are you calling me") == Intent.QUESTION

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 import traceback
 from pathlib import Path
 
@@ -15,8 +16,16 @@ from .pipeline import build_pipeline
 
 _CRASH_LOG = Path("/tmp/telnyx_events.log")
 _active_call_ids: set[str] = set()
-_completed_call_ids: set[str] = set()
+_completed_call_ids: dict[str, float] = {}
 _session_lock = asyncio.Lock()
+_COMPLETED_TTL_S = 120.0
+
+
+def _prune_completed_calls() -> None:
+    now = time.monotonic()
+    stale = [key for key, ts in _completed_call_ids.items() if now - ts > _COMPLETED_TTL_S]
+    for key in stale:
+        _completed_call_ids.pop(key, None)
 
 
 def _event(msg: str) -> None:
@@ -62,6 +71,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
 
         session_key = call_control_id or stream_id
         async with _session_lock:
+            _prune_completed_calls()
             if session_key in _completed_call_ids:
                 _event(f"=== WS REJECTED (call already ended {session_key}) ===")
                 await websocket.close(code=1000)
@@ -148,4 +158,4 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
         if session_key:
             async with _session_lock:
                 _active_call_ids.discard(session_key)
-                _completed_call_ids.add(session_key)
+                _completed_call_ids[session_key] = time.monotonic()

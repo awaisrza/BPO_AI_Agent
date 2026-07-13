@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Optional
 
+import re
+
 from .config import ScriptConfig
 from .knowledge import match_knowledge
 from .speech_renderer import prepare_for_speech
@@ -60,7 +62,18 @@ _POSITIVE = {
 _GREETING_ACK = {"good", "fine", "well", "doing well", "i'm fine", "im fine", "great"}
 _CONSENT = {"yes", "yeah", "yep", "sure", "ok", "okay", "go ahead", "interested", "correct", "i do"}
 _QUALIFY_YES = {"yes", "yeah", "yep", "sure", "correct", "absolutely", "definitely"}
-_NEGATIVE = {"no", "nope", "not interested", "stop", "remove me", "don't call", "busy", "later"}
+_NEGATIVE = (
+    "no",
+    "nope",
+    "not interested",
+    "stop",
+    "remove me",
+    "don't call",
+    "do not call",
+    "busy",
+    "later",
+    "no thanks",
+)
 _QUESTION_MARKERS = (
     "what ",
     "how ",
@@ -87,6 +100,23 @@ _QUESTION_MARKERS = (
 )
 
 
+def _matches_phrase(utterance: str, phrases: tuple[str, ...] | set[str]) -> bool:
+    u = utterance.strip().lower()
+    if not u:
+        return False
+    ordered = sorted(phrases, key=len, reverse=True)
+    for phrase in ordered:
+        p = phrase.strip().lower()
+        if not p:
+            continue
+        if " " in p:
+            if p in u:
+                return True
+        elif re.search(rf"\b{re.escape(p)}\b", u):
+            return True
+    return False
+
+
 def _looks_like_question(utterance: str) -> bool:
     u = utterance.strip().lower()
     if not u:
@@ -99,15 +129,14 @@ def _looks_like_question(utterance: str) -> bool:
 
 
 def _is_consent(utterance: str) -> bool:
-    u = utterance.strip().lower()
-    return any(p in u for p in _CONSENT)
+    return _matches_phrase(utterance, _CONSENT)
 
 
 def _is_qualify_yes(utterance: str) -> bool:
     u = utterance.strip().lower()
     if not u:
         return False
-    if "i do" in u or "i have" in u:
+    if _matches_phrase(u, ("i do", "i have")):
         return True
     words = set(u.replace(",", " ").replace(".", " ").split())
     return bool(words & _QUALIFY_YES)
@@ -117,7 +146,7 @@ def _is_greeting_ack_only(utterance: str) -> bool:
     u = utterance.strip().lower()
     if _is_consent(u) or _looks_like_question(u):
         return False
-    return any(p in u for p in _GREETING_ACK)
+    return _matches_phrase(u, _GREETING_ACK)
 
 
 def heuristic_classifier(utterance: str, _context: str = "") -> Intent:
@@ -126,11 +155,11 @@ def heuristic_classifier(utterance: str, _context: str = "") -> Intent:
         return Intent.UNCLEAR
     if _looks_like_question(u):
         return Intent.QUESTION
-    if any(p in u for p in _NEGATIVE):
+    if _matches_phrase(u, _NEGATIVE):
         return Intent.NEGATIVE
     if _is_consent(u):
         return Intent.POSITIVE
-    if any(p in u for p in _POSITIVE):
+    if _matches_phrase(u, _POSITIVE):
         return Intent.POSITIVE
     return Intent.UNCLEAR
 

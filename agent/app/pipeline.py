@@ -62,6 +62,36 @@ except Exception:  # pragma: no cover - allows the FSM/tests to run without Pipe
     FrameProcessor = object  # type: ignore
 
 
+_STT_IGNORE = frozenset({
+    "you",
+    "the",
+    "a",
+    "an",
+    "oh",
+    "um",
+    "uh",
+    "hmm",
+    "bye",
+    "thanks",
+    "thank you",
+    ".",
+    "..",
+    "...",
+})
+
+
+def _is_meaningful_caller_text(text: str) -> bool:
+    t = text.strip().lower()
+    if len(t) < 2:
+        return False
+    if t in _STT_IGNORE:
+        return False
+    words = [w for w in t.replace(",", " ").split() if w]
+    if len(words) == 1 and len(words[0]) <= 2 and words[0] not in {"no", "yes"}:
+        return False
+    return True
+
+
 class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     def __init__(
         self,
@@ -71,12 +101,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         *,
         mic_test: bool = False,
         call_controller: CallController | None = None,
+        telephony_phone_test: bool = False,
     ):
         super().__init__()
         self._engine = engine
         self._vici = vicidial
         self._agent_user = agent_user
         self._mic_test = mic_test
+        self._telephony_phone_test = telephony_phone_test
         self._opened = False
         self._call = call_controller or CallController()
         self._pending_caller_text: str | None = None
@@ -127,10 +159,27 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
         text = self._caller_buffer.strip()
         self._caller_buffer = ""
-        if not text:
+        if not _is_meaningful_caller_text(text):
+            logger.info(f"Ignoring low-confidence STT fragment: {text!r}")
             return
         self._call.close_user_turn()
         await self._handle_caller(text)
+
+    def _queue_pending_caller_text(self, text: str) -> None:
+        if not _is_meaningful_caller_text(text):
+            return
+        prev = self._pending_caller_text
+        self._pending_caller_text = self._merge_transcripts(prev, text) if prev else text
+        logger.info(
+            "STT heard caller while bot speaking — queued: "
+            f"{self._pending_caller_text[:64]!r}"
+        )
+
+    def _move_pending_to_buffer(self) -> None:
+        if not self._pending_caller_text:
+            return
+        self._buffer_caller_text(self._pending_caller_text)
+        self._pending_caller_text = None
 
     async def _handle_caller(self, text: str) -> None:
         self._call.close_user_turn()
@@ -156,7 +205,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     logger.info(f"FSM -> warm transfer (preset={preset})")
                     await self._vici.warm_transfer(self._agent_user, preset=preset)
                 await self._vici.set_disposition(self._agent_user, "XFER")
-            await self.push_frame(EndFrame())
+            if not self._telephony_phone_test:
+                await self.push_frame(EndFrame())
         elif turn.action == Action.HANGUP:
             if self._mic_test:
                 logger.info("MIC TEST -> call ended (hangup simulated)")
@@ -192,13 +242,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, BotStoppedSpeakingFrame):
-            self._call.on_bot_chunk_finished()
             if self._call.can_accept_caller():
-                if self._pending_caller_text:
-                    self._buffer_caller_text(self._pending_caller_text)
-                    self._pending_caller_text = None
+                self._move_pending_to_buffer()
                 if self._caller_buffer:
-                    await self._flush_caller_buffer()
+                    self._schedule_caller_flush()
             await self.push_frame(frame, direction)
             return
 
@@ -219,14 +266,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             if not self._call.can_accept_caller():
                 if self._call.state in (CallState.SPEAKING, CallState.PROCESSING):
-                    prev = self._pending_caller_text
-                    self._pending_caller_text = (
-                        self._merge_transcripts(prev, text) if prev else text
-                    )
-                    logger.info(
-                        "STT heard caller while bot speaking — queued: "
-                        f"{self._pending_caller_text[:64]!r}"
-                    )
+                    self._queue_pending_caller_text(text)
+                return
+
+            if not _is_meaningful_caller_text(text):
                 return
 
             self._buffer_caller_text(text)
@@ -518,6 +561,7 @@ def build_pipeline(
         agent_user,
         mic_test=mic_test,
         call_controller=call_controller,
+        telephony_phone_test=telephony and mic_test,
     )
     barge_in = BargeInProcessor(call_controller, telephony=telephony)
     max_words, pause_min, pause_max = _speech_settings(telephony=telephony)
