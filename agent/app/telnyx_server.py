@@ -11,6 +11,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import httpx
 import uvicorn
@@ -133,6 +134,10 @@ def _log_greeting_cache(script: ScriptConfig) -> None:
         _event(f"KB cache check skipped: {exc}")
 
 
+_TELNYX_API_RETRIES = 4
+_TELNYX_API_RETRY_DELAY_S = 2.0
+
+
 def _place_telnyx_call(*, to_number: str, from_number: str, answer_url: str) -> dict:
     url = (
         f"https://api.telnyx.com/v2/texml/Accounts/{settings.telnyx_account_sid}/Calls"
@@ -150,11 +155,24 @@ def _place_telnyx_call(*, to_number: str, from_number: str, answer_url: str) -> 
         "StatusCallback": f"{settings.local_server_url.rstrip('/')}/status",
         "StatusCallbackMethod": "POST",
     }
-    with httpx.Client(timeout=30.0) as client:
-        resp = client.post(url, headers=headers, json=payload)
-        if resp.status_code != 200:
-            raise RuntimeError(f"Telnyx API error ({resp.status_code}): {resp.text}")
-        return resp.json()
+    last_exc: Exception | None = None
+    for attempt in range(1, _TELNYX_API_RETRIES + 1):
+        try:
+            with httpx.Client(timeout=45.0) as client:
+                resp = client.post(url, headers=headers, json=payload)
+            if resp.status_code != 200:
+                raise RuntimeError(f"Telnyx API error ({resp.status_code}): {resp.text}")
+            return resp.json()
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
+            last_exc = exc
+            _event(
+                f"Telnyx API network error (attempt {attempt}/{_TELNYX_API_RETRIES}): {exc}"
+            )
+            if attempt < _TELNYX_API_RETRIES:
+                time.sleep(_TELNYX_API_RETRY_DELAY_S * attempt)
+    raise RuntimeError(
+        f"Telnyx API unreachable after {_TELNYX_API_RETRIES} attempts: {last_exc}"
+    ) from last_exc
 
 
 def create_telnyx_app(script: ScriptConfig, agent_user: str) -> FastAPI:
@@ -176,10 +194,22 @@ def create_telnyx_app(script: ScriptConfig, agent_user: str) -> FastAPI:
     async def status(request: Request) -> Response:
         body = ""
         try:
-            body = (await request.body()).decode("utf-8", errors="replace")[:300]
+            body = (await request.body()).decode("utf-8", errors="replace")
         except Exception:
             pass
-        _event(f"=== /status {request.method} body={body!r} ===")
+        params = {k: v[0] for k, v in parse_qs(body).items()}
+        summary = {
+            "CallStatus": params.get("CallStatus"),
+            "CallDuration": params.get("CallDuration"),
+            "SipResponseCode": params.get("SipResponseCode"),
+            "ErrorCode": params.get("ErrorCode") or params.get("error_code"),
+            "ErrorMessage": params.get("ErrorMessage") or params.get("error_message"),
+            "To": params.get("To"),
+            "From": params.get("From"),
+        }
+        _event(f"=== /status {request.method} {summary} ===")
+        if summary.get("CallStatus") == "failed" and not params.get("SipResponseCode"):
+            _event(f"=== /status raw (truncated): {body[:500]!r} ===")
         return Response(content="", status_code=200)
 
     @app.get("/stream-status")
@@ -323,10 +353,15 @@ def run_telnyx_server(
                 answer_url=answer_url,
             )
             _event(f"=== DIALED {dial_to} result={result} ===")
-            print(f"Dialing {dial_to} now — answer your phone.\n")
+            print(f"Dialing {dial_to} now — answer your phone.")
+            print("Keep this server running until the call ends (do not Ctrl+C early).\n")
         except Exception:
             _event("=== DIAL FAILED ===\n" + traceback.format_exc())
             print("DIAL FAILED — see /tmp/telnyx_events.log")
+            print(
+                "If the error mentions SSL/EOF, retry in a few seconds or run:\n"
+                "  curl -I https://api.telnyx.com\n"
+            )
 
     if dial_to:
         threading.Thread(target=_dial_after_ready, daemon=True).start()
