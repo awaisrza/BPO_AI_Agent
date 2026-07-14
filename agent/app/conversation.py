@@ -302,6 +302,11 @@ class ConversationEngine:
                         return turn
                 return self._escalate()
 
+            if self._kb_only_answer(utterance):
+                turn = self._respond_offscript(utterance)
+                if turn:
+                    return turn
+
             if is_question:
                 turn = self._respond_offscript(utterance)
                 if turn:

@@ -114,7 +114,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._pending_caller_text: str | None = None
         self._caller_buffer: str = ""
         self._flush_task: asyncio.Task | None = None
-        self._caller_flush_delay_s = 0.75
+        self._caller_flush_delay_s = 0.4 if telephony_phone_test else 0.75
 
     def _merge_transcripts(self, prev: str, new: str) -> str:
         prev_s, new_s = prev.strip(), new.strip()
@@ -253,8 +253,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, VADUserStoppedSpeakingFrame):
+            if self._pending_caller_text:
+                self._buffer_caller_text(self._pending_caller_text)
+                self._pending_caller_text = None
             if self._call.can_accept_caller() and self._caller_buffer:
                 await self._flush_caller_buffer()
+            elif self._caller_buffer:
+                self._schedule_caller_flush()
             await self.push_frame(frame, direction)
             return
 
@@ -301,7 +306,14 @@ def _speech_settings(*, telephony: bool = False) -> tuple[int, int, int]:
 
 def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> list[str]:
     max_words, pause_min, pause_max = _speech_settings(telephony=telephony)
-    lines = [script.greeting, script.pitch, *script.qualifying_questions]
+    engine = ConversationEngine(script=script)
+    lines = [
+        script.greeting,
+        script.pitch,
+        engine._consent_prompt(),
+        engine._short_prompt,
+        *script.qualifying_questions,
+    ]
     lines.extend([script.transfer_line, script.not_interested_line])
     for entry in script.knowledge_base:
         answer = prepare_for_speech(entry.answer)
