@@ -256,6 +256,39 @@ class ConversationEngine:
             return self._speak_new(current)
         return self._speak_new("Sorry — could you say yes or no?")
 
+    def _pitch_consent_question(self) -> str:
+        pitch = prepare_for_speech(self.script.pitch)
+        if pitch:
+            sentences = [s.strip() for s in pitch.replace("!", ".").split(".") if s.strip()]
+            for sentence in reversed(sentences):
+                if "?" in sentence:
+                    return sentence if sentence.endswith("?") else f"{sentence}?"
+        return self._short_prompt
+
+    def _anchor_to_pitch_consent(self, reply: str) -> str:
+        question = self._pitch_consent_question()
+        if question.strip().lower() in reply.strip().lower():
+            return reply
+        return f"{reply} {question}"
+
+    def _respond_offscript_pitch(self, utterance: str) -> Turn | None:
+        turn = self._respond_offscript(utterance)
+        if not turn or self.state != State.PITCH:
+            return turn
+        anchored = self._anchor_to_pitch_consent(turn.reply)
+        if anchored == turn.reply:
+            return turn
+        return self._speak_new(anchored)
+
+    def _respond_offscript_pre_consent(self, utterance: str) -> Turn | None:
+        turn = self._respond_offscript(utterance)
+        if not turn:
+            return None
+        anchored = self._anchor_to_pitch_consent(turn.reply)
+        if anchored == turn.reply:
+            return turn
+        return self._speak_new(anchored)
+
     def _anchor_to_current_qualifier(self, reply: str) -> str:
         questions = self.script.qualifying_questions
         if not questions or self._qualify_idx == 0:
@@ -322,7 +355,7 @@ class ConversationEngine:
             if is_question:
                 if self._pitch_kb_answers >= self._max_pitch_kb_answers:
                     return self._deliver_pitch()
-                turn = self._respond_offscript(utterance)
+                turn = self._respond_offscript_pitch(utterance)
                 if turn:
                     return turn
                 return self._escalate()
@@ -345,7 +378,7 @@ class ConversationEngine:
                     self._answered_kb_pre_consent = False
                     return self._next_qualifier()
                 if is_question:
-                    turn = self._respond_offscript(utterance)
+                    turn = self._respond_offscript_pre_consent(utterance)
                     if turn:
                         return turn
                 return self._escalate()

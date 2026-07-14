@@ -221,6 +221,32 @@ def test_all_right_after_kb_advances_to_qualify():
     assert "eligibility check" not in turn.reply.lower()
 
 
+def test_kb_how_did_you_get_number_reanchors_pitch_consent():
+    from app.knowledge import answer_offscript as kb_answer
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Great — I'll be quick. I'm calling about your Medicare plan. Do you have a moment for a quick eligibility check?",
+        qualifying_questions=["Do you have Part A and B?"],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic="How did you get my number",
+                triggers=["how did you get my number"],
+                answer="Your number came from a public Medicare outreach list.",
+            ),
+        ],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
+    )
+    e.open()
+    e.handle("I'm good")
+    turn = e.handle("how did you get my number")
+    assert "outreach list" in turn.reply.lower()
+    assert "moment" in turn.reply.lower() or "eligibility check" in turn.reply.lower()
+
+
 def test_kb_already_have_benefits_during_qualify():
     from app.knowledge import answer_offscript as kb_answer
 

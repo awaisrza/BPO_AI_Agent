@@ -83,11 +83,13 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             _active_call_ids.add(session_key)
 
         os.environ.setdefault("TELNYX_API_KEY", settings.telnyx_api_key or "")
+        inbound_encoding = outbound_encoding
+        _event(f"=== CODEC inbound={inbound_encoding} outbound={outbound_encoding} ===")
 
         serializer = TelnyxFrameSerializer(
             stream_id=stream_id,
             outbound_encoding=outbound_encoding,
-            inbound_encoding="PCMU",
+            inbound_encoding=inbound_encoding,
             call_control_id=call_control_id,
             api_key=settings.telnyx_api_key,
             params=TelnyxFrameSerializer.InputParams(auto_hang_up=False),

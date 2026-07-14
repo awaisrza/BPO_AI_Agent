@@ -73,11 +73,12 @@ def _public_base() -> str:
 def _texml_for_stream() -> str:
     stream_status = f"{_public_base()}/stream-status"
     ws_url = _websocket_url()
+    codec = os.getenv("TELNYX_STREAM_CODEC", "PCMA")
     # Connect keeps the call alive until the WebSocket media path is up (Start can drop early).
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="{ws_url}" bidirectionalMode="rtp" bidirectionalCodec="PCMU" statusCallback="{stream_status}" statusCallbackMethod="POST"/>
+    <Stream url="{ws_url}" bidirectionalMode="rtp" bidirectionalCodec="{codec}" statusCallback="{stream_status}" statusCallbackMethod="POST"/>
   </Connect>
   <Pause length="120"/>
 </Response>"""

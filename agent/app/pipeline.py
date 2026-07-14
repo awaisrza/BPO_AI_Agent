@@ -80,6 +80,18 @@ _STT_IGNORE = frozenset({
 })
 
 
+_STT_GREETING_FIXES = {
+    "i'm dead": "I'm good",
+    "im dead": "I'm good",
+    "i am dead": "I am good",
+}
+
+
+def _normalize_caller_stt(text: str) -> str:
+    key = text.strip().lower().rstrip(".")
+    return _STT_GREETING_FIXES.get(key, text)
+
+
 def _is_meaningful_caller_text(text: str) -> bool:
     t = text.strip().lower()
     if len(t) < 2:
@@ -182,6 +194,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._pending_caller_text = None
 
     async def _handle_caller(self, text: str) -> None:
+        text = _normalize_caller_stt(text)
         self._call.close_user_turn()
         self._call.on_processing()
         logger.info(f"CALLER: {text}")
@@ -322,6 +335,9 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
             if telephony and script.qualifying_questions:
                 for question in script.qualifying_questions:
                     lines.append(f"{answer} {question}")
+            if telephony:
+                consent_q = engine._pitch_consent_question()
+                lines.append(f"{answer} {consent_q}")
     if telephony:
         lines.append(TELEPHONY_KB_MISS_REPLY)
     raw = [line.strip() for line in lines if line and line.strip()]
