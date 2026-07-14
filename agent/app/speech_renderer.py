@@ -155,6 +155,7 @@ def normalize_spoken_text(text: str) -> str:
     cleaned = (text or "").strip()
     if not cleaned:
         return ""
+    cleaned = cleaned.replace("\u2014", " - ").replace("—", " - ").replace("–", " - ")
     for pattern, replacement in _REWRITES:
         cleaned = pattern.sub(replacement, cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned)

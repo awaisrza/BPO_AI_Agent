@@ -94,3 +94,24 @@ def test_written_to_spoken_rewrite():
     joined = " ".join(c.text for c in chunks).lower()
     assert "can you" in joined
     assert "in order to" not in joined
+
+
+def test_script_cache_covers_kb_anchor_chunks():
+    from app.config import ScriptConfig
+    from app.conversation import ConversationEngine
+    from app.knowledge import answer_offscript
+    from app.pipeline import _script_cache_lines
+
+    script = ScriptConfig.load("scripts/campaigns/4c3aaed2-2dc6-4828-9d19-1024636dc0ac.json")
+    engine = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: answer_offscript(
+            q, ctx, script.knowledge_base, telephony=True
+        ),
+    )
+    engine.open()
+    engine.handle("I'm good")
+    turn = engine.handle("how did you get my number")
+    cache = set(_script_cache_lines(script, telephony=True))
+    for chunk in render_speech_telephony(turn.reply):
+        assert chunk.text.strip() in cache, chunk.text

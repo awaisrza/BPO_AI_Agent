@@ -244,7 +244,7 @@ def test_kb_how_did_you_get_number_reanchors_pitch_consent():
     e.handle("I'm good")
     turn = e.handle("how did you get my number")
     assert "outreach list" in turn.reply.lower()
-    assert "moment" in turn.reply.lower() or "eligibility check" in turn.reply.lower()
+    assert "moment" in turn.reply.lower() or "yes or no" in turn.reply.lower()
 
 
 def test_kb_already_have_benefits_during_qualify():

@@ -269,6 +269,11 @@ class ConversationEngine:
         question = self._pitch_consent_question()
         if question.strip().lower() in reply.strip().lower():
             return reply
+        if reply.strip().endswith("?") or _matches_phrase(
+            reply.lower(),
+            ("fair enough", "thirty-second check", "30-second check", "quick check", "quick moment"),
+        ):
+            return f"{reply} {self._short_prompt}"
         return f"{reply} {question}"
 
     def _respond_offscript_pitch(self, utterance: str) -> Turn | None:

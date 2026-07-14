@@ -319,6 +319,9 @@ def _speech_settings(*, telephony: bool = False) -> tuple[int, int, int]:
 
 def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> list[str]:
     max_words, pause_min, pause_max = _speech_settings(telephony=telephony)
+    if telephony:
+        # Must match SpeechRendererNode (telephony_utterance_max_words), not speech_max_words.
+        max_words = settings.telephony_utterance_max_words
     engine = ConversationEngine(script=script)
     lines = [
         script.greeting,
@@ -328,16 +331,17 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
         *script.qualifying_questions,
     ]
     lines.extend([script.transfer_line, script.not_interested_line])
+    consent_q = engine._pitch_consent_question()
     for entry in script.knowledge_base:
         answer = prepare_for_speech(entry.answer)
-        if answer:
-            lines.append(answer)
-            if telephony and script.qualifying_questions:
-                for question in script.qualifying_questions:
-                    lines.append(f"{answer} {question}")
-            if telephony:
-                consent_q = engine._pitch_consent_question()
-                lines.append(f"{answer} {consent_q}")
+        if not answer:
+            continue
+        lines.append(answer)
+        if telephony:
+            lines.append(f"{answer} {consent_q}")
+            lines.append(f"{answer} {engine._short_prompt}")
+            for question in script.qualifying_questions:
+                lines.append(f"{answer} {question}")
     if telephony:
         lines.append(TELEPHONY_KB_MISS_REPLY)
     raw = [line.strip() for line in lines if line and line.strip()]

@@ -82,10 +82,17 @@ def test_answer_offscript_falls_back_to_gemini_on_miss(monkeypatch):
     assert reply == "gemini:my wife handles the bills"
 
 
-def test_answer_offscript_telephony_returns_empty_on_miss(monkeypatch):
+def test_answer_offscript_telephony_returns_fallback_on_miss(monkeypatch):
+    monkeypatch.setattr("app.knowledge.settings.google_api_key", "")
+    reply = answer_offscript("my dog is barking", "pitch", _entries(), telephony=True)
+    assert "specialist" in reply.lower()
+
+
+def test_answer_offscript_telephony_uses_gemini_on_miss(monkeypatch):
+    monkeypatch.setattr("app.knowledge.settings.google_api_key", "test-key")
     monkeypatch.setattr(
         "app.knowledge.generate_gemini_reply",
-        lambda *_args, **_kwargs: "GEMINI SHOULD NOT RUN",
+        lambda q, ctx, kb, timeout_secs=3.0: f"gemini:{q}",
     )
     reply = answer_offscript("my dog is barking", "pitch", _entries(), telephony=True)
-    assert reply == ""
+    assert reply == "gemini:my dog is barking"
