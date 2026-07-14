@@ -116,6 +116,11 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
         _event(
             f"=== PIPELINE BUILT in {(time.monotonic() - build_started) * 1000:.0f}ms ==="
         )
+        if (time.monotonic() - build_started) > 2.0:
+            _event(
+                "WARNING: pipeline build >2s — Telnyx may hang up before greeting. "
+                "Ensure pre-warm finished and STT reuse log appears on connect."
+            )
         tts_for_cleanup = pipeline.processors[-2] if pipeline.processors else None
 
         worker_kwargs = {

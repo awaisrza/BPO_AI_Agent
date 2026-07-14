@@ -319,6 +319,9 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
         answer = prepare_for_speech(entry.answer)
         if answer:
             lines.append(answer)
+            if telephony and script.qualifying_questions:
+                for question in script.qualifying_questions:
+                    lines.append(f"{answer} {question}")
     if telephony:
         lines.append(TELEPHONY_KB_MISS_REPLY)
     raw = [line.strip() for line in lines if line and line.strip()]

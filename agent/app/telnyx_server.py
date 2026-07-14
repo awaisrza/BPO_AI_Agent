@@ -7,6 +7,7 @@ TeXML webhook: {LOCAL_SERVER_URL}/answer
 from __future__ import annotations
 
 import os
+import socket
 import threading
 import time
 import traceback
@@ -274,6 +275,22 @@ def _wait_for_health(port: int, timeout: float = 30.0) -> None:
     raise RuntimeError(f"Server did not become healthy on {url}")
 
 
+def _port_in_use(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        return sock.connect_ex((host, port)) == 0
+
+
+def _ensure_port_free(host: str, port: int) -> None:
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    if _port_in_use(probe_host, port):
+        raise RuntimeError(
+            f"Port {port} is already in use — an old run_telnyx.py is still running.\n"
+            f"Kill it first: kill $(lsof -t -i:{port})\n"
+            "Then restart. Do not dial until you see 'Uvicorn running'."
+        )
+
+
 def run_telnyx_server(
     script: ScriptConfig,
     agent_user: str,
@@ -285,6 +302,10 @@ def run_telnyx_server(
     from_number = settings.telnyx_phone_number
     if dial_to and not from_number:
         raise RuntimeError("Set TELNYX_PHONE_NUMBER to use --dial.")
+
+    host = settings.host
+    port = settings.port
+    _ensure_port_free(host, port)
 
     try:
         _CRASH_LOG.write_text("", encoding="utf-8")
@@ -307,8 +328,6 @@ def run_telnyx_server(
     _event("Pre-warm complete.")
 
     app = create_telnyx_app(script, agent_user)
-    host = settings.host
-    port = settings.port
 
     print("\n=== AI FRONTER — TELNYX PHONE TEST ===")
     print(f"Public URL:  {settings.local_server_url}")
