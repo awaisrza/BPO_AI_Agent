@@ -60,7 +60,23 @@ _POSITIVE = {
     "im fine",
 }
 _GREETING_ACK = {"good", "fine", "well", "doing well", "i'm fine", "im fine", "great"}
-_CONSENT = {"yes", "yeah", "yep", "sure", "ok", "okay", "go ahead", "interested", "correct", "i do"}
+_CONSENT = {
+    "yes",
+    "yeah",
+    "yep",
+    "sure",
+    "ok",
+    "okay",
+    "go ahead",
+    "interested",
+    "correct",
+    "i do",
+    "all right",
+    "alright",
+    "got it",
+    "i see",
+    "sounds good",
+}
 _QUALIFY_YES = {"yes", "yeah", "yep", "sure", "correct", "absolutely", "definitely"}
 _NEGATIVE = (
     "no",
@@ -186,6 +202,7 @@ class ConversationEngine:
     _last_reply: str = ""
     _consent_misses: int = 0
     _unclear_at_qualify: int = 0
+    _answered_kb_pre_consent: bool = False
     _short_prompt: str = "Just a quick yes or no — do you have a moment?"
 
     def _consent_prompt(self) -> str:
@@ -243,6 +260,8 @@ class ConversationEngine:
             return None
         if self.state == State.PITCH:
             self._pitch_kb_answers += 1
+        elif self.state == State.QUALIFY and not self._pitch_confirmed:
+            self._answered_kb_pre_consent = True
         return self._speak_new(answer)
 
     def _deliver_pitch(self) -> Turn:
@@ -250,6 +269,7 @@ class ConversationEngine:
         self.state = State.QUALIFY
         self._qualify_idx = 0
         self._pitch_confirmed = False
+        self._answered_kb_pre_consent = False
         return self._speak_new(self.script.pitch)
 
     def _objection_reply(self, utterance: str) -> str:
@@ -295,6 +315,14 @@ class ConversationEngine:
                 if intent == Intent.POSITIVE and _is_consent(utterance):
                     self._pitch_confirmed = True
                     self._consent_misses = 0
+                    self._answered_kb_pre_consent = False
+                    return self._next_qualifier()
+                if self._answered_kb_pre_consent and _matches_phrase(
+                    utterance, ("all right", "alright", "okay", "ok", "sure", "fine", "got it")
+                ):
+                    self._pitch_confirmed = True
+                    self._consent_misses = 0
+                    self._answered_kb_pre_consent = False
                     return self._next_qualifier()
                 if is_question:
                     turn = self._respond_offscript(utterance)

@@ -22,7 +22,7 @@
     },
     {
       "topic": "How did you get my number",
-      "triggers": ["how did you get my number", "how did you get", "where did you get"],
+      "triggers": ["how did you get my number", "how did you get", "where did you get", "how did you get my name"],
       "answer": "Your number came from a public Medicare outreach list. I can remove you if you'd like — it's just a thirty-second check first."
     },
     {
