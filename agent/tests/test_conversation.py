@@ -153,6 +153,47 @@ def test_loose_positive_does_not_skip_qualifiers():
     assert "100 dollars" not in turn.reply
 
 
+def test_all_right_during_qualify_advances():
+    e = make_engine()
+    e.open()
+    e.handle("ok")
+    e.handle("yes")
+    e.handle("how did you get my number")
+    turn = e.handle("all right")
+    assert "100 dollars" in turn.reply or "bill" in turn.reply.lower()
+
+
+def test_kb_already_have_reanchors_qualify_question():
+    from app.knowledge import answer_offscript as kb_answer
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare review. Do you have a moment?",
+        qualifying_questions=[
+            "Do you have Part A and B?",
+            "Are you interested in reviewing your plan options this year?",
+        ],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic="Already have benefits",
+                triggers=["already have"],
+                answer="That's great — a lot of folks still qualify for extra savings.",
+            ),
+        ],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
+    )
+    e.open()
+    e.handle("ok")
+    e.handle("yes")
+    e.handle("yes")
+    turn = e.handle("I already have benefits")
+    assert "great" in turn.reply.lower()
+    assert "plan options" in turn.reply.lower()
+
+
 def test_all_right_after_kb_advances_to_qualify():
     from app.knowledge import answer_offscript as kb_answer
 
@@ -205,7 +246,7 @@ def test_kb_already_have_benefits_during_qualify():
     e.handle("yes")
     turn = e.handle("I already have benefits")
     assert "great" in turn.reply.lower() or "savings" in turn.reply.lower()
-    assert "plan review" not in turn.reply.lower()
+    assert "plan review" in turn.reply.lower()
 
 
 def test_third_kb_in_pitch_advances_to_pitch():

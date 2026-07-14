@@ -103,6 +103,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
         )
 
         sample_rate = TELEPHONY_PIPELINE_RATE
+        build_started = time.monotonic()
         _event(f"=== BUILDING PIPELINE (sample_rate={sample_rate}) ===")
         pipeline = build_pipeline(
             transport,
@@ -111,6 +112,9 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             mic_test=True,
             sample_rate=sample_rate,
             telephony=True,
+        )
+        _event(
+            f"=== PIPELINE BUILT in {(time.monotonic() - build_started) * 1000:.0f}ms ==="
         )
         tts_for_cleanup = pipeline.processors[-2] if pipeline.processors else None
 
@@ -133,7 +137,8 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(_transport, _client) -> None:
-            _event("=== MEDIA READY — greeting should play within 1s ===")
+            ms = (time.monotonic() - connect_started) * 1000
+            _event(f"=== MEDIA READY — greeting should play within 1s (connect {ms:.0f}ms) ===")
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client) -> None:
@@ -142,6 +147,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
                 await tts_for_cleanup.cancel_background_work()
             await worker.cancel()
 
+        connect_started = time.monotonic()
         _event("=== STARTING RUNNER ===")
         try:
             runner = WorkerRunner(handle_sigint=False)

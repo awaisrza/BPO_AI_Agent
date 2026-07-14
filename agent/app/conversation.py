@@ -149,6 +149,8 @@ def _is_consent(utterance: str) -> bool:
 
 
 def _is_qualify_yes(utterance: str) -> bool:
+    if _is_consent(utterance):
+        return True
     u = utterance.strip().lower()
     if not u:
         return False
@@ -254,6 +256,24 @@ class ConversationEngine:
             return self._speak_new(current)
         return self._speak_new("Sorry — could you say yes or no?")
 
+    def _anchor_to_current_qualifier(self, reply: str) -> str:
+        questions = self.script.qualifying_questions
+        if not questions or self._qualify_idx == 0:
+            return reply
+        current = questions[self._qualify_idx - 1]
+        if current.strip().lower() in reply.strip().lower():
+            return reply
+        return f"{reply} {current}"
+
+    def _respond_offscript_qualify(self, utterance: str) -> Turn | None:
+        turn = self._respond_offscript(utterance)
+        if not turn or not self._pitch_confirmed or self._qualify_idx == 0:
+            return turn
+        anchored = self._anchor_to_current_qualifier(turn.reply)
+        if anchored == turn.reply:
+            return turn
+        return self._speak_new(anchored)
+
     def _respond_offscript(self, utterance: str) -> Turn | None:
         answer = self._try_offscript(utterance)
         if not answer or answer == self._last_reply:
@@ -331,12 +351,12 @@ class ConversationEngine:
                 return self._escalate()
 
             if self._kb_only_answer(utterance):
-                turn = self._respond_offscript(utterance)
+                turn = self._respond_offscript_qualify(utterance)
                 if turn:
                     return turn
 
             if is_question:
-                turn = self._respond_offscript(utterance)
+                turn = self._respond_offscript_qualify(utterance)
                 if turn:
                     return turn
                 return self._escalate()

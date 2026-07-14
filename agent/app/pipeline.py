@@ -548,9 +548,14 @@ def build_pipeline(
     mode = "telephony" if telephony else "local"
     logger.info(f"Voice backend: {backend} ({mode}, {sample_rate} Hz)")
 
-    # Telephony: fresh STT per call — shared WhisperSTTService blocks StartFrame on reconnect.
+    # Telephony: reuse pre-warmed Whisper when available (fresh load costs ~7s silence).
     if telephony:
-        stt = _build_stt(telephony=True)
+        if _cached_stt is not None:
+            stt = _cached_stt
+            logger.info("STT: reusing pre-warmed Whisper for telephony")
+        else:
+            stt = _build_stt(telephony=True)
+            _cached_stt = stt
     else:
         stt = _cached_stt or _build_stt(telephony=False)
     tts_base = _cached_tts.get((sample_rate, telephony)) or _build_tts(
