@@ -20,6 +20,13 @@ def test_prepare_for_speech_medicare_tone():
     assert "i'm calling about" in text.lower()
 
 
+def test_call_controller_finish_playback_opens_turn():
+    ctrl = CallController()
+    ctrl.begin_bot_reply(2)
+    ctrl.finish_bot_playback()
+    assert ctrl.can_accept_caller()
+
+
 def test_call_controller_turn_gating():
     ctrl = CallController()
     ctrl.begin_bot_reply(2)

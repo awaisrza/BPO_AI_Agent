@@ -105,6 +105,13 @@ class CallController:
     def on_response_start(self) -> None:
         self.begin_bot_reply(1)
 
+    def finish_bot_playback(self) -> None:
+        """Bot audio fully finished — open the caller's turn (one BSSF per reply on PSTN)."""
+        self._chunks_remaining = 0
+        self.interrupted = False
+        self.state = CallState.LISTENING
+        self._user_turn_open = True
+
     def on_bot_chunk_finished(self) -> None:
         if self._chunks_remaining > 0:
             self._chunks_remaining -= 1
@@ -350,7 +357,10 @@ if PIPECAT_AVAILABLE:
                 return
 
             if isinstance(frame, BotStoppedSpeakingFrame):
-                self._controller.on_bot_chunk_finished()
+                if self._telephony:
+                    self._controller.finish_bot_playback()
+                else:
+                    self._controller.on_bot_chunk_finished()
                 await self.push_frame(frame, direction)
                 return
 
@@ -372,7 +382,8 @@ if PIPECAT_AVAILABLE:
                 if not chunks:
                     return
 
-                self._controller.begin_bot_reply(len(chunks))
+                turn_gate = 1 if self._telephony else len(chunks)
+                self._controller.begin_bot_reply(turn_gate)
                 logger.debug(f"SpeechRenderer: {len(chunks)} chunk(s) from {frame.text[:48]!r}...")
                 for idx, chunk in enumerate(chunks):
                     if self._cancel_stream:

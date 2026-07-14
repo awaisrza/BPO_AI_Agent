@@ -242,6 +242,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, BotStoppedSpeakingFrame):
+            if self._pending_caller_text and not self._call.can_accept_caller():
+                self._call.finish_bot_playback()
+                logger.info("Bot playback done — releasing queued caller audio")
             if self._call.can_accept_caller():
                 self._move_pending_to_buffer()
                 if self._caller_buffer:
@@ -266,6 +269,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             if not self._call.can_accept_caller():
                 if self._call.state in (CallState.SPEAKING, CallState.PROCESSING):
+                    self._queue_pending_caller_text(text)
+                elif self._pending_caller_text:
                     self._queue_pending_caller_text(text)
                 return
 
