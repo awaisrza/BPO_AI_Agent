@@ -528,6 +528,8 @@ def build_pipeline(
     telephony: bool = False,
 ) -> Pipeline:
     """Assemble the live pipeline. `transport` provides audio in/out frames."""
+    global _cached_stt
+
     if not PIPECAT_AVAILABLE:
         extra = "whisper" if _is_local_gpu_backend() else "deepgram"
         raise RuntimeError(
