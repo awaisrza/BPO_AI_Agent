@@ -204,13 +204,21 @@ def create_telnyx_app(script: ScriptConfig, agent_user: str) -> FastAPI:
             "CallStatus": params.get("CallStatus"),
             "CallDuration": params.get("CallDuration"),
             "SipResponseCode": params.get("SipResponseCode"),
+            "SipHangupCause": params.get("SipHangupCause"),
             "ErrorCode": params.get("ErrorCode") or params.get("error_code"),
             "ErrorMessage": params.get("ErrorMessage") or params.get("error_message"),
             "To": params.get("To"),
             "From": params.get("From"),
         }
         _event(f"=== /status {request.method} {summary} ===")
-        if summary.get("CallStatus") == "failed" and not params.get("SipResponseCode"):
+        hangup = params.get("SipHangupCause") or ""
+        if summary.get("CallStatus") == "failed" and hangup == "404":
+            _event(
+                "=== CALL FAILED: SIP 404 — Telnyx could not route to this number. "
+                "Enable international (Pakistan +92) on your Outbound Voice Profile, "
+                "or verify the E.164 number is reachable. No WebSocket = bot never starts."
+            )
+        elif summary.get("CallStatus") == "failed" and not params.get("SipResponseCode"):
             _event(f"=== /status raw (truncated): {body[:500]!r} ===")
         return Response(content="", status_code=200)
 
