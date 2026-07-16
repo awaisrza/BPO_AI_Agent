@@ -390,10 +390,14 @@ if PIPECAT_AVAILABLE:
                     if self._cancel_stream:
                         break
                     prefetch = chunks[idx + 1].text if idx + 1 < len(chunks) else ""
+                    # Keep RTP alive between sentences on PSTN (Telnyx drops silent gaps).
+                    pause_ms = chunk.pause_after_ms
+                    if self._telephony and idx < len(chunks) - 1 and pause_ms <= 0:
+                        pause_ms = 180
                     await self.push_frame(
                         SpokenChunkFrame(
                             text=chunk.text,
-                            pause_after_ms=chunk.pause_after_ms,
+                            pause_after_ms=pause_ms,
                             reset_barge_in=(idx == 0),
                             prefetch_text=prefetch,
                         ),

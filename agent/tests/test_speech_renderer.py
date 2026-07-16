@@ -115,3 +115,7 @@ def test_script_cache_covers_kb_anchor_chunks():
     cache = set(_script_cache_lines(script, telephony=True))
     for chunk in render_speech_telephony(turn.reply):
         assert chunk.text.strip() in cache, chunk.text
+    follow = engine.take_pending_followup()
+    assert follow
+    for chunk in render_speech_telephony(follow):
+        assert chunk.text.strip() in cache, chunk.text

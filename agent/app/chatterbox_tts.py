@@ -318,6 +318,9 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             if cached is not None:
                 logger.info(f"Chatterbox cache HIT: {text[:48]!r}")
                 await self.stop_ttfb_metrics()
+                # Pace telephony frames near realtime so Telnyx Media Streams
+                # is not flooded (burst dumps often drop the WS mid-utterance).
+                frame_pace_s = (STREAM_FRAME_MS / 1000.0) * 0.75 if self._telephony else 0.0
                 for chunk in _chunk_pcm(cached, self.sample_rate):
                     if self.speech_is_cancelled():
                         return
@@ -327,6 +330,8 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
                         num_channels=1,
                         context_id=context_id,
                     )
+                    if frame_pace_s > 0:
+                        await asyncio.sleep(frame_pace_s)
                 await self.start_tts_usage_metrics(text)
                 return
 

@@ -205,7 +205,19 @@ class ConversationEngine:
     _consent_misses: int = 0
     _unclear_at_qualify: int = 0
     _answered_kb_pre_consent: bool = False
+    _pending_followup: str = ""
     _short_prompt: str = "Just a quick yes or no — do you have a moment?"
+
+    def take_pending_followup(self) -> str:
+        """Return and clear a deferred follow-up line (e.g. re-ask after KB)."""
+        text = self._pending_followup.strip()
+        self._pending_followup = ""
+        return text
+
+    def _queue_followup(self, text: str) -> None:
+        line = (text or "").strip()
+        if line:
+            self._pending_followup = line
 
     def _consent_prompt(self) -> str:
         pitch = prepare_for_speech(self.script.pitch)
@@ -265,52 +277,49 @@ class ConversationEngine:
                     return sentence if sentence.endswith("?") else f"{sentence}?"
         return self._short_prompt
 
-    def _anchor_to_pitch_consent(self, reply: str) -> str:
-        question = self._pitch_consent_question()
-        if question.strip().lower() in reply.strip().lower():
-            return reply
-        if reply.strip().endswith("?") or _matches_phrase(
-            reply.lower(),
-            ("fair enough", "thirty-second check", "30-second check", "quick check", "quick moment"),
-        ):
-            return f"{reply} {self._short_prompt}"
-        return f"{reply} {question}"
-
     def _respond_offscript_pitch(self, utterance: str) -> Turn | None:
         turn = self._respond_offscript(utterance)
         if not turn or self.state != State.PITCH:
             return turn
-        anchored = self._anchor_to_pitch_consent(turn.reply)
-        if anchored == turn.reply:
-            return turn
-        return self._speak_new(anchored)
+        # Speak KB only; consent question follows after playback (keeps Telnyx stream stable).
+        question = self._pitch_consent_question()
+        if question.strip().lower() not in turn.reply.strip().lower():
+            self._queue_followup(question)
+        return turn
 
     def _respond_offscript_pre_consent(self, utterance: str) -> Turn | None:
         turn = self._respond_offscript(utterance)
         if not turn:
             return None
-        anchored = self._anchor_to_pitch_consent(turn.reply)
-        if anchored == turn.reply:
-            return turn
-        return self._speak_new(anchored)
-
-    def _anchor_to_current_qualifier(self, reply: str) -> str:
-        questions = self.script.qualifying_questions
-        if not questions or self._qualify_idx == 0:
-            return reply
-        current = questions[self._qualify_idx - 1]
-        if current.strip().lower() in reply.strip().lower():
-            return reply
-        return f"{reply} {current}"
+        question = self._pitch_consent_question()
+        if question.strip().lower() not in turn.reply.strip().lower():
+            follow = (
+                self._short_prompt
+                if turn.reply.strip().endswith("?")
+                or _matches_phrase(
+                    turn.reply.lower(),
+                    (
+                        "fair enough",
+                        "thirty-second check",
+                        "30-second check",
+                        "quick check",
+                        "quick moment",
+                    ),
+                )
+                else question
+            )
+            self._queue_followup(follow)
+        return turn
 
     def _respond_offscript_qualify(self, utterance: str) -> Turn | None:
         turn = self._respond_offscript(utterance)
         if not turn or not self._pitch_confirmed or self._qualify_idx == 0:
             return turn
-        anchored = self._anchor_to_current_qualifier(turn.reply)
-        if anchored == turn.reply:
-            return turn
-        return self._speak_new(anchored)
+        questions = self.script.qualifying_questions
+        current = questions[self._qualify_idx - 1]
+        if current.strip().lower() not in turn.reply.strip().lower():
+            self._queue_followup(current)
+        return turn
 
     def _respond_offscript(self, utterance: str) -> Turn | None:
         answer = self._try_offscript(utterance)

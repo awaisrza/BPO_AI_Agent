@@ -191,7 +191,8 @@ def test_kb_already_have_reanchors_qualify_question():
     e.handle("yes")
     turn = e.handle("I already have benefits")
     assert "great" in turn.reply.lower()
-    assert "plan options" in turn.reply.lower()
+    assert "plan options" not in turn.reply.lower()
+    assert "plan options" in e.take_pending_followup().lower()
 
 
 def test_all_right_after_kb_advances_to_qualify():
@@ -244,7 +245,9 @@ def test_kb_how_did_you_get_number_reanchors_pitch_consent():
     e.handle("I'm good")
     turn = e.handle("how did you get my number")
     assert "outreach list" in turn.reply.lower()
-    assert "moment" in turn.reply.lower() or "yes or no" in turn.reply.lower()
+    assert "eligibility check" not in turn.reply.lower()
+    follow = e.take_pending_followup()
+    assert "moment" in follow.lower() or "eligibility" in follow.lower()
 
 
 def test_kb_already_have_benefits_during_qualify():
@@ -272,7 +275,8 @@ def test_kb_already_have_benefits_during_qualify():
     e.handle("yes")
     turn = e.handle("I already have benefits")
     assert "great" in turn.reply.lower() or "savings" in turn.reply.lower()
-    assert "plan review" in turn.reply.lower()
+    assert "plan review" not in turn.reply.lower()
+    assert "plan review" in e.take_pending_followup().lower()
 
 
 def test_third_kb_in_pitch_advances_to_pitch():

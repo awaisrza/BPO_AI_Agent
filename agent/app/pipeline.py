@@ -124,6 +124,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._opened = False
         self._call = call_controller or CallController()
         self._pending_caller_text: str | None = None
+        self._followup_reply: str | None = None
         self._caller_buffer: str = ""
         self._flush_task: asyncio.Task | None = None
         self._caller_flush_delay_s = 0.4 if telephony_phone_test else 0.75
@@ -201,6 +202,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         turn = self._engine.handle(text)
         spoken = render_speech(turn.reply)
         logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")
+        followup = self._engine.take_pending_followup()
+        self._followup_reply = followup or None
+        if followup:
+            logger.info(f"BOT follow-up queued: {followup[:64]!r}")
         await self.push_frame(TTSSpeakFrame(turn.reply))
 
         if turn.action == Action.TRANSFER:
@@ -227,7 +232,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 logger.info("FSM -> disposition + hangup")
                 await self._vici.set_disposition(self._agent_user, "NI")
                 await self._vici.hangup(self._agent_user)
-            await self.push_frame(EndFrame())
+            # Keep Telnyx media alive during phone tests so a disposition line
+            # does not tear down the stream before the caller hears it.
+            if not self._telephony_phone_test:
+                await self.push_frame(EndFrame())
 
     async def process_frame(self, frame, direction):  # type: ignore[override]
         await super().process_frame(frame, direction)
@@ -255,6 +263,17 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, BotStoppedSpeakingFrame):
+            if self._followup_reply:
+                followup = self._followup_reply
+                self._followup_reply = None
+                spoken = render_speech(followup)
+                logger.info(
+                    f"BOT follow-up: {' | '.join(c.text for c in spoken) or followup}"
+                )
+                self._call.on_processing()
+                await self.push_frame(TTSSpeakFrame(followup))
+                await self.push_frame(frame, direction)
+                return
             if self._pending_caller_text and not self._call.can_accept_caller():
                 self._call.finish_bot_playback()
                 logger.info("Bot playback done — releasing queued caller audio")
