@@ -16,7 +16,6 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOrg } from "@/components/layout/org-provider";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 
@@ -134,7 +133,6 @@ export function Sidebar() {
             Pilot
           </span>
         )}
-        <ThemeToggle variant="sidebar" className="mt-3" />
       </div>
     </aside>
   );
