@@ -56,6 +56,54 @@
     --shadow-focus: 0 0 0 2px var(--bg-base), 0 0 0 4px rgba(26, 107, 82, 0.35);
   }
 
+  .dark {
+    /* Canvas — near-black with gray steps */
+    --bg-base: #0a0a0b;
+    --bg-raised: #141416;
+    --bg-overlay: #1c1c1f;
+    --bg-hover: #232326;
+
+    /* Text — gray ramp */
+    --text-primary: #f4f4f5;
+    --text-secondary: #c9c9ce;
+    --text-muted: #92929a;
+    --text-faint: #66666e;
+
+    /* Borders */
+    --border-default: #26262a;
+    --border-subtle: #1e1e21;
+
+    /* Brand — brightened pine for contrast on black */
+    --brand: #34b98a;
+    --brand-hover: #4ecda0;
+    --brand-muted: rgba(52, 185, 138, 0.14);
+    --brand-foreground: #0a0a0b;
+
+    /* Sidebar — black panel, one step darker than canvas cards */
+    --sidebar-bg: #060607;
+    --sidebar-raised: #131315;
+    --sidebar-border: #1e1e21;
+    --sidebar-text: #f4f4f5;
+    --sidebar-muted: #92929a;
+    --sidebar-faint: #5c5c63;
+    --sidebar-accent: #4ecda0;
+    --sidebar-active: rgba(78, 205, 160, 0.1);
+
+    /* Status — lifted for dark contrast */
+    --status-success: #34d27b;
+    --status-success-muted: rgba(52, 210, 123, 0.12);
+    --status-warning: #e8a13c;
+    --status-warning-muted: rgba(232, 161, 60, 0.12);
+    --status-danger: #f0564f;
+    --status-danger-muted: rgba(240, 86, 79, 0.12);
+    --status-info: #4db3d9;
+    --status-info-muted: rgba(77, 179, 217, 0.12);
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-focus: 0 0 0 2px var(--bg-base), 0 0 0 4px rgba(52, 185, 138, 0.4);
+  }
+
   * {
     @apply border-surface-border;
   }
@@ -71,6 +119,10 @@
   ::selection {
     background: rgba(26, 107, 82, 0.18);
     color: var(--text-primary);
+  }
+
+  .dark ::selection {
+    background: rgba(52, 185, 138, 0.25);
   }
 }
 
@@ -96,6 +148,14 @@
     background-image: radial-gradient(
       70rem 22rem at 50% -8rem,
       rgba(26, 107, 82, 0.05),
+      transparent 65%
+    );
+  }
+
+  .dark .canvas-atmosphere {
+    background-image: radial-gradient(
+      70rem 22rem at 50% -8rem,
+      rgba(52, 185, 138, 0.05),
       transparent 65%
     );
   }

@@ -28,6 +28,14 @@ export default function RootLayout({
       className={`${body.variable} ${display.variable}`}
       suppressHydrationWarning
     >
+      <head>
+        {/* Apply saved theme before paint to avoid a light-mode flash */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem("theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.classList.add("dark")}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="font-sans" suppressHydrationWarning>
         {children}
       </body>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell, Menu } from "lucide-react";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { UserMenu } from "@/components/layout/user-menu";
 import { cn } from "@/lib/utils";
 
@@ -70,6 +71,7 @@ export function TopBar({ title }: { title?: string }) {
       </div>
 
       <div className="flex items-center gap-1">
+        <ThemeToggle />
         <button
           type="button"
           className="rounded-md p-2 text-foreground-faint transition-colors hover:bg-surface-overlay hover:text-foreground-muted"
