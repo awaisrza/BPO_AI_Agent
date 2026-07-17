@@ -71,7 +71,6 @@ export function TopBar({ title }: { title?: string }) {
       </div>
 
       <div className="flex items-center gap-1">
-        <ThemeToggle />
         <button
           type="button"
           className="rounded-md p-2 text-foreground-muted transition-colors hover:bg-surface-overlay hover:text-foreground-secondary"
