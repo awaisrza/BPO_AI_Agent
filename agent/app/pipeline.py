@@ -21,14 +21,20 @@ import asyncio
 from loguru import logger
 
 from .config import settings, ScriptConfig
-from .conversation import Action, ConversationEngine
+from .conversation import (
+    Action,
+    ConversationEngine,
+    _is_consent,
+    _looks_like_question,
+)
 from .fish_tts import FishAudioTTSService
-from .gemini import TELEPHONY_KB_MISS_REPLY
+from .gemini import FALLBACK_REPLY, TELEPHONY_KB_MISS_REPLY
 from .knowledge import answer_offscript
 from .speech_renderer import (
     BargeInProcessor,
     CallController,
     CallState,
+    RtpKeepaliveStartFrame,
     SpeechRendererNode,
     iter_chunk_texts,
     prepare_for_speech,
@@ -104,6 +110,16 @@ def _is_meaningful_caller_text(text: str) -> bool:
     return True
 
 
+def should_telephony_barge_in(text: str, engine: ConversationEngine) -> bool:
+    """Stop bot playback on PSTN when the caller asks a real question (KB or off-script)."""
+    normalized = _normalize_caller_stt(text)
+    if not _is_meaningful_caller_text(normalized):
+        return False
+    if _looks_like_question(normalized):
+        return True
+    return bool(engine._kb_only_answer(normalized))
+
+
 class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     def __init__(
         self,
@@ -113,6 +129,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         *,
         mic_test: bool = False,
         call_controller: CallController | None = None,
+        telephony: bool = False,
         telephony_phone_test: bool = False,
     ):
         super().__init__()
@@ -120,14 +137,34 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._vici = vicidial
         self._agent_user = agent_user
         self._mic_test = mic_test
+        self._telephony = telephony
         self._telephony_phone_test = telephony_phone_test
         self._opened = False
         self._call = call_controller or CallController()
-        self._pending_caller_text: str | None = None
+        self._pending_caller_texts: list[str] = []
         self._followup_reply: str | None = None
         self._caller_buffer: str = ""
         self._flush_task: asyncio.Task | None = None
-        self._caller_flush_delay_s = 0.4 if telephony_phone_test else 0.75
+        self._caller_flush_delay_s = 0.4 if (telephony or telephony_phone_test) else 0.75
+
+    async def _start_telephony_keepalive(self) -> None:
+        if self._telephony and PIPECAT_AVAILABLE:
+            await self.push_frame(RtpKeepaliveStartFrame())
+
+    async def _interrupt_and_handle_caller(self, text: str, direction) -> None:  # type: ignore[no-untyped-def]
+        """Stop current TTS and answer the caller immediately (telephony KB/questions)."""
+        logger.info(f"Telephony barge-in — answering caller: {text[:64]!r}")
+        self._cancel_flush_task()
+        self._followup_reply = None
+        self._call.on_interruption()
+        await self.push_frame(InterruptionFrame(), direction)
+        await asyncio.sleep(0.05)
+        self._call.finish_bot_playback()
+        await self._start_telephony_keepalive()
+        await self._handle_caller(_normalize_caller_stt(text))
+
+    def _maybe_barge_in_for_caller(self, text: str) -> bool:
+        return self._telephony and should_telephony_barge_in(text, self._engine)
 
     def _merge_transcripts(self, prev: str, new: str) -> str:
         prev_s, new_s = prev.strip(), new.strip()
@@ -140,12 +177,16 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return prev_s
         if pl in nl:
             return new_s
-        return new_s if len(new_s) >= len(prev_s) else prev_s
+        # Keep both — never drop an earlier answer for a longer clarification.
+        return f"{prev_s} {new_s}"
 
     def _buffer_caller_text(self, text: str) -> None:
         if not text.strip():
             return
         self._caller_buffer = self._merge_transcripts(self._caller_buffer, text)
+
+    def _has_pending_caller(self) -> bool:
+        return bool(self._pending_caller_texts) or bool(self._caller_buffer.strip())
 
     def _cancel_flush_task(self) -> None:
         if self._flush_task and not self._flush_task.done():
@@ -181,23 +222,63 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     def _queue_pending_caller_text(self, text: str) -> None:
         if not _is_meaningful_caller_text(text):
             return
-        prev = self._pending_caller_text
-        self._pending_caller_text = self._merge_transcripts(prev, text) if prev else text
+        cleaned = text.strip()
+        if not cleaned:
+            return
+        # Queue each distinct utterance — do not overwrite earlier answers.
+        if self._pending_caller_texts:
+            last = self._pending_caller_texts[-1].lower()
+            if cleaned.lower() in last or last in cleaned.lower():
+                if len(cleaned) > len(self._pending_caller_texts[-1]):
+                    self._pending_caller_texts[-1] = cleaned
+                logger.info(
+                    "STT heard caller while bot speaking — queued: "
+                    f"{self._pending_caller_texts[-1][:64]!r}"
+                )
+                return
+        self._pending_caller_texts.append(cleaned)
         logger.info(
             "STT heard caller while bot speaking — queued: "
-            f"{self._pending_caller_text[:64]!r}"
+            f"{cleaned[:64]!r} ({len(self._pending_caller_texts)} waiting)"
         )
 
+    def _utterance_priority(self, item: str) -> int:
+        if _looks_like_question(item):
+            return 3
+        t = item.strip().lower().rstrip(".!?")
+        if t in ("yes", "yeah", "yep", "sure", "ok", "okay", "go ahead", "correct"):
+            return 2
+        if _is_consent(item):
+            return 1
+        return 0
+
+    def _collapse_caller_queue(self) -> str | None:
+        """Pick the strongest signal when the caller spoke over the bot multiple times."""
+        if not self._pending_caller_texts:
+            return None
+        items = list(self._pending_caller_texts)
+        self._pending_caller_texts.clear()
+        best_idx = max(range(len(items)), key=lambda i: (self._utterance_priority(items[i]), i))
+        chosen = items[best_idx]
+        if len(items) > 1:
+            logger.info(
+                f"STT queue collapsed {len(items)} utterances — using: {chosen[:64]!r}"
+            )
+        return _normalize_caller_stt(chosen)
+
     def _move_pending_to_buffer(self) -> None:
-        if not self._pending_caller_text:
+        if not self._pending_caller_texts:
             return
-        self._buffer_caller_text(self._pending_caller_text)
-        self._pending_caller_text = None
+        next_text = self._collapse_caller_queue()
+        if not next_text:
+            return
+        self._caller_buffer = next_text
 
     async def _handle_caller(self, text: str) -> None:
         text = _normalize_caller_stt(text)
         self._call.close_user_turn()
         self._call.on_processing()
+        await self._start_telephony_keepalive()
         logger.info(f"CALLER: {text}")
         turn = self._engine.handle(text)
         spoken = render_speech(turn.reply)
@@ -263,6 +344,22 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, BotStoppedSpeakingFrame):
+            # Caller speech waiting always beats a scripted follow-up re-ask.
+            if self._pending_caller_texts:
+                if self._followup_reply:
+                    logger.info(
+                        "Dropping bot follow-up — caller has queued speech waiting"
+                    )
+                    self._followup_reply = None
+                if not self._call.can_accept_caller():
+                    self._call.finish_bot_playback()
+                await self._start_telephony_keepalive()
+                logger.info("Bot playback done — releasing queued caller audio")
+                self._move_pending_to_buffer()
+                if self._caller_buffer:
+                    self._schedule_caller_flush()
+                await self.push_frame(frame, direction)
+                return
             if self._followup_reply:
                 followup = self._followup_reply
                 self._followup_reply = None
@@ -274,10 +371,11 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 await self.push_frame(TTSSpeakFrame(followup))
                 await self.push_frame(frame, direction)
                 return
-            if self._pending_caller_text and not self._call.can_accept_caller():
+            if not self._call.can_accept_caller():
                 self._call.finish_bot_playback()
-                logger.info("Bot playback done — releasing queued caller audio")
             if self._call.can_accept_caller():
+                if self._pending_caller_texts or self._caller_buffer.strip():
+                    await self._start_telephony_keepalive()
                 self._move_pending_to_buffer()
                 if self._caller_buffer:
                     self._schedule_caller_flush()
@@ -285,9 +383,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, VADUserStoppedSpeakingFrame):
-            if self._pending_caller_text:
-                self._buffer_caller_text(self._pending_caller_text)
-                self._pending_caller_text = None
+            if self._pending_caller_texts and self._call.can_accept_caller():
+                self._move_pending_to_buffer()
             if self._call.can_accept_caller() and self._caller_buffer:
                 await self._flush_caller_buffer()
             elif self._caller_buffer:
@@ -306,8 +403,11 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             if not self._call.can_accept_caller():
                 if self._call.state in (CallState.SPEAKING, CallState.PROCESSING):
+                    if self._maybe_barge_in_for_caller(text):
+                        await self._interrupt_and_handle_caller(text, direction)
+                        return
                     self._queue_pending_caller_text(text)
-                elif self._pending_caller_text:
+                elif self._pending_caller_texts:
                     self._queue_pending_caller_text(text)
                 return
 
@@ -363,6 +463,7 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
                 lines.append(f"{answer} {question}")
     if telephony:
         lines.append(TELEPHONY_KB_MISS_REPLY)
+        lines.append(FALLBACK_REPLY)
     raw = [line.strip() for line in lines if line and line.strip()]
     return iter_chunk_texts(
         raw,
@@ -627,6 +728,7 @@ def build_pipeline(
         agent_user,
         mic_test=mic_test,
         call_controller=call_controller,
+        telephony=telephony,
         telephony_phone_test=telephony and mic_test,
     )
     barge_in = BargeInProcessor(call_controller, telephony=telephony)
