@@ -2,9 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-export function ThemeToggle() {
-  const [dark, setDark] = useState<boolean | null>(null);
+export function ThemeToggle({
+  className,
+  showLabel = true,
+}: {
+  className?: string;
+  showLabel?: boolean;
+}) {
+  const [dark, setDark] = useState(false);
 
   useEffect(() => {
     setDark(document.documentElement.classList.contains("dark"));
@@ -21,12 +28,19 @@ export function ThemeToggle() {
     <button
       type="button"
       onClick={toggle}
+      title={dark ? "Switch to light mode" : "Switch to dark mode"}
       aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-      className="rounded-md p-2 text-foreground-faint transition-colors hover:bg-surface-overlay hover:text-foreground-muted"
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md border border-surface-border bg-surface-raised px-2.5 py-1.5 text-caption font-medium text-foreground-secondary shadow-sm transition-colors hover:bg-surface-overlay hover:text-foreground",
+        className,
+      )}
     >
-      {/* Render both and swap via CSS so SSR markup never mismatches */}
-      <Sun className="hidden h-4 w-4 dark:block" strokeWidth={1.75} />
-      <Moon className="h-4 w-4 dark:hidden" strokeWidth={1.75} />
+      {dark ? (
+        <Sun className="h-3.5 w-3.5 shrink-0 text-brand" strokeWidth={1.75} />
+      ) : (
+        <Moon className="h-3.5 w-3.5 shrink-0 text-brand" strokeWidth={1.75} />
+      )}
+      {showLabel && <span>{dark ? "Light" : "Dark"}</span>}
     </button>
   );
 }

@@ -70,11 +70,11 @@ export function TopBar({ title }: { title?: string }) {
         <p className="truncate text-body font-medium text-foreground">{pageTitle}</p>
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-2">
         <ThemeToggle />
         <button
           type="button"
-          className="rounded-md p-2 text-foreground-faint transition-colors hover:bg-surface-overlay hover:text-foreground-muted"
+          className="rounded-md p-2 text-foreground-muted transition-colors hover:bg-surface-overlay hover:text-foreground-secondary"
           aria-label="Notifications"
         >
           <Bell className="h-4 w-4" strokeWidth={1.75} />
