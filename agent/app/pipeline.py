@@ -21,7 +21,12 @@ import asyncio
 from loguru import logger
 
 from .config import settings, ScriptConfig
-from .conversation import Action, ConversationEngine
+from .conversation import (
+    Action,
+    ConversationEngine,
+    _is_consent,
+    _looks_like_question,
+)
 from .fish_tts import FishAudioTTSService
 from .gemini import FALLBACK_REPLY, TELEPHONY_KB_MISS_REPLY
 from .knowledge import answer_offscript
@@ -205,17 +210,37 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             f"{cleaned[:64]!r} ({len(self._pending_caller_texts)} waiting)"
         )
 
+    def _utterance_priority(self, item: str) -> int:
+        if _looks_like_question(item):
+            return 3
+        t = item.strip().lower().rstrip(".!?")
+        if t in ("yes", "yeah", "yep", "sure", "ok", "okay", "go ahead", "correct"):
+            return 2
+        if _is_consent(item):
+            return 1
+        return 0
+
+    def _collapse_caller_queue(self) -> str | None:
+        """Pick the strongest signal when the caller spoke over the bot multiple times."""
+        if not self._pending_caller_texts:
+            return None
+        items = list(self._pending_caller_texts)
+        self._pending_caller_texts.clear()
+        best_idx = max(range(len(items)), key=lambda i: (self._utterance_priority(items[i]), i))
+        chosen = items[best_idx]
+        if len(items) > 1:
+            logger.info(
+                f"STT queue collapsed {len(items)} utterances — using: {chosen[:64]!r}"
+            )
+        return _normalize_caller_stt(chosen)
+
     def _move_pending_to_buffer(self) -> None:
         if not self._pending_caller_texts:
             return
-        # Process one queued utterance per bot turn (FIFO).
-        next_text = self._pending_caller_texts.pop(0)
+        next_text = self._collapse_caller_queue()
+        if not next_text:
+            return
         self._caller_buffer = next_text
-        if self._pending_caller_texts:
-            logger.info(
-                f"STT queue remaining: {len(self._pending_caller_texts)} "
-                f"(next={self._pending_caller_texts[0][:40]!r})"
-            )
 
     async def _handle_caller(self, text: str) -> None:
         text = _normalize_caller_stt(text)

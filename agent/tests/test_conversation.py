@@ -114,6 +114,46 @@ def test_thank_you_before_consent_advances_to_qualify():
     e.handle("I'm good")
     turn = e.handle("thank you")
     assert "Part A" in turn.reply
+    assert "eligibility check" not in turn.reply.lower()
+
+
+def test_thank_you_during_pitch_playback_does_not_repeat_consent():
+    """Simulates caller saying thank you while bot is still playing the pitch."""
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "Great — I'll be quick. I'm calling about your Medicare plan. "
+            "Do you have a moment for a quick eligibility check?"
+        ),
+        qualifying_questions=["Do you have Part A and B?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    pitch_turn = e.handle("I'm good")
+    assert "eligibility check" in pitch_turn.reply.lower()
+    turn = e.handle("thank you")
+    assert "Part A" in turn.reply
+    assert turn.reply != "Do you have a moment for a quick eligibility check?"
+
+
+def test_unclear_after_pitch_uses_short_prompt_not_repeat():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "Great — I'll be quick. I'm calling about your Medicare plan. "
+            "Do you have a moment for a quick eligibility check?"
+        ),
+        qualifying_questions=["Do you have Part A and B?"],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: "",
+    )
+    e.open()
+    e.handle("I'm good")
+    turn = e.handle("huh")
+    assert "yes or no" in turn.reply.lower()
+    assert "eligibility check" not in turn.reply.lower()
 
 
 def test_offscript_miss_escalates_not_repeat():
@@ -130,7 +170,9 @@ def test_offscript_miss_escalates_not_repeat():
     e.handle("I'm good")
     t1 = e.handle("what is the weather")
     t2 = e.handle("tell me a joke")
-    assert t1.reply != t2.reply
+    # Pitch already asked consent — escalate skips the verbatim repeat.
+    assert "yes or no" in t1.reply.lower()
+    assert t1.reply == t2.reply
 
 
 def test_greeting_ack_does_not_advance_qualify():
