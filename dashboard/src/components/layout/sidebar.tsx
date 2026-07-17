@@ -137,7 +137,7 @@ export function Sidebar() {
               </span>
             )}
           </div>
-          <ThemeToggle variant="sidebar" />
+          <ThemeToggle variant="sidebar" className="-mr-2 -mt-1" />
         </div>
       </div>
     </aside>

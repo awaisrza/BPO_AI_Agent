@@ -70,7 +70,7 @@ export function TopBar({ title }: { title?: string }) {
         <p className="truncate text-body font-medium text-foreground">{pageTitle}</p>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1">
         <ThemeToggle />
         <button
           type="button"
