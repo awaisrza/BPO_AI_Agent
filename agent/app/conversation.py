@@ -76,6 +76,15 @@ _CONSENT = {
     "got it",
     "i see",
     "sounds good",
+    "that's good",
+    "that is good",
+    "thats good",
+    "thank you",
+    "thanks",
+    "i'm good",
+    "im good",
+    "i am good",
+    "all good",
 }
 _QUALIFY_YES = {"yes", "yeah", "yep", "sure", "correct", "absolutely", "definitely"}
 _NEGATIVE = (
@@ -372,20 +381,48 @@ class ConversationEngine:
                 turn = self._respond_offscript_pitch(utterance)
                 if turn:
                     return turn
-                return self._escalate()
+                # No KB hit — keep the script moving (do not escalate into consent).
+                return self._deliver_pitch()
             if _is_greeting_ack_only(utterance):
                 return self._deliver_pitch()
             return self._deliver_pitch()
 
         if self.state == State.QUALIFY:
             if not self._pitch_confirmed:
-                if intent == Intent.POSITIVE and _is_consent(utterance):
+                if intent == Intent.POSITIVE and (
+                    _is_consent(utterance)
+                    or _matches_phrase(
+                        utterance,
+                        (
+                            "that's good",
+                            "thats good",
+                            "thank you",
+                            "thanks",
+                            "i think that's good",
+                            "i think thats good",
+                            "fine",
+                        ),
+                    )
+                ):
                     self._pitch_confirmed = True
                     self._consent_misses = 0
                     self._answered_kb_pre_consent = False
                     return self._next_qualifier()
                 if self._answered_kb_pre_consent and _matches_phrase(
-                    utterance, ("all right", "alright", "okay", "ok", "sure", "fine", "got it")
+                    utterance,
+                    (
+                        "all right",
+                        "alright",
+                        "okay",
+                        "ok",
+                        "sure",
+                        "fine",
+                        "got it",
+                        "thank you",
+                        "thanks",
+                        "that's good",
+                        "thats good",
+                    ),
                 ):
                     self._pitch_confirmed = True
                     self._consent_misses = 0

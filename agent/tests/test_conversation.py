@@ -100,7 +100,7 @@ def test_kb_question_during_qualify_not_repeat():
     assert turn.reply != "Do you have Part A and B?"
 
 
-def test_thank_you_before_consent_reasks_eligibility():
+def test_thank_you_before_consent_advances_to_qualify():
     script = ScriptConfig(
         greeting="Hi.",
         pitch=(
@@ -113,8 +113,7 @@ def test_thank_you_before_consent_reasks_eligibility():
     e.open()
     e.handle("I'm good")
     turn = e.handle("thank you")
-    assert "eligibility check" in turn.reply.lower()
-    assert "Part A" not in turn.reply
+    assert "Part A" in turn.reply
 
 
 def test_offscript_miss_escalates_not_repeat():
@@ -161,6 +160,21 @@ def test_all_right_during_qualify_advances():
     e.handle("how did you get my number")
     turn = e.handle("all right")
     assert "100 dollars" in turn.reply or "bill" in turn.reply.lower()
+
+
+def test_soft_ack_during_consent_advances():
+    e = make_engine()
+    e.open()
+    e.handle("ok")
+    turn = e.handle("I think that's good")
+    assert turn.reply == "Do you own your home?"
+
+
+def test_unclear_question_during_pitch_delivers_pitch():
+    e = make_engine()
+    e.open()
+    turn = e.handle("That's what?")
+    assert "power bill" in turn.reply.lower() or "own your home" in turn.reply.lower()
 
 
 def test_kb_already_have_reanchors_qualify_question():
