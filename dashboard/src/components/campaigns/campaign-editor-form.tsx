@@ -347,7 +347,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
                   <button
                     type="button"
                     onClick={addQuestion}
-                    className="text-foreground-secondary underline hover:text-white"
+                    className="text-foreground-secondary underline hover:text-foreground"
                   >
                     Add your first question
                   </button>
@@ -401,7 +401,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
                   <button
                     type="button"
                     onClick={addKnowledgeEntry}
-                    className="text-foreground-secondary underline hover:text-white"
+                    className="text-foreground-secondary underline hover:text-foreground"
                   >
                     Add your first topic
                   </button>
@@ -609,7 +609,7 @@ function SettingRow({
   return (
     <div>
       <p className="text-xs text-foreground-faint">{label}</p>
-      <p className={`mt-1.5 flex items-center gap-2 text-sm text-zinc-200 ${mono ? "font-mono" : ""}`}>
+      <p className={`mt-1.5 flex items-center gap-2 text-sm text-foreground-secondary ${mono ? "font-mono" : ""}`}>
         {Icon && <Icon className="h-3.5 w-3.5 text-foreground-faint" />}
         {value}
       </p>

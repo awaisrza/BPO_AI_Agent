@@ -38,7 +38,7 @@ export function TopBar({ title }: { title?: string }) {
   const pageTitle = title ?? resolveTitle(pathname);
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-surface-border bg-surface px-4 sm:px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-surface-border bg-surface px-4 sm:px-6">
       <div className="flex min-w-0 items-center gap-3">
         <details className="relative lg:hidden">
           <summary className="flex cursor-pointer list-none items-center rounded-md p-2 text-foreground-muted hover:bg-surface-overlay hover:text-foreground-secondary">
@@ -62,6 +62,10 @@ export function TopBar({ title }: { title?: string }) {
             ))}
           </div>
         </details>
+        <span className="font-display text-body font-semibold tracking-tight text-foreground lg:hidden">
+          Parasite
+        </span>
+        <span className="text-foreground-faint lg:hidden">/</span>
         <p className="truncate text-body font-medium text-foreground">{pageTitle}</p>
       </div>
 

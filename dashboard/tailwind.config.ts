@@ -24,6 +24,16 @@ const config: Config = {
           muted: "var(--brand-muted)",
           foreground: "var(--brand-foreground)",
         },
+        sidebar: {
+          DEFAULT: "var(--sidebar-bg)",
+          raised: "var(--sidebar-raised)",
+          border: "var(--sidebar-border)",
+          text: "var(--sidebar-text)",
+          muted: "var(--sidebar-muted)",
+          faint: "var(--sidebar-faint)",
+          accent: "var(--sidebar-accent)",
+          active: "var(--sidebar-active)",
+        },
         status: {
           success: "var(--status-success)",
           "success-muted": "var(--status-success-muted)",
@@ -42,7 +52,8 @@ const config: Config = {
         lg: "var(--radius-lg)",
       },
       fontFamily: {
-        sans: ["var(--font-inter)", "system-ui", "sans-serif"],
+        sans: ["var(--font-body)", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "var(--font-body)", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
       fontSize: {
