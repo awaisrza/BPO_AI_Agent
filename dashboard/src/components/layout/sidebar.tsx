@@ -16,6 +16,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOrg } from "@/components/layout/org-provider";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 
@@ -124,15 +125,20 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-sidebar-border p-4">
-        <p className="truncate text-body font-medium text-sidebar-text">{org.name}</p>
-        <p className="mt-0.5 text-caption text-sidebar-faint">
-          {org.plan} plan · {org.botsActive}/{org.botsIncluded} agents
-        </p>
-        {org.pilot && (
-          <span className="mt-2 inline-flex items-center rounded-sm bg-sidebar-accent/10 px-2 py-0.5 text-2xs font-medium text-sidebar-accent">
-            Pilot
-          </span>
-        )}
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-body font-medium text-sidebar-text">{org.name}</p>
+            <p className="mt-0.5 text-caption text-sidebar-faint">
+              {org.plan} plan · {org.botsActive}/{org.botsIncluded} agents
+            </p>
+            {org.pilot && (
+              <span className="mt-2 inline-flex items-center rounded-sm bg-sidebar-accent/10 px-2 py-0.5 text-2xs font-medium text-sidebar-accent">
+                Pilot
+              </span>
+            )}
+          </div>
+          <ThemeToggle variant="sidebar" />
+        </div>
       </div>
     </aside>
   );
