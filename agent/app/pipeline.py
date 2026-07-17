@@ -34,6 +34,7 @@ from .speech_renderer import (
     BargeInProcessor,
     CallController,
     CallState,
+    RtpKeepaliveStartFrame,
     SpeechRendererNode,
     iter_chunk_texts,
     prepare_for_speech,
@@ -109,6 +110,16 @@ def _is_meaningful_caller_text(text: str) -> bool:
     return True
 
 
+def should_telephony_barge_in(text: str, engine: ConversationEngine) -> bool:
+    """Stop bot playback on PSTN when the caller asks a real question (KB or off-script)."""
+    normalized = _normalize_caller_stt(text)
+    if not _is_meaningful_caller_text(normalized):
+        return False
+    if _looks_like_question(normalized):
+        return True
+    return bool(engine._kb_only_answer(normalized))
+
+
 class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     def __init__(
         self,
@@ -118,6 +129,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         *,
         mic_test: bool = False,
         call_controller: CallController | None = None,
+        telephony: bool = False,
         telephony_phone_test: bool = False,
     ):
         super().__init__()
@@ -125,6 +137,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._vici = vicidial
         self._agent_user = agent_user
         self._mic_test = mic_test
+        self._telephony = telephony
         self._telephony_phone_test = telephony_phone_test
         self._opened = False
         self._call = call_controller or CallController()
@@ -132,7 +145,26 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._followup_reply: str | None = None
         self._caller_buffer: str = ""
         self._flush_task: asyncio.Task | None = None
-        self._caller_flush_delay_s = 0.4 if telephony_phone_test else 0.75
+        self._caller_flush_delay_s = 0.4 if (telephony or telephony_phone_test) else 0.75
+
+    async def _start_telephony_keepalive(self) -> None:
+        if self._telephony and PIPECAT_AVAILABLE:
+            await self.push_frame(RtpKeepaliveStartFrame())
+
+    async def _interrupt_and_handle_caller(self, text: str, direction) -> None:  # type: ignore[no-untyped-def]
+        """Stop current TTS and answer the caller immediately (telephony KB/questions)."""
+        logger.info(f"Telephony barge-in — answering caller: {text[:64]!r}")
+        self._cancel_flush_task()
+        self._followup_reply = None
+        self._call.on_interruption()
+        await self.push_frame(InterruptionFrame(), direction)
+        await asyncio.sleep(0.05)
+        self._call.finish_bot_playback()
+        await self._start_telephony_keepalive()
+        await self._handle_caller(_normalize_caller_stt(text))
+
+    def _maybe_barge_in_for_caller(self, text: str) -> bool:
+        return self._telephony and should_telephony_barge_in(text, self._engine)
 
     def _merge_transcripts(self, prev: str, new: str) -> str:
         prev_s, new_s = prev.strip(), new.strip()
@@ -246,6 +278,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         text = _normalize_caller_stt(text)
         self._call.close_user_turn()
         self._call.on_processing()
+        await self._start_telephony_keepalive()
         logger.info(f"CALLER: {text}")
         turn = self._engine.handle(text)
         spoken = render_speech(turn.reply)
@@ -320,6 +353,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     self._followup_reply = None
                 if not self._call.can_accept_caller():
                     self._call.finish_bot_playback()
+                await self._start_telephony_keepalive()
                 logger.info("Bot playback done — releasing queued caller audio")
                 self._move_pending_to_buffer()
                 if self._caller_buffer:
@@ -340,6 +374,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             if not self._call.can_accept_caller():
                 self._call.finish_bot_playback()
             if self._call.can_accept_caller():
+                if self._pending_caller_texts or self._caller_buffer.strip():
+                    await self._start_telephony_keepalive()
                 self._move_pending_to_buffer()
                 if self._caller_buffer:
                     self._schedule_caller_flush()
@@ -367,6 +403,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             if not self._call.can_accept_caller():
                 if self._call.state in (CallState.SPEAKING, CallState.PROCESSING):
+                    if self._maybe_barge_in_for_caller(text):
+                        await self._interrupt_and_handle_caller(text, direction)
+                        return
                     self._queue_pending_caller_text(text)
                 elif self._pending_caller_texts:
                     self._queue_pending_caller_text(text)
@@ -689,6 +728,7 @@ def build_pipeline(
         agent_user,
         mic_test=mic_test,
         call_controller=call_controller,
+        telephony=telephony,
         telephony_phone_test=telephony and mic_test,
     )
     barge_in = BargeInProcessor(call_controller, telephony=telephony)
