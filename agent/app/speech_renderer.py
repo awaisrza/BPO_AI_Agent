@@ -329,6 +329,12 @@ if PIPECAT_AVAILABLE:
             self._telephony = telephony
 
         async def _on_caller_started(self, frame, direction) -> None:  # type: ignore[no-untyped-def]
+            if self._telephony and self._controller.state == CallState.PROCESSING:
+                # Bot reply is being composed (TTSSpeakFrame not queued yet) — the
+                # caller's speech will still be captured/queued once STT finishes;
+                # this just keeps the log accurate for that narrow race window.
+                logger.info("VAD: caller speech while bot composing reply (telephony)")
+                return
             if self._controller.should_interrupt():
                 if self._telephony:
                     # PSTN echo often triggers false barge-in; let the bot finish the line.

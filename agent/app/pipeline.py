@@ -524,7 +524,7 @@ def _telephony_vad_params() -> VADParams:
     return VADParams(
         confidence=0.55,
         start_secs=0.2,
-        stop_secs=0.9,
+        stop_secs=settings.telephony_vad_stop_secs,
         min_volume=0.35,
     )
 

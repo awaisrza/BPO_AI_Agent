@@ -154,6 +154,11 @@ class Settings(BaseModel):
     telephony_utterance_max_words: int = Field(
         default_factory=lambda: int(os.getenv("TELEPHONY_UTTERANCE_MAX_WORDS", "40") or "40")
     )
+    # How long the caller must be silent before VAD considers them done talking.
+    # Too low cuts callers off mid-thought; too high adds dead air before the bot replies.
+    telephony_vad_stop_secs: float = Field(
+        default_factory=lambda: float(os.getenv("TELEPHONY_VAD_STOP_SECS", "1.3") or "1.3")
+    )
 
     vicidial_base_url: str = Field(default_factory=lambda: os.getenv("VICIDIAL_BASE_URL", ""))
     vicidial_user: str = Field(default_factory=lambda: os.getenv("VICIDIAL_API_USER", ""))
