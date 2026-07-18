@@ -335,6 +335,50 @@ def test_kb_already_have_benefits_during_qualify():
     assert "plan review" in e.take_pending_followup().lower()
 
 
+def test_repeated_kb_questions_during_qualify_escalate_not_loop_forever():
+    """Caller keeps asking off-script questions instead of answering the qualifier —
+    the bot must not just re-ask the exact same question forever (feels stuck)."""
+    from app.knowledge import answer_offscript as kb_answer
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare review. Do you have a moment?",
+        qualifying_questions=["Do you have Part A and B?"],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic="How did you get my number",
+                triggers=["how did you get my number", "how did you get"],
+                answer="Your number came from a public Medicare outreach list.",
+            ),
+            KnowledgeEntry(
+                topic="Is this a scam",
+                triggers=["scam"],
+                answer="This is a legitimate call from a licensed Medicare benefits group.",
+            ),
+        ],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
+    )
+    e.open()
+    e.handle("ok")  # pitch delivered, enter QUALIFY
+    e.handle("yes")  # consent given, first qualifier asked
+
+    turn1 = e.handle("how did you get my number")
+    assert "outreach list" in turn1.reply.lower()
+    follow1 = e.take_pending_followup()
+    assert follow1 == "Do you have Part A and B?"
+
+    turn2 = e.handle("is it a scam")
+    assert "legitimate" in turn2.reply.lower()
+    follow2 = e.take_pending_followup()
+    # Second off-script interruption on the same qualifier must escalate,
+    # not silently repeat the identical question again.
+    assert follow2 != "Do you have Part A and B?"
+    assert "yes or no" in follow2.lower()
+
+
 def test_third_kb_in_pitch_advances_to_pitch():
     from app.knowledge import answer_offscript as kb_answer
 

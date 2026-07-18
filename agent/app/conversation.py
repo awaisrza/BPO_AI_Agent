@@ -336,7 +336,14 @@ class ConversationEngine:
         questions = self.script.qualifying_questions
         current = questions[self._qualify_idx - 1]
         if current.strip().lower() not in turn.reply.strip().lower():
-            self._queue_followup(current)
+            # Escalate if the caller keeps asking off-script questions instead of
+            # answering — repeating the same qualifier verbatim forever feels like
+            # the bot is stuck in a loop and never lets the call complete.
+            if self._unclear_at_qualify == 0:
+                self._unclear_at_qualify += 1
+                self._queue_followup(current)
+            else:
+                self._queue_followup("Sorry — just a quick yes or no on that one, then we're done.")
         return turn
 
     def _respond_offscript(self, utterance: str) -> Turn | None:
