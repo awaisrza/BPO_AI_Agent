@@ -17,6 +17,8 @@ Voice backends (``VOICE_BACKEND`` env):
 from __future__ import annotations
 
 import asyncio
+import time
+from typing import Awaitable, Callable
 
 from loguru import logger
 
@@ -24,7 +26,6 @@ from .config import settings, ScriptConfig
 from .conversation import (
     Action,
     ConversationEngine,
-    _is_consent,
     _looks_like_question,
 )
 from .fish_tts import FishAudioTTSService
@@ -131,6 +132,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         call_controller: CallController | None = None,
         telephony: bool = False,
         telephony_phone_test: bool = False,
+        on_call_should_end: "Callable[[str], Awaitable[None]] | None" = None,
     ):
         super().__init__()
         self._engine = engine
@@ -139,6 +141,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._mic_test = mic_test
         self._telephony = telephony
         self._telephony_phone_test = telephony_phone_test
+        self._on_call_should_end = on_call_should_end
+        self._pending_terminal_action: str | None = None
         self._opened = False
         self._call = call_controller or CallController()
         self._pending_caller_texts: list[str] = []
@@ -146,6 +150,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._caller_buffer: str = ""
         self._flush_task: asyncio.Task | None = None
         self._caller_flush_delay_s = 0.4 if (telephony or telephony_phone_test) else 0.75
+        self.last_activity_monotonic: float = time.monotonic()
+
+    def _touch_activity(self) -> None:
+        self.last_activity_monotonic = time.monotonic()
 
     async def _start_telephony_keepalive(self) -> None:
         if self._telephony and PIPECAT_AVAILABLE:
@@ -242,29 +250,29 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             f"{cleaned[:64]!r} ({len(self._pending_caller_texts)} waiting)"
         )
 
-    def _utterance_priority(self, item: str) -> int:
-        if _looks_like_question(item):
-            return 3
-        t = item.strip().lower().rstrip(".!?")
-        if t in ("yes", "yeah", "yep", "sure", "ok", "okay", "go ahead", "correct"):
-            return 2
-        if _is_consent(item):
-            return 1
-        return 0
-
     def _collapse_caller_queue(self) -> str | None:
-        """Pick the strongest signal when the caller spoke over the bot multiple times."""
+        """Combine everything the caller said while the bot was busy.
+
+        Previously this picked a single "winner" utterance by priority (question >
+        short yes/no > consent phrase) and silently discarded the rest. If VAD split
+        one continuous answer into two utterances across a natural pause (e.g. "Yes
+        I am" + "I turned 66 last year"), the second half — often the actually
+        informative part — was thrown away entirely. Now every queued utterance is
+        merged (same dedup logic as the live buffer), so nothing the caller said is
+        ever dropped.
+        """
         if not self._pending_caller_texts:
             return None
         items = list(self._pending_caller_texts)
         self._pending_caller_texts.clear()
-        best_idx = max(range(len(items)), key=lambda i: (self._utterance_priority(items[i]), i))
-        chosen = items[best_idx]
+        merged = ""
+        for item in items:
+            merged = self._merge_transcripts(merged, item)
         if len(items) > 1:
             logger.info(
-                f"STT queue collapsed {len(items)} utterances — using: {chosen[:64]!r}"
+                f"STT queue merged {len(items)} utterances -> {merged[:80]!r}"
             )
-        return _normalize_caller_stt(chosen)
+        return _normalize_caller_stt(merged) if merged else None
 
     def _move_pending_to_buffer(self) -> None:
         if not self._pending_caller_texts:
@@ -280,7 +288,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._call.on_processing()
         await self._start_telephony_keepalive()
         logger.info(f"CALLER: {text}")
-        turn = self._engine.handle(text)
+        self._touch_activity()
+        # engine.handle() can call Gemini synchronously (blocking network I/O up to a
+        # few seconds). Running it directly here would freeze the asyncio event loop —
+        # no keepalive frames, no other WebSocket traffic — for that whole window,
+        # which is how a KB/off-script question can silently kill a live call. Push it
+        # to a worker thread so the loop stays responsive while we wait.
+        loop = asyncio.get_running_loop()
+        turn = await loop.run_in_executor(None, self._engine.handle, text)
         spoken = render_speech(turn.reply)
         logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")
         followup = self._engine.take_pending_followup()
@@ -304,7 +319,12 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     logger.info(f"FSM -> warm transfer (preset={preset})")
                     await self._vici.warm_transfer(self._agent_user, preset=preset)
                 await self._vici.set_disposition(self._agent_user, "XFER")
-            if not self._telephony_phone_test:
+            if self._telephony:
+                # Defer termination until the closing line's BotStoppedSpeakingFrame
+                # arrives — EndFrame is a SystemFrame and can jump the queue ahead of
+                # still-playing audio, cutting the closer line off mid-sentence.
+                self._pending_terminal_action = "transfer"
+            elif not self._telephony_phone_test:
                 await self.push_frame(EndFrame())
         elif turn.action == Action.HANGUP:
             if self._mic_test:
@@ -313,9 +333,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 logger.info("FSM -> disposition + hangup")
                 await self._vici.set_disposition(self._agent_user, "NI")
                 await self._vici.hangup(self._agent_user)
-            # Keep Telnyx media alive during phone tests so a disposition line
-            # does not tear down the stream before the caller hears it.
-            if not self._telephony_phone_test:
+            if self._telephony:
+                self._pending_terminal_action = "hangup"
+            elif not self._telephony_phone_test:
                 await self.push_frame(EndFrame())
 
     async def process_frame(self, frame, direction):  # type: ignore[override]
@@ -328,6 +348,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if isinstance(frame, StartFrame):
             if not self._opened:
                 self._opened = True
+                self._touch_activity()
                 self._call.state = CallState.LISTENING
                 opening = self._engine.open()
                 spoken = render_speech(opening.reply)
@@ -344,6 +365,18 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, BotStoppedSpeakingFrame):
+            # FSM decided to hang up / transfer — the closing line has now fully
+            # played, so it's safe to actually end the call. This takes priority
+            # over any queued caller speech or follow-up (the conversation is over).
+            if self._pending_terminal_action:
+                action = self._pending_terminal_action
+                self._pending_terminal_action = None
+                if not self._call.can_accept_caller():
+                    self._call.finish_bot_playback()
+                if self._on_call_should_end is not None:
+                    await self._on_call_should_end(action)
+                await self.push_frame(frame, direction)
+                return
             # Caller speech waiting always beats a scripted follow-up re-ask.
             if self._pending_caller_texts:
                 if self._followup_reply:
@@ -400,6 +433,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             text = frame.text.strip()
             if not text:
                 return
+            self._touch_activity()
 
             if not self._call.can_accept_caller():
                 if self._call.state in (CallState.SPEAKING, CallState.PROCESSING):
@@ -666,6 +700,7 @@ def build_pipeline(
     mic_test: bool = False,
     sample_rate: int = 16000,
     telephony: bool = False,
+    on_call_should_end: "Callable[[str], Awaitable[None]] | None" = None,
 ) -> Pipeline:
     """Assemble the live pipeline. `transport` provides audio in/out frames."""
     global _cached_stt
@@ -730,6 +765,7 @@ def build_pipeline(
         call_controller=call_controller,
         telephony=telephony,
         telephony_phone_test=telephony and mic_test,
+        on_call_should_end=on_call_should_end,
     )
     barge_in = BargeInProcessor(call_controller, telephony=telephony)
     max_words, pause_min, pause_max = _speech_settings(telephony=telephony)

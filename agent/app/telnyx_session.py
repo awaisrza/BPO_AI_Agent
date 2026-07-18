@@ -12,13 +12,19 @@ from loguru import logger
 
 from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
 from .config import ScriptConfig, settings
-from .pipeline import build_pipeline
+from .pipeline import FronterProcessor, build_pipeline
+from .telnyx_api import hangup_telnyx_call
 
 _CRASH_LOG = Path("/tmp/telnyx_events.log")
 _active_call_ids: set[str] = set()
 _completed_call_ids: dict[str, float] = {}
 _session_lock = asyncio.Lock()
 _COMPLETED_TTL_S = 120.0
+# How long the call can sit with no caller/bot activity before we assume the
+# line is dead (e.g. a network partition ate the WebSocket close frame) and
+# force it closed ourselves rather than leaving a silent zombie call.
+_IDLE_TIMEOUT_S = 45.0
+_IDLE_CHECK_INTERVAL_S = 10.0
 
 
 def _prune_completed_calls() -> None:
@@ -40,6 +46,74 @@ def _event(msg: str) -> None:
     logger.info(line.strip())
 
 
+class _CallShutdown:
+    """Single, idempotent teardown path for a Telnyx call.
+
+    Every way a call can end — FSM hangup/transfer, the remote party hanging
+    up, an unrecoverable exception, or an idle timeout — must funnel through
+    ``end_call`` exactly once. Previously these paths were scattered and
+    incomplete: a bot-initiated hangup never told Telnyx to actually end the
+    PSTN leg, so the call sat open and silent (falling through TeXML's
+    ``<Pause length="120"/>``) until the caller gave up or Telnyx's own ~2
+    minute timeout fired.
+
+    Ordering matters: the Telnyx REST hangup runs *first*, before touching the
+    local worker/websocket, because cancelling our own worker from inside a
+    frame it is currently processing can raise ``CancelledError`` partway
+    through this method — we want the one step that actually ends the PSTN
+    call to have already succeeded before that risk is taken.
+    """
+
+    def __init__(self, *, call_control_id: str | None, websocket) -> None:
+        self._call_control_id = call_control_id
+        self._websocket = websocket
+        self._worker = None
+        self._tts_for_cleanup = None
+        self._done = False
+
+    def attach(self, *, worker, tts_for_cleanup) -> None:
+        self._worker = worker
+        self._tts_for_cleanup = tts_for_cleanup
+
+    @property
+    def done(self) -> bool:
+        return self._done
+
+    async def end_call(self, reason: str, *, hangup_telnyx: bool) -> None:
+        if self._done:
+            return
+        self._done = True
+        _event(f"=== ENDING CALL (reason={reason}) ===")
+
+        if hangup_telnyx and self._call_control_id:
+            try:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, hangup_telnyx_call, self._call_control_id)
+            except Exception as exc:  # noqa: BLE001
+                _event(f"shutdown: telnyx hangup failed: {exc}")
+
+        if self._tts_for_cleanup is not None and hasattr(self._tts_for_cleanup, "cancel_background_work"):
+            try:
+                await self._tts_for_cleanup.cancel_background_work()
+            except Exception as exc:  # noqa: BLE001
+                _event(f"shutdown: TTS cleanup failed: {exc}")
+
+        if self._worker is not None:
+            try:
+                await self._worker.cancel()
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                _event(f"shutdown: worker cancel failed: {exc}")
+
+        try:
+            await self._websocket.close(code=1000)
+        except Exception:
+            pass
+
+        _event(f"=== CALL ENDED (reason={reason}) ===")
+
+
 async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> None:
     """Handle one inbound or outbound Telnyx call over Media Streams."""
     from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -53,6 +127,8 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
 
     _event("=== WS HANDLER ENTERED ===")
     session_key: str | None = None
+    shutdown: "_CallShutdown | None" = None
+    idle_watchdog_task: asyncio.Task | None = None
     try:
         await websocket.accept()
         _event("=== WS ACCEPTED ===")
@@ -68,6 +144,8 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
         outbound_encoding = call_data.get("outbound_encoding") or "PCMU"
         if not stream_id:
             raise RuntimeError(f"Missing stream_id in handshake: {call_data}")
+
+        shutdown = _CallShutdown(call_control_id=call_control_id, websocket=websocket)
 
         session_key = call_control_id or stream_id
         async with _session_lock:
@@ -104,6 +182,9 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             ),
         )
 
+        async def _on_call_should_end(reason: str) -> None:
+            await shutdown.end_call(reason, hangup_telnyx=True)
+
         sample_rate = TELEPHONY_PIPELINE_RATE
         build_started = time.monotonic()
         _event(f"=== BUILDING PIPELINE (sample_rate={sample_rate}) ===")
@@ -114,6 +195,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             mic_test=True,
             sample_rate=sample_rate,
             telephony=True,
+            on_call_should_end=_on_call_should_end,
         )
         _event(
             f"=== PIPELINE BUILT in {(time.monotonic() - build_started) * 1000:.0f}ms ==="
@@ -124,6 +206,9 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
                 "Ensure pre-warm finished and STT reuse log appears on connect."
             )
         tts_for_cleanup = pipeline.processors[-2] if pipeline.processors else None
+        fronter = next(
+            (p for p in pipeline.processors if isinstance(p, FronterProcessor)), None
+        )
 
         worker_kwargs = {
             "params": PipelineParams(
@@ -142,6 +227,8 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             _event("=== PipelineWorker fallback (no enable_rtvi/idle_timeout) ===")
             worker = PipelineWorker(pipeline, **worker_kwargs)
 
+        shutdown.attach(worker=worker, tts_for_cleanup=tts_for_cleanup)
+
         @transport.event_handler("on_client_connected")
         async def on_client_connected(_transport, _client) -> None:
             ms = (time.monotonic() - connect_started) * 1000
@@ -149,10 +236,28 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client) -> None:
-            _event("=== CALL ENDED (remote hung up or stream closed) ===")
-            if tts_for_cleanup is not None and hasattr(tts_for_cleanup, "cancel_background_work"):
-                await tts_for_cleanup.cancel_background_work()
-            await worker.cancel()
+            # Telnyx already ended the PSTN leg on its side — no REST hangup needed.
+            await shutdown.end_call("remote_hangup", hangup_telnyx=False)
+
+        async def _idle_watchdog() -> None:
+            """Force-end the call if nothing has happened for a while.
+
+            Protects against a dead line where the WebSocket close frame never
+            arrives (e.g. a network partition) — without this, the worker sits
+            forever and the PSTN call is never released.
+            """
+            try:
+                while True:
+                    await asyncio.sleep(_IDLE_CHECK_INTERVAL_S)
+                    if shutdown.done or fronter is None:
+                        return
+                    idle_for = time.monotonic() - fronter.last_activity_monotonic
+                    if idle_for > _IDLE_TIMEOUT_S:
+                        _event(f"=== IDLE TIMEOUT ({idle_for:.0f}s) — forcing hangup ===")
+                        await shutdown.end_call("idle_timeout", hangup_telnyx=True)
+                        return
+            except asyncio.CancelledError:
+                pass
 
         connect_started = time.monotonic()
         _event("=== STARTING RUNNER ===")
@@ -161,13 +266,21 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
         except TypeError:
             runner = WorkerRunner()
         await runner.add_workers(worker)
+        idle_watchdog_task = asyncio.create_task(_idle_watchdog())
         await runner.run()
         _event("=== RUNNER FINISHED ===")
     except Exception:
         tb = traceback.format_exc()
         _event("=== CRASH ===\n" + tb)
+        if shutdown is not None:
+            try:
+                await shutdown.end_call("exception", hangup_telnyx=True)
+            except Exception as cleanup_exc:  # noqa: BLE001
+                _event(f"shutdown-on-exception failed: {cleanup_exc}")
         raise
     finally:
+        if idle_watchdog_task is not None:
+            idle_watchdog_task.cancel()
         if session_key:
             async with _session_lock:
                 _active_call_ids.discard(session_key)
