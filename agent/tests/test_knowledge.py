@@ -51,6 +51,34 @@ def test_match_knowledge_returns_none_when_no_hit():
     assert match_knowledge("my dog is barking", _entries()) is None
 
 
+def test_match_knowledge_rejects_weak_stopword_overlap():
+    """Two words overlapping where only one is meaningful (the other is filler
+    like "a"/"is"/"me") must not trigger a KB answer — this caused the bot to
+    answer "You're not a lot of comedy" with a random "call me back" reply."""
+    entries = [
+        KnowledgeEntry(
+            topic="Call me back later",
+            triggers=["call me back", "not a good time", "busy", "later"],
+            answer="Sure — what time works best for you tomorrow?",
+        ),
+    ]
+    assert match_knowledge("You're not a lot of comedy.", entries) is None
+    assert match_knowledge("We're just not an American.", entries) is None
+
+
+def test_match_knowledge_still_matches_two_real_words():
+    entries = [
+        KnowledgeEntry(
+            topic="Already have benefits",
+            triggers=["already on medicare"],
+            answer="Still worth a quick check.",
+        ),
+    ]
+    hit = match_knowledge("I'm already on my medicare plan", entries)
+    assert hit is not None
+    assert hit.topic == "Already have benefits"
+
+
 def test_parse_knowledge_base_from_dashboard_shape():
     raw = [
         {

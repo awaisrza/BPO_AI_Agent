@@ -61,7 +61,11 @@ def match_knowledge(utterance: str, entries: Iterable[KnowledgeEntry]) -> Knowle
                 if not overlap:
                     continue
                 distinctive = {w for w in overlap if w not in _STOP_WORDS and len(w) >= 3}
-                if len(overlap) >= 2 and distinctive:
+                # Require at least two *meaningful* overlapping words — a single
+                # distinctive word plus filler like "a"/"is" is too weak a signal and
+                # causes false hits on unrelated speech (e.g. "not a good time" vs.
+                # "you're not a lot of comedy").
+                if len(overlap) >= 2 and len(distinctive) >= 2:
                     score = len(distinctive) * 12 + len(overlap) * 4
                 elif len(trigger_words) == 1:
                     word = next(iter(overlap))
