@@ -80,6 +80,28 @@ def test_collapse_caller_queue_dedupes_overlapping_fragments():
     assert merged == "I have Part A and Part B"
 
 
+def test_greeting_ack_runs_fsm_on_event_loop():
+    """Greeting acks must not wait on the shared TTS thread pool — that was the
+    'CALLER: I am good.' → silence → remote hangup failure mode."""
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare review. Do you have a moment?",
+        qualifying_questions=["Do you have Part A and B?"],
+    )
+    engine = ConversationEngine(script=script)
+    engine.open()
+    fronter = _make_fronter(engine=engine)
+
+    assert not fronter._engine_may_block("I am good.")
+
+    async def _run() -> None:
+        await fronter._handle_caller("I am good.")
+
+    asyncio.run(_run())
+    assert "medicare" in fronter._engine.script.pitch.lower()
+    assert fronter._engine.state.value == "qualify"
+
+
 def test_handle_caller_does_not_block_event_loop():
     """engine.handle() (which can call Gemini synchronously) must run off the
     event loop — otherwise a single off-script question freezes the entire

@@ -87,30 +87,6 @@ _CONSENT = {
     "all good",
 }
 _QUALIFY_YES = {"yes", "yeah", "yep", "sure", "correct", "absolutely", "definitely"}
-# Qualifying questions that expect a *value* (an age, a number, a name), not a
-# yes/no. Matching these against `_is_qualify_yes` would never succeed for a
-# real answer like "I'm 67" or "sixty-five" — the FSM would treat a perfectly
-# good answer as unclear and repeat the question forever (e.g. "Age? Age?
-# Age? Age?"). Detected from the question text itself so campaign scripts
-# don't need a schema change.
-_OPEN_VALUE_QUALIFIER_MARKERS = (
-    "how old",
-    "what is your age",
-    "what's your age",
-    "your age",
-    "how many",
-    "how much",
-    "what year",
-    "zip code",
-    "postal code",
-    "how long",
-    "what is your name",
-    "what's your name",
-    "your name",
-    "what state",
-    "which state",
-    "what county",
-)
 _NEGATIVE = (
     "no",
     "nope",
@@ -191,11 +167,6 @@ def _is_qualify_yes(utterance: str) -> bool:
         return True
     words = set(u.replace(",", " ").replace(".", " ").split())
     return bool(words & _QUALIFY_YES)
-
-
-def _expects_open_value(question: str) -> bool:
-    """True if this qualifier expects a value (age/number/name) rather than yes/no."""
-    return _matches_phrase(question, _OPEN_VALUE_QUALIFIER_MARKERS)
 
 
 def _is_greeting_ack_only(utterance: str) -> bool:
@@ -365,14 +336,7 @@ class ConversationEngine:
         questions = self.script.qualifying_questions
         current = questions[self._qualify_idx - 1]
         if current.strip().lower() not in turn.reply.strip().lower():
-            # Escalate if the caller keeps asking off-script questions instead of
-            # answering — repeating the same qualifier verbatim forever feels like
-            # the bot is stuck in a loop and never lets the call complete.
-            if self._unclear_at_qualify == 0:
-                self._unclear_at_qualify += 1
-                self._queue_followup(current)
-            else:
-                self._queue_followup("Sorry — just a quick yes or no on that one, then we're done.")
+            self._queue_followup(current)
         return turn
 
     def _respond_offscript(self, utterance: str) -> Turn | None:
@@ -456,20 +420,6 @@ class ConversationEngine:
                 if turn:
                     return turn
                 return self._escalate()
-
-            # Some qualifiers ask for a value (age, name, zip code), not yes/no.
-            # By this point the utterance is already known to be non-negative and
-            # not a question — for a value-type qualifier, any substantive reply
-            # (a number, "I'm 67", "sixty-five") counts as answered. Requiring a
-            # literal "yes" here is what caused questions like "Age?" to repeat
-            # indefinitely even when the caller did answer.
-            questions = self.script.qualifying_questions
-            current_question = (
-                questions[self._qualify_idx - 1] if 0 < self._qualify_idx <= len(questions) else ""
-            )
-            if current_question and _expects_open_value(current_question):
-                self._positives += 1
-                return self._next_qualifier()
 
             if _is_qualify_yes(utterance):
                 self._positives += 1

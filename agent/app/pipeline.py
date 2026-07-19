@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Awaitable, Callable
 
 from loguru import logger
@@ -26,8 +27,15 @@ from .config import settings, ScriptConfig
 from .conversation import (
     Action,
     ConversationEngine,
+    Intent,
     _looks_like_question,
 )
+
+# Dedicated pool for FSM turns that may call Gemini. Do NOT use the default
+# asyncio executor here — Chatterbox TTS also parks CUDA synth on that pool,
+# and a queued/stuck synth job can starve greeting/consent turns for 10s+
+# (caller hears silence after "I am good." until they hang up).
+_FSM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="fsm")
 from .fish_tts import FishAudioTTSService
 from .gemini import FALLBACK_REPLY, TELEPHONY_KB_MISS_REPLY
 from .knowledge import answer_offscript
@@ -282,6 +290,33 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
         self._caller_buffer = next_text
 
+    def _engine_may_block(self, text: str) -> bool:
+        """True when handle() might invoke answer_offscript (Gemini / slow I/O)."""
+        if self._engine.answer_offscript is None:
+            return False
+        # Local KB hit is sync and cheap — no need to leave the event loop.
+        if self._engine._kb_only_answer(text):
+            return False
+        intent = self._engine.classify(text, self._engine.state.value)
+        return intent in (Intent.QUESTION, Intent.NEGATIVE)
+
+    async def _run_engine(self, text: str):
+        """Run the FSM without starving keepalive; only park a worker for Gemini."""
+        t0 = time.perf_counter()
+        if self._engine_may_block(text):
+            loop = asyncio.get_running_loop()
+            turn = await loop.run_in_executor(_FSM_EXECUTOR, self._engine.handle, text)
+        else:
+            # Greeting acks / consent / yes-no qualify — must stay on the loop so a
+            # busy default executor (Chatterbox) cannot delay the next BOT line.
+            turn = self._engine.handle(text)
+        ms = (time.perf_counter() - t0) * 1000
+        if ms >= 50:
+            logger.info(f"FSM handled in {ms:.0f}ms")
+        else:
+            logger.debug(f"FSM handled in {ms:.0f}ms")
+        return turn
+
     async def _handle_caller(self, text: str) -> None:
         text = _normalize_caller_stt(text)
         self._call.close_user_turn()
@@ -289,13 +324,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         await self._start_telephony_keepalive()
         logger.info(f"CALLER: {text}")
         self._touch_activity()
-        # engine.handle() can call Gemini synchronously (blocking network I/O up to a
-        # few seconds). Running it directly here would freeze the asyncio event loop —
-        # no keepalive frames, no other WebSocket traffic — for that whole window,
-        # which is how a KB/off-script question can silently kill a live call. Push it
-        # to a worker thread so the loop stays responsive while we wait.
-        loop = asyncio.get_running_loop()
-        turn = await loop.run_in_executor(None, self._engine.handle, text)
+        turn = await self._run_engine(text)
         spoken = render_speech(turn.reply)
         logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")
         followup = self._engine.take_pending_followup()

@@ -335,9 +335,9 @@ def test_kb_already_have_benefits_during_qualify():
     assert "plan review" in e.take_pending_followup().lower()
 
 
-def test_repeated_kb_questions_during_qualify_escalate_not_loop_forever():
-    """Caller keeps asking off-script questions instead of answering the qualifier —
-    the bot must not just re-ask the exact same question forever (feels stuck)."""
+def test_repeated_kb_questions_during_qualify_reasks_qualifier():
+    """After each KB answer during qualify, the pending follow-up re-asks the
+    current qualifier (stable behavior when KB was working on live calls)."""
     from app.knowledge import answer_offscript as kb_answer
 
     script = ScriptConfig(
@@ -373,67 +373,7 @@ def test_repeated_kb_questions_during_qualify_escalate_not_loop_forever():
     turn2 = e.handle("is it a scam")
     assert "legitimate" in turn2.reply.lower()
     follow2 = e.take_pending_followup()
-    # Second off-script interruption on the same qualifier must escalate,
-    # not silently repeat the identical question again.
-    assert follow2 != "Do you have Part A and B?"
-    assert "yes or no" in follow2.lower()
-
-
-def test_open_value_qualifier_accepts_any_substantive_answer():
-    """'Age?' expects a number, not yes/no — answering with a value must advance,
-    not repeat the question forever."""
-    script = ScriptConfig(
-        greeting="Hi.",
-        pitch="Medicare review. Do you have a moment?",
-        qualifying_questions=["What is your age?", "Do you have Medicare?"],
-    )
-    e = ConversationEngine(script=script)
-    e.open()
-    e.handle("ok")  # pitch delivered, enter QUALIFY
-    turn1 = e.handle("yes")  # consent -> asks "What is your age?"
-    assert turn1.reply == "What is your age?"
-
-    turn2 = e.handle("I'm sixty seven")
-    assert turn2.reply == "Do you have Medicare?"
-    assert turn2.reply != "What is your age?"
-
-
-def test_open_value_qualifier_still_defers_to_kb_question():
-    """A real question during a value qualifier should still get answered, not
-    be swallowed as if it were the value."""
-    from app.knowledge import answer_offscript as kb_answer
-
-    script = ScriptConfig(
-        greeting="Hi.",
-        pitch="Medicare review. Do you have a moment?",
-        qualifying_questions=["What is your age?"],
-        knowledge_base=[
-            KnowledgeEntry(
-                topic="Is this a scam",
-                triggers=["scam"],
-                answer="This is a legitimate call.",
-            ),
-        ],
-    )
-    e = ConversationEngine(
-        script=script,
-        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
-    )
-    e.open()
-    e.handle("ok")
-    e.handle("yes")  # asks "What is your age?"
-    turn = e.handle("is this a scam")
-    assert "legitimate" in turn.reply.lower()
-
-
-def test_yes_no_qualifier_unaffected_by_open_value_detection():
-    """Plain yes/no qualifiers must still require an actual yes to advance."""
-    e = make_engine()
-    e.open()
-    e.handle("ok")
-    e.handle("yes")  # consent given, asks "Do you own your home?"
-    turn = e.handle("hmm kind of unsure about that")
-    assert turn.reply == "Do you own your home?"
+    assert follow2 == "Do you have Part A and B?"
 
 
 def test_third_kb_in_pitch_advances_to_pitch():
