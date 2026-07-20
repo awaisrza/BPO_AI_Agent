@@ -430,6 +430,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 logger.info(
                     f"BOT follow-up: {' | '.join(c.text for c in spoken) or followup}"
                 )
+                if self._telephony:
+                    pause_s = settings.telephony_followup_pause_s
+                    if pause_s > 0:
+                        logger.info(
+                            f"Telephony follow-up pause ({pause_s:.1f}s) after KB answer"
+                        )
+                        await self._start_telephony_keepalive()
+                        await asyncio.sleep(pause_s)
                 self._call.on_processing()
                 await self.push_frame(TTSSpeakFrame(followup))
                 await self.push_frame(frame, direction)

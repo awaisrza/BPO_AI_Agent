@@ -236,8 +236,10 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client) -> None:
-            # Telnyx already ended the PSTN leg on its side — no REST hangup needed.
-            await shutdown.end_call("remote_hangup", hangup_telnyx=False)
+            # Media stream died but the PSTN leg often stays open (TeXML Pause) — the
+            # caller hears silence while their phone still shows connected. Always
+            # REST-hangup so the line actually ends when our WebSocket closes.
+            await shutdown.end_call("remote_hangup", hangup_telnyx=True)
 
         async def _idle_watchdog() -> None:
             """Force-end the call if nothing has happened for a while.

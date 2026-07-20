@@ -267,8 +267,6 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
         async def _loop() -> None:
             logger.debug("RTP keepalive started")
             while not stop.is_set():
-                if self.speech_is_cancelled():
-                    break
                 await self.push_frame(
                     TTSAudioRawFrame(
                         audio=silent_frame,
