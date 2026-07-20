@@ -259,13 +259,15 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             task.cancel()
         self._prefetch_tasks.clear()
 
+    async def start_listen_keepalive(self) -> None:
+        """Start comfort RTP after bot playback — called directly from the fronter."""
+        await self._start_rtp_keepalive()
+
     async def _start_rtp_keepalive(self, direction=None) -> None:  # type: ignore[no-untyped-def]
         """Stream 20 ms silence frames so Telnyx does not drop the call during gaps."""
         if not self._telephony:
             return
         await self._stop_rtp_keepalive()
-        # Outbound comfort noise must always go toward the transport output, even when
-        # this handler was triggered by an upstream BotStoppedSpeakingFrame.
         out_dir = FrameDirection.DOWNSTREAM
         self._keepalive_stop = asyncio.Event()
         stop = self._keepalive_stop
@@ -276,22 +278,28 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             return
         silent_frame = frames[0]
 
+        async def _emit_silence() -> None:
+            await self.push_frame(
+                TTSAudioRawFrame(
+                    audio=silent_frame,
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                ),
+                out_dir,
+            )
+
+        # Emit one frame immediately in the caller's task — do not wait for a
+        # background task to be scheduled (Telnyx drops the stream in ~3s).
+        await _emit_silence()
+        logger.info("RTP keepalive started")
+
         async def _loop() -> None:
-            logger.info("RTP keepalive started")
             while not stop.is_set():
-                await self.push_frame(
-                    TTSAudioRawFrame(
-                        audio=silent_frame,
-                        sample_rate=self.sample_rate,
-                        num_channels=1,
-                    ),
-                    out_dir,
-                )
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=STREAM_FRAME_MS / 1000.0)
                     break
                 except asyncio.TimeoutError:
-                    continue
+                    await _emit_silence()
             logger.debug("RTP keepalive stopped")
 
         self._keepalive_task = asyncio.create_task(_loop())
