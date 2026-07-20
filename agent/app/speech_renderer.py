@@ -393,6 +393,9 @@ if PIPECAT_AVAILABLE:
             if isinstance(frame, BotStoppedSpeakingFrame):
                 if self._telephony:
                     self._controller.finish_bot_playback()
+                    # Start RTP keepalive here (adjacent to TTS) once playback has
+                    # actually finished — not when chunks were queued ~7s earlier.
+                    await self.push_frame(RtpKeepaliveStartFrame(), FrameDirection.DOWNSTREAM)
                 else:
                     self._controller.on_bot_chunk_finished()
                 await self.push_frame(frame, direction)

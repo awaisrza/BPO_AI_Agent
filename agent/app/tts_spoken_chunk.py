@@ -53,8 +53,6 @@ async def handle_spoken_chunk_frame(
     """Synthesize one chunk, stream audio, then optional pause silence."""
     if frame.reset_barge_in and hasattr(processor, "reset_speech_cancellation"):
         processor.reset_speech_cancellation()
-        if getattr(processor, "_telephony", False) and hasattr(processor, "_push_comfort_silence"):
-            await processor._push_comfort_silence(direction)
 
     if getattr(processor, "speech_is_cancelled", lambda: False)():
         logger.debug(f"TTS chunk skipped (barge-in): {frame.text[:48]!r}")
@@ -95,13 +93,3 @@ async def handle_spoken_chunk_frame(
                 ),
                 direction,
             )
-
-    # Do not rely on BotStoppedSpeakingFrame reaching FronterProcessor — on Telnyx
-    # that frame can lag or never arrive while outbound RTP is silent, and Telnyx
-    # drops the media stream (~3s) leaving the caller hearing dead air.
-    if (
-        getattr(processor, "_telephony", False)
-        and hasattr(processor, "_push_comfort_silence")
-        and not getattr(processor, "speech_is_cancelled", lambda: False)()
-    ):
-        await processor._push_comfort_silence(direction)

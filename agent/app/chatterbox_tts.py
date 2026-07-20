@@ -344,6 +344,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             await super().process_frame(frame, direction)
             return
         if isinstance(frame, RtpKeepaliveStartFrame):
+            await self._stop_rtp_keepalive()
             await self._start_rtp_keepalive(direction)
             await self.push_frame(frame, direction)
             return
