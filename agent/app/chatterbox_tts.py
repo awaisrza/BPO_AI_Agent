@@ -22,13 +22,22 @@ from .speech_renderer import (
 from .tts_spoken_chunk import SpokenChunkTTSSupport, handle_spoken_chunk_frame
 
 try:
-    from pipecat.frames.frames import ErrorFrame, Frame, InterruptionFrame, TTSAudioRawFrame
+    from pipecat.frames.frames import (
+        BotStoppedSpeakingFrame,
+        ErrorFrame,
+        Frame,
+        InterruptionFrame,
+        TTSAudioRawFrame,
+    )
+    from pipecat.processors.frame_processor import FrameDirection
     from pipecat.services.settings import TTSSettings
     from pipecat.services.tts_service import TTSService
 except Exception:  # pragma: no cover
     TTSService = object  # type: ignore
     Frame = object  # type: ignore
     TTSSettings = object  # type: ignore
+    BotStoppedSpeakingFrame = object  # type: ignore
+    FrameDirection = object  # type: ignore
 
 
 _model_lock = threading.Lock()
@@ -250,17 +259,20 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             task.cancel()
         self._prefetch_tasks.clear()
 
-    async def _start_rtp_keepalive(self, direction) -> None:  # type: ignore[no-untyped-def]
+    async def _start_rtp_keepalive(self, direction=None) -> None:  # type: ignore[no-untyped-def]
         """Stream 20 ms silence frames so Telnyx does not drop the call during gaps."""
         if not self._telephony:
             return
-        if self._keepalive_task and not self._keepalive_task.done():
-            return
+        await self._stop_rtp_keepalive()
+        # Outbound comfort noise must always go toward the transport output, even when
+        # this handler was triggered by an upstream BotStoppedSpeakingFrame.
+        out_dir = FrameDirection.DOWNSTREAM
         self._keepalive_stop = asyncio.Event()
         stop = self._keepalive_stop
         pcm = silence_pcm(STREAM_FRAME_MS, self.sample_rate)
         frames = list(iter_pcm_frames(pcm, self.sample_rate, frame_ms=STREAM_FRAME_MS))
         if not frames:
+            logger.warning("RTP keepalive failed: no silence frames generated")
             return
         silent_frame = frames[0]
 
@@ -273,7 +285,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
                         sample_rate=self.sample_rate,
                         num_channels=1,
                     ),
-                    direction,
+                    out_dir,
                 )
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=STREAM_FRAME_MS / 1000.0)
@@ -344,12 +356,16 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             await super().process_frame(frame, direction)
             return
         if isinstance(frame, RtpKeepaliveStartFrame):
-            await self._stop_rtp_keepalive()
-            await self._start_rtp_keepalive(direction)
+            await self._start_rtp_keepalive()
             await self.push_frame(frame, direction)
             return
         if isinstance(frame, RtpKeepaliveStopFrame):
             await self._stop_rtp_keepalive()
+            await self.push_frame(frame, direction)
+            return
+        if isinstance(frame, BotStoppedSpeakingFrame):
+            if self._telephony:
+                await self._start_rtp_keepalive()
             await self.push_frame(frame, direction)
             return
         if isinstance(frame, SpokenChunkFrame):
