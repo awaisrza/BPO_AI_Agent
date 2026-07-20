@@ -65,6 +65,7 @@ try:
         SystemFrame,
         TranscriptionFrame,
         TTSSpeakFrame,
+        VADUserStartedSpeakingFrame,
         VADUserStoppedSpeakingFrame,
     )
     from pipecat.pipeline.pipeline import Pipeline
@@ -436,11 +437,21 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             if not self._call.can_accept_caller():
                 self._call.finish_bot_playback()
             if self._call.can_accept_caller():
-                if self._pending_caller_texts or self._caller_buffer.strip():
+                # Telnyx drops the media stream after ~3s with no outbound RTP.
+                # Keepalive must run for the whole listen window — not only when
+                # caller text is already queued (after greeting that gap killed calls).
+                if self._telephony:
                     await self._start_telephony_keepalive()
                 self._move_pending_to_buffer()
                 if self._caller_buffer:
                     self._schedule_caller_flush()
+            await self.push_frame(frame, direction)
+            return
+
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            if self._telephony and self._call.can_accept_caller():
+                self._touch_activity()
+                await self._start_telephony_keepalive()
             await self.push_frame(frame, direction)
             return
 
