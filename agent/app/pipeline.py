@@ -696,6 +696,7 @@ def _build_tts(*, script: ScriptConfig, sample_rate: int, telephony: bool = Fals
             exaggeration=settings.chatterbox_exaggeration,
             cfg_weight=settings.chatterbox_cfg_weight,
             sample_rate=sample_rate,
+            telephony=telephony,
             cache=cache,
         )
 

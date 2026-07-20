@@ -218,6 +218,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
         exaggeration: float = 0.35,
         cfg_weight: float = 0.5,
         sample_rate: int = 16000,
+        telephony: bool = False,
         cache: dict[str, bytes] | None = None,
         **kwargs,
     ):
@@ -232,7 +233,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
         self._device = resolve_chatterbox_device(device)
         self._exaggeration = exaggeration
         self._cfg_weight = cfg_weight
-        self._telephony = sample_rate == TELEPHONY_PIPELINE_RATE
+        self._telephony = telephony
         self._cache = cache or {}
         self._infer_lock = asyncio.Lock()
         self._prefetch_tasks: set[asyncio.Task] = set()
@@ -248,6 +249,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             exaggeration=self._exaggeration,
             cfg_weight=self._cfg_weight,
             sample_rate=self.sample_rate,
+            telephony=self._telephony,
             cache=self._cache,
         )
 
@@ -267,7 +269,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
         """Stream 20 ms silence frames so Telnyx does not drop the call during gaps."""
         if not self._telephony:
             logger.warning(
-                f"RTP keepalive skipped (telephony=False, sample_rate={self.sample_rate})"
+                f"RTP keepalive skipped (telephony={self._telephony!r}, sample_rate={self.sample_rate})"
             )
             return
         await self._stop_rtp_keepalive()
