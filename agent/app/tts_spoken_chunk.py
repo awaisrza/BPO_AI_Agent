@@ -95,3 +95,13 @@ async def handle_spoken_chunk_frame(
                 ),
                 direction,
             )
+
+    # Do not rely on BotStoppedSpeakingFrame reaching FronterProcessor — on Telnyx
+    # that frame can lag or never arrive while outbound RTP is silent, and Telnyx
+    # drops the media stream (~3s) leaving the caller hearing dead air.
+    if (
+        getattr(processor, "_telephony", False)
+        and hasattr(processor, "_push_comfort_silence")
+        and not getattr(processor, "speech_is_cancelled", lambda: False)()
+    ):
+        await processor._push_comfort_silence(direction)

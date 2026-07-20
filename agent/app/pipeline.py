@@ -462,6 +462,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 # caller text is already queued (after greeting that gap killed calls).
                 if self._telephony:
                     await self._start_telephony_keepalive()
+                    logger.info("Telephony listen — waiting for caller")
                 self._move_pending_to_buffer()
                 if self._caller_buffer:
                     self._schedule_caller_flush()

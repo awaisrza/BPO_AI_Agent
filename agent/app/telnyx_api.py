@@ -40,6 +40,12 @@ def hangup_telnyx_call(call_control_id: str, *, timeout: float = 10.0) -> bool:
         if resp.status_code in (200, 202):
             logger.info(f"Telnyx hangup OK (call_sid={call_control_id}, status={resp.status_code})")
             return True
+        if resp.status_code == 404:
+            logger.info(
+                f"Telnyx hangup skipped — call already ended "
+                f"(call_sid={call_control_id}, status=404)"
+            )
+            return True
         logger.warning(
             f"Telnyx hangup failed (call_sid={call_control_id}) "
             f"status={resp.status_code} body={resp.text[:200]!r}"
