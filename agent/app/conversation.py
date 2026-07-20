@@ -60,6 +60,7 @@ _POSITIVE = {
     "im fine",
 }
 _GREETING_ACK = {"good", "fine", "well", "doing well", "i'm fine", "im fine", "great"}
+_GREETING_REPLY = _GREETING_ACK | {"i'm good", "im good", "i am good", "all good"}
 _CONSENT = {
     "yes",
     "yeah",
@@ -81,10 +82,6 @@ _CONSENT = {
     "thats good",
     "thank you",
     "thanks",
-    "i'm good",
-    "im good",
-    "i am good",
-    "all good",
 }
 _QUALIFY_YES = {"yes", "yeah", "yep", "sure", "correct", "absolutely", "definitely"}
 _NEGATIVE = (
@@ -167,6 +164,28 @@ def _is_qualify_yes(utterance: str) -> bool:
         return True
     words = set(u.replace(",", " ").replace(".", " ").split())
     return bool(words & _QUALIFY_YES)
+
+
+def _is_greeting_reply(utterance: str) -> bool:
+    """Answer to 'how are you today?' — always play the pitch, never a KB line."""
+    u = utterance.strip().lower().rstrip(".")
+    if _looks_like_question(u):
+        return False
+    if _matches_phrase(
+        u,
+        {
+            "i'm good",
+            "im good",
+            "i am good",
+            "all good",
+            "i'm fine",
+            "im fine",
+            "doing well",
+        },
+    ):
+        return True
+    words = [w for w in u.replace(",", " ").split() if w]
+    return len(words) == 1 and words[0] in {"good", "fine", "well", "great"}
 
 
 def _is_greeting_ack_only(utterance: str) -> bool:
@@ -384,6 +403,11 @@ class ConversationEngine:
         is_question = intent == Intent.QUESTION or bool(self._kb_only_answer(utterance))
 
         if self.state == State.PITCH:
+            # "I'm good / fine / great" must never hit KB (e.g. false "not interested"
+            # overlap on Supabase triggers) — that blocks the pitch and after two KB
+            # hits the next real question gets the whole pitch again.
+            if _is_greeting_reply(utterance):
+                return self._deliver_pitch()
             if is_question:
                 if self._pitch_kb_answers >= self._max_pitch_kb_answers:
                     return self._deliver_pitch()
@@ -398,6 +422,10 @@ class ConversationEngine:
 
         if self.state == State.QUALIFY:
             if not self._pitch_confirmed:
+                # Greeting reply ("I'm good") is not pitch consent — e.g. after spurious STT
+                # during the hello line advanced state to QUALIFY without a real pitch answer.
+                if _is_greeting_reply(utterance):
+                    return self._deliver_pitch()
                 # Any affirmative after the pitch counts as consent — thank you, yes, sure, etc.
                 if intent == Intent.POSITIVE or _is_consent(utterance):
                     self._pitch_confirmed = True

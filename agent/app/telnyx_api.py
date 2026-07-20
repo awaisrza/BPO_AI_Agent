@@ -37,8 +37,8 @@ def hangup_telnyx_call(call_control_id: str, *, timeout: float = 10.0) -> bool:
     try:
         with httpx.Client(timeout=timeout) as client:
             resp = client.post(url, headers=headers, data={"Status": "completed"})
-        if resp.status_code == 200:
-            logger.info(f"Telnyx hangup OK (call_sid={call_control_id})")
+        if resp.status_code in (200, 202):
+            logger.info(f"Telnyx hangup OK (call_sid={call_control_id}, status={resp.status_code})")
             return True
         logger.warning(
             f"Telnyx hangup failed (call_sid={call_control_id}) "

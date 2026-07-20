@@ -4,7 +4,7 @@ import time
 from app.config import ScriptConfig
 from app.conversation import ConversationEngine
 from app.models import KnowledgeEntry
-from app.pipeline import FronterProcessor, should_telephony_barge_in
+from app.pipeline import FronterProcessor, _is_meaningful_caller_text, should_telephony_barge_in
 
 
 def _medicare_engine() -> ConversationEngine:
@@ -184,3 +184,8 @@ def test_hangup_defers_termination_until_bot_finishes_speaking():
     # for the closing line is observed (simulated directly here).
     assert ended == []
     assert fronter._pending_terminal_action == "hangup"
+
+
+def test_stt_click_fragment_is_ignored():
+    assert not _is_meaningful_caller_text("Click")
+    assert not _is_meaningful_caller_text("click.")

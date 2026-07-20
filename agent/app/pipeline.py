@@ -90,6 +90,9 @@ _STT_IGNORE = frozenset({
     "bye",
     "thanks",
     "thank you",
+    "click",
+    "clicks",
+    "tick",
     ".",
     "..",
     "...",
@@ -109,7 +112,7 @@ def _normalize_caller_stt(text: str) -> str:
 
 
 def _is_meaningful_caller_text(text: str) -> bool:
-    t = text.strip().lower()
+    t = text.strip().lower().rstrip(".")
     if len(t) < 2:
         return False
     if t in _STT_IGNORE:
@@ -142,6 +145,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         telephony: bool = False,
         telephony_phone_test: bool = False,
         on_call_should_end: "Callable[[str], Awaitable[None]] | None" = None,
+        is_call_active: "Callable[[], bool] | None" = None,
     ):
         super().__init__()
         self._engine = engine
@@ -151,6 +155,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._telephony = telephony
         self._telephony_phone_test = telephony_phone_test
         self._on_call_should_end = on_call_should_end
+        self._is_call_active = is_call_active
         self._pending_terminal_action: str | None = None
         self._opened = False
         self._call = call_controller or CallController()
@@ -163,6 +168,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
     def _touch_activity(self) -> None:
         self.last_activity_monotonic = time.monotonic()
+
+    def _call_live(self) -> bool:
+        return self._is_call_active is None or self._is_call_active()
 
     async def _start_telephony_keepalive(self) -> None:
         if self._telephony and PIPECAT_AVAILABLE:
@@ -319,6 +327,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         return turn
 
     async def _handle_caller(self, text: str) -> None:
+        if not self._call_live():
+            return
         text = _normalize_caller_stt(text)
         self._call.close_user_turn()
         self._call.on_processing()
@@ -369,6 +379,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 await self.push_frame(EndFrame())
 
     async def process_frame(self, frame, direction):  # type: ignore[override]
+        if not self._call_live() and not isinstance(frame, (StartFrame, SystemFrame)):
+            return
         await super().process_frame(frame, direction)
 
         # Mic audio must not reach TTS — only STT/VAD consume it upstream.
@@ -749,6 +761,7 @@ def build_pipeline(
     sample_rate: int = 16000,
     telephony: bool = False,
     on_call_should_end: "Callable[[str], Awaitable[None]] | None" = None,
+    is_call_active: "Callable[[], bool] | None" = None,
 ) -> Pipeline:
     """Assemble the live pipeline. `transport` provides audio in/out frames."""
     global _cached_stt
@@ -814,6 +827,7 @@ def build_pipeline(
         telephony=telephony,
         telephony_phone_test=telephony and mic_test,
         on_call_should_end=on_call_should_end,
+        is_call_active=is_call_active,
     )
     barge_in = BargeInProcessor(call_controller, telephony=telephony)
     max_words, pause_min, pause_max = _speech_settings(telephony=telephony)

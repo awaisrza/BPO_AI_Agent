@@ -64,9 +64,16 @@ class _CallShutdown:
     call to have already succeeded before that risk is taken.
     """
 
-    def __init__(self, *, call_control_id: str | None, websocket) -> None:
+    def __init__(
+        self,
+        *,
+        call_control_id: str | None,
+        websocket,
+        on_begin_shutdown=None,
+    ) -> None:
         self._call_control_id = call_control_id
         self._websocket = websocket
+        self._on_begin_shutdown = on_begin_shutdown
         self._worker = None
         self._tts_for_cleanup = None
         self._done = False
@@ -83,6 +90,11 @@ class _CallShutdown:
         if self._done:
             return
         self._done = True
+        if self._on_begin_shutdown is not None:
+            try:
+                await self._on_begin_shutdown()
+            except Exception as exc:  # noqa: BLE001
+                _event(f"shutdown: session mark failed: {exc}")
         _event(f"=== ENDING CALL (reason={reason}) ===")
 
         if hangup_telnyx and self._call_control_id:
@@ -145,9 +157,21 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
         if not stream_id:
             raise RuntimeError(f"Missing stream_id in handshake: {call_data}")
 
-        shutdown = _CallShutdown(call_control_id=call_control_id, websocket=websocket)
+        shutdown = _CallShutdown(
+            call_control_id=call_control_id,
+            websocket=websocket,
+            on_begin_shutdown=None,  # set below once session_key exists
+        )
 
         session_key = call_control_id or stream_id
+
+        async def _mark_session_ended() -> None:
+            async with _session_lock:
+                _active_call_ids.discard(session_key)
+                _completed_call_ids[session_key] = time.monotonic()
+
+        shutdown._on_begin_shutdown = _mark_session_ended
+
         async with _session_lock:
             _prune_completed_calls()
             if session_key in _completed_call_ids:
@@ -196,6 +220,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             sample_rate=sample_rate,
             telephony=True,
             on_call_should_end=_on_call_should_end,
+            is_call_active=lambda: not shutdown.done,
         )
         _event(
             f"=== PIPELINE BUILT in {(time.monotonic() - build_started) * 1000:.0f}ms ==="

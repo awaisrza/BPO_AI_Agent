@@ -1,5 +1,6 @@
 from app.config import ScriptConfig
-from app.conversation import Action, ConversationEngine, Intent, heuristic_classifier
+from app.conversation import Action, ConversationEngine, Intent, State, heuristic_classifier
+from app.knowledge import parse_knowledge_base
 from app.models import KnowledgeEntry
 
 
@@ -374,6 +375,43 @@ def test_repeated_kb_questions_during_qualify_reasks_qualifier():
     assert "legitimate" in turn2.reply.lower()
     follow2 = e.take_pending_followup()
     assert follow2 == "Do you have Part A and B?"
+
+
+def test_im_good_pre_consent_redelivers_pitch_not_part_ab():
+    """After a spurious advance to QUALIFY, 'I'm good' must not skip to Part A/B."""
+    e = make_engine()
+    e.open()
+    e.state = State.QUALIFY
+    e._pitch_confirmed = False
+    turn = e.handle("I'm good.")
+    assert "own your home" in turn.reply.lower() or "power bill" in turn.reply.lower()
+    assert "Part A" not in turn.reply
+
+
+def test_im_good_after_greeting_delivers_pitch_not_kb_objection():
+    """Greeting reply must play the pitch — not a KB/objection line."""
+    import json
+    from pathlib import Path
+
+    data = json.loads(
+        (Path(__file__).resolve().parents[1] / "scripts/campaigns/4c3aaed2-2dc6-4828-9d19-1024636dc0ac.json").read_text()
+    )
+    script = ScriptConfig(
+        greeting=data["greeting"],
+        pitch=data["pitch"],
+        qualifying_questions=data["qualifying_questions"],
+        knowledge_base=parse_knowledge_base(data["knowledge_base"]),
+    )
+    from app.knowledge import answer_offscript as kb_answer
+
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base, telephony=True),
+    )
+    e.open()
+    turn = e.handle("I'm good.")
+    assert "Medicare plan" in turn.reply
+    assert "totally get that" not in turn.reply.lower()
 
 
 def test_third_kb_in_pitch_advances_to_pitch():
