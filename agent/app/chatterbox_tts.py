@@ -266,6 +266,9 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
     async def _start_rtp_keepalive(self, direction=None) -> None:  # type: ignore[no-untyped-def]
         """Stream 20 ms silence frames so Telnyx does not drop the call during gaps."""
         if not self._telephony:
+            logger.warning(
+                f"RTP keepalive skipped (telephony=False, sample_rate={self.sample_rate})"
+            )
             return
         await self._stop_rtp_keepalive()
         out_dir = FrameDirection.DOWNSTREAM
@@ -364,6 +367,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             await super().process_frame(frame, direction)
             return
         if isinstance(frame, RtpKeepaliveStartFrame):
+            logger.info("Chatterbox: starting RTP keepalive (RtpKeepaliveStartFrame)")
             await self._start_rtp_keepalive()
             await self.push_frame(frame, direction)
             return
@@ -373,6 +377,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             return
         if isinstance(frame, BotStoppedSpeakingFrame):
             if self._telephony:
+                logger.info("Chatterbox: starting RTP keepalive (BotStoppedSpeakingFrame)")
                 await self._start_rtp_keepalive()
             await self.push_frame(frame, direction)
             return

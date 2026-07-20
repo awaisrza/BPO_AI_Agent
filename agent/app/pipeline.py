@@ -70,7 +70,7 @@ try:
     )
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.processors.audio.vad_processor import VADProcessor
-    from pipecat.processors.frame_processor import FrameProcessor
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
     from pipecat.services.deepgram.stt import DeepgramSTTService
     PIPECAT_AVAILABLE = True
 except Exception:  # pragma: no cover - allows the FSM/tests to run without Pipecat installed
@@ -146,7 +146,6 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         telephony_phone_test: bool = False,
         on_call_should_end: "Callable[[str], Awaitable[None]] | None" = None,
         is_call_active: "Callable[[], bool] | None" = None,
-        on_listen_start: "Callable[[], Awaitable[None]] | None" = None,
     ):
         super().__init__()
         self._engine = engine
@@ -157,7 +156,6 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._telephony_phone_test = telephony_phone_test
         self._on_call_should_end = on_call_should_end
         self._is_call_active = is_call_active
-        self._on_listen_start = on_listen_start
         self._pending_terminal_action: str | None = None
         self._opened = False
         self._call = call_controller or CallController()
@@ -175,14 +173,11 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         return self._is_call_active is None or self._is_call_active()
 
     async def _start_telephony_keepalive(self) -> None:
-        if not self._telephony:
+        if not self._telephony or not PIPECAT_AVAILABLE:
             return
-        # Direct TTS callback is more reliable than routing a custom frame through
-        # the pipeline (BSSF/keepalive frames can miss the Chatterbox processor).
-        if self._on_listen_start is not None:
-            await self._on_listen_start()
-        elif PIPECAT_AVAILABLE:
-            await self.push_frame(RtpKeepaliveStartFrame())
+        # Must route through the pipeline so keepalive runs inside TTS process_frame
+        # (calling tts.push_frame from here does not reach Telnyx in PipelineWorker).
+        await self.push_frame(RtpKeepaliveStartFrame(), FrameDirection.DOWNSTREAM)
 
     async def _interrupt_and_handle_caller(self, text: str, direction) -> None:  # type: ignore[no-untyped-def]
         """Stop current TTS and answer the caller immediately (telephony KB/questions)."""
@@ -827,11 +822,6 @@ def build_pipeline(
     )
     call_controller = CallController()
     vici = None if mic_test else ViciDialClient()
-
-    async def _on_listen_start() -> None:
-        if hasattr(tts, "start_listen_keepalive"):
-            await tts.start_listen_keepalive()
-
     fronter = FronterProcessor(
         engine,
         vici,
@@ -842,7 +832,6 @@ def build_pipeline(
         telephony_phone_test=telephony and mic_test,
         on_call_should_end=on_call_should_end,
         is_call_active=is_call_active,
-        on_listen_start=_on_listen_start if telephony else None,
     )
     barge_in = BargeInProcessor(call_controller, telephony=telephony)
     max_words, pause_min, pause_max = _speech_settings(telephony=telephony)
