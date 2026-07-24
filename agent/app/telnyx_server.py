@@ -70,6 +70,41 @@ def _public_base() -> str:
     return settings.local_server_url.rstrip("/")
 
 
+def _local_server_uses_wss() -> bool:
+    return _websocket_url().startswith("wss://")
+
+
+def _validate_local_server_url(*, for_dial: bool = False) -> None:
+    """Telnyx media requires wss://; raw Vast http://IP:port → ws:// is unstable."""
+    base = settings.local_server_url.strip().rstrip("/")
+    if not base:
+        raise RuntimeError("Set LOCAL_SERVER_URL in agent/.env.local")
+    if base.startswith("https://"):
+        return
+    if base.startswith("http://"):
+        ws_url = _websocket_url()
+        msg = (
+            f"LOCAL_SERVER_URL={base!r} → WebSocket {ws_url!r}. "
+            "Telnyx needs wss:// (TLS on port 443). Vast's mapped port often "
+            "causes stream-error, silence, and choppy/robotic audio.\n"
+            "On the GPU run: ./scripts/start-vast-tunnel.sh\n"
+            "Then set LOCAL_SERVER_URL=https://....trycloudflare.com and restart."
+        )
+        allow = os.getenv("TELNYX_ALLOW_INSECURE_WS", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if for_dial and not allow:
+            raise RuntimeError(msg)
+        _event(f"WARNING: {msg}")
+        return
+    raise RuntimeError(
+        f"LOCAL_SERVER_URL must start with https:// (got {base!r}). "
+        "Use cloudflared or ngrok on the GPU instance."
+    )
+
+
 def _texml_for_stream() -> str:
     stream_status = f"{_public_base()}/stream-status"
     ws_url = _websocket_url()
@@ -242,11 +277,21 @@ def create_telnyx_app(script: ScriptConfig, agent_user: str) -> FastAPI:
         except Exception:
             pass
         _event(f"=== /stream-status {request.method} body={body!r} ===")
+        if "StreamEvent=stream-error" in body or "StreamEvent=stream-failed" in body:
+            ws_url = _websocket_url()
+            _event(
+                "=== STREAM ERROR — Telnyx could not connect to the media WebSocket. "
+                f"Expected URL: {ws_url}. "
+                "No /ws INCOMING log means Telnyx never reached your server. "
+                "Use LOCAL_SERVER_URL=https://... (wss://) via ngrok/cloudflare — "
+                "raw ws:// on a public IP often fails."
+            )
         return Response(content="", status_code=200)
 
     @app.post("/dialout")
     async def dialout(body: DialoutBody) -> JSONResponse:
         _require_telnyx()
+        _validate_local_server_url(for_dial=True)
         from_number = (body.from_number or settings.telnyx_phone_number or "").strip()
         if not from_number:
             raise HTTPException(
@@ -319,6 +364,7 @@ def run_telnyx_server(
 ) -> None:
     """Start the Telnyx phone-test server and optionally place one outbound call."""
     _require_telnyx()
+    _validate_local_server_url(for_dial=bool(dial_to))
     from_number = settings.telnyx_phone_number
     if dial_to and not from_number:
         raise RuntimeError("Set TELNYX_PHONE_NUMBER to use --dial.")
@@ -353,6 +399,18 @@ def run_telnyx_server(
     print(f"Public URL:  {settings.local_server_url}")
     print(f"TeXML:       {settings.local_server_url.rstrip('/')}/answer")
     print(f"WebSocket:   {_websocket_url()}")
+    ws_url = _websocket_url()
+    if not _local_server_uses_wss():
+        print(
+            "\n*** INSECURE WEBSOCKET — expect choppy audio / stream-error ***\n"
+            f"  Current: {ws_url}\n"
+            "  Fix on GPU: ./scripts/start-vast-tunnel.sh\n"
+            "  Then LOCAL_SERVER_URL=https://....trycloudflare.com\n"
+            "  (Override only for debugging: TELNYX_ALLOW_INSECURE_WS=1)\n"
+        )
+        _event(f"WARNING: insecure WebSocket URL {ws_url} — Telnyx may send stream-error")
+    else:
+        _event(f"WebSocket URL OK: {ws_url}")
     print(f"Local bind:  http://{host}:{port}")
     print(f"Event log:   {_CRASH_LOG}")
     print(f"Script:      {script.greeting[:60]}...")
@@ -360,6 +418,12 @@ def run_telnyx_server(
 
     def _dial_after_ready() -> None:
         try:
+            try:
+                _validate_local_server_url(for_dial=True)
+            except RuntimeError as exc:
+                _event(f"=== DIAL BLOCKED: {exc} ===")
+                print(f"\n*** DIAL BLOCKED ***\n{exc}\n")
+                return
             _wait_for_health(port)
             answer_url = f"{settings.local_server_url.rstrip('/')}/answer"
             local_answer = f"http://127.0.0.1:{port}/answer"
@@ -421,4 +485,14 @@ def run_telnyx_server(
     if dial_to:
         threading.Thread(target=_dial_after_ready, daemon=True).start()
 
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    # Keep the Telnyx media WebSocket alive through proxies / idle gaps.
+    ws_ping = float(os.getenv("TELNYX_WS_PING_INTERVAL", "20") or "20")
+    ws_timeout = float(os.getenv("TELNYX_WS_PING_TIMEOUT", "20") or "20")
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        ws_ping_interval=ws_ping,
+        ws_ping_timeout=ws_timeout,
+    )
