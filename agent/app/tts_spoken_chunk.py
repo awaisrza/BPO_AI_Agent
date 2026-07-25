@@ -78,4 +78,7 @@ async def handle_spoken_chunk_frame(
         )
 
     if getattr(processor, "_telephony", False):
-        await processor.push_frame(UtteranceFlushFrame(), direction)
+        await processor.push_frame(
+            UtteranceFlushFrame(final=frame.is_last_chunk),
+            direction,
+        )

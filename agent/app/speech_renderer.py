@@ -307,12 +307,13 @@ if PIPECAT_AVAILABLE:
         pause_after_ms: int = 0
         reset_barge_in: bool = False
         prefetch_text: str = ""
+        is_last_chunk: bool = True
 
     @dataclass
     class UtteranceFlushFrame(SystemFrame):
         """End of one spoken line — triggers bulk Telnyx media flush."""
 
-        pass
+        final: bool = False
 
     @dataclass
     class RtpKeepaliveStartFrame(SystemFrame):
@@ -442,6 +443,7 @@ if PIPECAT_AVAILABLE:
                             pause_after_ms=pause_ms,
                             reset_barge_in=(idx == 0),
                             prefetch_text=prefetch,
+                            is_last_chunk=(idx == len(chunks) - 1),
                         ),
                         direction,
                     )

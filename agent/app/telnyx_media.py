@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import audioop
 import base64
 import json
@@ -13,7 +14,13 @@ from loguru import logger
 from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
 
 try:
-    from pipecat.frames.frames import Frame, InterruptionFrame, TTSAudioRawFrame
+    from pipecat.frames.frames import (
+        BotStartedSpeakingFrame,
+        BotStoppedSpeakingFrame,
+        Frame,
+        InterruptionFrame,
+        TTSAudioRawFrame,
+    )
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
     PIPECAT_AVAILABLE = True
@@ -24,6 +31,8 @@ except Exception:  # pragma: no cover
     Frame = object  # type: ignore
     InterruptionFrame = object  # type: ignore
     TTSAudioRawFrame = object  # type: ignore
+    BotStartedSpeakingFrame = object  # type: ignore
+    BotStoppedSpeakingFrame = object  # type: ignore
 
 TELNYX_WIRE_RATE = 8000
 # 20 ms PCM16 @ 8 kHz — flush keepalive silence promptly.
@@ -74,6 +83,14 @@ def _is_silence_pcm(pcm: bytes) -> bool:
     return audioop.max(pcm, 2) == 0
 
 
+def _playback_duration_ms(pcm: bytes, *, sample_rate: int, wire_rate: int) -> int:
+    if not pcm:
+        return 0
+    if sample_rate != wire_rate:
+        pcm, _ = audioop.ratecv(pcm, 2, 1, sample_rate, wire_rate, None)
+    return len(pcm) * 1000 // (wire_rate * 2)
+
+
 if PIPECAT_AVAILABLE:
 
     class TelnyxBulkMediaProcessor(FrameProcessor):  # type: ignore[misc]
@@ -92,25 +109,48 @@ if PIPECAT_AVAILABLE:
             self._wire_rate = wire_rate
             self._pcm = bytearray()
             self._rate = TELEPHONY_PIPELINE_RATE
+            self._bot_speaking = False
 
-        async def _flush(self) -> None:
-            if not self._pcm:
+        async def _ensure_bot_started(self) -> None:
+            if self._bot_speaking:
                 return
+            self._bot_speaking = True
+            await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+
+        async def _bot_finished_playback(self) -> None:
+            if not self._bot_speaking:
+                return
+            self._bot_speaking = False
+            logger.debug("Telnyx bulk media: bot playback finished — BotStoppedSpeaking")
+            await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+
+        async def _flush(self) -> int:
+            if not self._pcm:
+                return 0
+            pcm = bytes(self._pcm)
+            rate = self._rate
+            duration_ms = _playback_duration_ms(
+                pcm, sample_rate=rate, wire_rate=self._wire_rate
+            )
+            if not _is_silence_pcm(pcm):
+                await self._ensure_bot_started()
             msg = pcm_to_telnyx_media_json(
-                bytes(self._pcm),
-                sample_rate=self._rate,
+                pcm,
+                sample_rate=rate,
                 encoding=self._encoding,
                 wire_rate=self._wire_rate,
             )
             self._pcm.clear()
             if msg:
                 await self._send_json(msg)
+            return duration_ms
 
         async def process_frame(self, frame, direction):  # type: ignore[no-untyped-def]
             await super().process_frame(frame, direction)
 
             if isinstance(frame, InterruptionFrame):
                 self._pcm.clear()
+                self._bot_speaking = False
                 await self._send_json(json.dumps({"event": "clear"}))
                 await self.push_frame(frame, direction)
                 return
@@ -122,13 +162,18 @@ if PIPECAT_AVAILABLE:
                         self._rate = frame.sample_rate
                 # Keepalive silence must reach Telnyx within ~3 s — flush often.
                 if _is_silence_pcm(bytes(self._pcm)) and len(self._pcm) >= _KEEPALIVE_PCM_BYTES:
-                    await self._flush()
+                    duration_ms = await self._flush()
+                    if duration_ms > 0:
+                        await asyncio.sleep(duration_ms / 1000.0)
                 return
 
-            # UtteranceFlushFrame — defined in speech_renderer (import lazily).
             frame_name = type(frame).__name__
             if frame_name == "UtteranceFlushFrame":
-                await self._flush()
+                duration_ms = await self._flush()
+                if duration_ms > 0:
+                    await asyncio.sleep(duration_ms / 1000.0)
+                if getattr(frame, "final", False):
+                    await self._bot_finished_playback()
                 return
 
             await self.push_frame(frame, direction)
