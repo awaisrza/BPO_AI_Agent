@@ -1,10 +1,15 @@
-# Chatterbox + GPU stack (RunPod / local NVIDIA)
+# Chatterbox + GPU stack (RunPod / Vast.ai / local NVIDIA)
 # pip install -r requirements-gpu.txt
+#
+# Pin torch + torchvision + torchaudio together — mixing Vast/RunPod template
+# torchvision (e.g. 0.27 for torch 2.12) with pip torch 2.6 breaks Chatterbox:
+#   RuntimeError: operator torchvision::nms does not exist
 -r requirements.txt
 pipecat-ai[webrtc,whisper,daily]>=1.3.0
 pipecat-ai-small-webrtc-prebuilt>=2.0.0
 aiohttp>=3.9
 chatterbox-tts>=0.1.2
 setuptools>=70.0.0
-torch>=2.1.0
-torchaudio>=2.1.0
+torch==2.6.0
+torchaudio==2.6.0
+torchvision==0.21.0

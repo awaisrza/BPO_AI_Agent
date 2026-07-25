@@ -108,7 +108,7 @@ def _validate_local_server_url(*, for_dial: bool = False) -> None:
 def _texml_for_stream() -> str:
     stream_status = f"{_public_base()}/stream-status"
     ws_url = _websocket_url()
-    codec = os.getenv("TELNYX_STREAM_CODEC", "PCMA")
+    codec = os.getenv("TELNYX_STREAM_CODEC", "PCMU")
     # Connect keeps the call alive until the WebSocket media path is up (Start can drop early).
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>

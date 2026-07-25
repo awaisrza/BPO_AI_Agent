@@ -449,7 +449,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     pause_s = settings.telephony_followup_pause_s
                     if pause_s > 0:
                         logger.info(
-                            f"Telephony follow-up pause ({pause_s:.1f}s) after KB answer"
+                            f"Telephony follow-up pause ({pause_s:.1f}s) before follow-up line"
                         )
                         await self._start_telephony_keepalive()
                         await asyncio.sleep(pause_s)

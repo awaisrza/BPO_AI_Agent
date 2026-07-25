@@ -59,8 +59,16 @@ _POSITIVE = {
     "i'm fine",
     "im fine",
 }
-_GREETING_ACK = {"good", "fine", "well", "doing well", "i'm fine", "im fine", "great"}
-_GREETING_REPLY = _GREETING_ACK | {"i'm good", "im good", "i am good", "all good"}
+_GREETING_ACK = {"good", "fine", "well", "doing well", "doing good", "i'm fine", "im fine", "great"}
+_GREETING_REPLY = _GREETING_ACK | {
+    "i'm good",
+    "im good",
+    "i am good",
+    "all good",
+    "i'm doing good",
+    "im doing good",
+    "i am doing good",
+}
 _CONSENT = {
     "yes",
     "yeah",
@@ -169,20 +177,9 @@ def _is_qualify_yes(utterance: str) -> bool:
 def _is_greeting_reply(utterance: str) -> bool:
     """Answer to 'how are you today?' — always play the pitch, never a KB line."""
     u = utterance.strip().lower().rstrip(".")
-    if _looks_like_question(u):
+    if _looks_like_question(u) or _is_consent(u):
         return False
-    if _matches_phrase(
-        u,
-        {
-            "i'm good",
-            "im good",
-            "i am good",
-            "all good",
-            "i'm fine",
-            "im fine",
-            "doing well",
-        },
-    ):
+    if _matches_phrase(u, _GREETING_REPLY):
         return True
     words = [w for w in u.replace(",", " ").split() if w]
     return len(words) == 1 and words[0] in {"good", "fine", "well", "great"}

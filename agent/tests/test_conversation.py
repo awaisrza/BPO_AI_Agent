@@ -414,6 +414,35 @@ def test_im_good_after_greeting_delivers_pitch_not_kb_objection():
     assert "totally get that" not in turn.reply.lower()
 
 
+def test_im_doing_good_after_greeting_delivers_pitch_not_kb():
+    """'I'm doing good' must not hit a loose KB trigger on the word 'good'."""
+    from app.knowledge import answer_offscript as kb_answer
+
+    script = ScriptConfig(
+        greeting="Hi, how are you today?",
+        pitch="Great — Medicare plan. Do you have a moment?",
+        qualifying_questions=["Do you have Part A and B?"],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic="Not interested",
+                triggers=["not interested", "no thanks", "good"],
+                answer=(
+                    "I totally get that — it's just a quick Medicare eligibility check. "
+                    "Takes about thirty seconds, fair enough?"
+                ),
+            ),
+        ],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base, telephony=True),
+    )
+    e.open()
+    turn = e.handle("I'm doing good.")
+    assert "Medicare plan" in turn.reply
+    assert "totally get that" not in turn.reply.lower()
+
+
 def test_third_kb_in_pitch_advances_to_pitch():
     from app.knowledge import answer_offscript as kb_answer
 
