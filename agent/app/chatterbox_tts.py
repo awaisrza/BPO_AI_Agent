@@ -404,17 +404,26 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
                 logger.info(f"Chatterbox cache HIT: {text[:48]!r}")
                 await self.stop_ttfb_metrics()
                 await self._stop_rtp_keepalive()
-                # Do NOT sleep between frames here — Pipecat FastAPIWebsocketTransport
-                # already paces at write_audio_frame(). Extra sleeps = gaps / robotic audio.
-                for chunk in _chunk_pcm(cached, self.sample_rate):
+                pcm = cached
+                if self._telephony:
                     if self.speech_is_cancelled():
                         return
                     yield TTSAudioRawFrame(
-                        audio=chunk,
+                        audio=pcm,
                         sample_rate=self.sample_rate,
                         num_channels=1,
                         context_id=context_id,
                     )
+                else:
+                    for chunk in _chunk_pcm(cached, self.sample_rate):
+                        if self.speech_is_cancelled():
+                            return
+                        yield TTSAudioRawFrame(
+                            audio=chunk,
+                            sample_rate=self.sample_rate,
+                            num_channels=1,
+                            context_id=context_id,
+                        )
                 await self.start_tts_usage_metrics(text)
                 return
 
@@ -439,15 +448,25 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
                 return
             await self.stop_ttfb_metrics()
             await self._stop_rtp_keepalive()
-            for chunk in _chunk_pcm(pcm, self.sample_rate):
+            if self._telephony:
                 if self.speech_is_cancelled():
                     return
                 yield TTSAudioRawFrame(
-                    audio=chunk,
+                    audio=pcm,
                     sample_rate=self.sample_rate,
                     num_channels=1,
                     context_id=context_id,
                 )
+            else:
+                for chunk in _chunk_pcm(pcm, self.sample_rate):
+                    if self.speech_is_cancelled():
+                        return
+                    yield TTSAudioRawFrame(
+                        audio=chunk,
+                        sample_rate=self.sample_rate,
+                        num_channels=1,
+                        context_id=context_id,
+                    )
             await self.start_tts_usage_metrics(text)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Chatterbox TTS error: {exc}")

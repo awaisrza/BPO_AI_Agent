@@ -14,6 +14,7 @@ from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
 from .config import ScriptConfig, settings
 from .pipeline import FronterProcessor, build_pipeline
 from .telnyx_api import hangup_telnyx_call
+from .telnyx_media import telephony_bulk_media_enabled
 
 _CRASH_LOG = Path("/tmp/telnyx_events.log")
 _active_call_ids: set[str] = set()
@@ -185,8 +186,9 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             _active_call_ids.add(session_key)
 
         os.environ.setdefault("TELNYX_API_KEY", settings.telnyx_api_key or "")
-        inbound_encoding = outbound_encoding
-        _event(f"=== CODEC inbound={inbound_encoding} outbound={outbound_encoding} ===")
+        inbound_encoding = "PCMU"
+        outbound_encoding = call_data.get("outbound_encoding") or "PCMU"
+        _event(f"=== CODEC send={inbound_encoding} recv={outbound_encoding} ===")
 
         serializer = TelnyxFrameSerializer(
             stream_id=stream_id,
@@ -219,7 +221,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
         build_started = time.monotonic()
         _event(
             f"=== BUILDING PIPELINE (sample_rate={sample_rate}, "
-            f"telephony_pacing=pipecat-only, codec={inbound_encoding}) ==="
+            f"bulk_media={telephony_bulk_media_enabled()}, codec=PCMU) ==="
         )
         pipeline = build_pipeline(
             transport,
