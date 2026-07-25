@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from loguru import logger
 
 from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
+from .speech_renderer import UtteranceFlushFrame
 
 try:
     from pipecat.frames.frames import (
@@ -167,12 +168,11 @@ if PIPECAT_AVAILABLE:
                         await asyncio.sleep(duration_ms / 1000.0)
                 return
 
-            frame_name = type(frame).__name__
-            if frame_name == "UtteranceFlushFrame":
+            if isinstance(frame, UtteranceFlushFrame):
                 duration_ms = await self._flush()
                 if duration_ms > 0:
                     await asyncio.sleep(duration_ms / 1000.0)
-                if getattr(frame, "final", False):
+                if frame.final:
                     await self._bot_finished_playback()
                 return
 

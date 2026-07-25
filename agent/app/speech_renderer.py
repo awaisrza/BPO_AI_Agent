@@ -310,8 +310,8 @@ if PIPECAT_AVAILABLE:
         is_last_chunk: bool = True
 
     @dataclass
-    class UtteranceFlushFrame(SystemFrame):
-        """End of one spoken line — triggers bulk Telnyx media flush."""
+    class UtteranceFlushFrame(DataFrame):
+        """End of one spoken line — triggers bulk Telnyx media flush (must stay in-order with audio)."""
 
         final: bool = False
 
