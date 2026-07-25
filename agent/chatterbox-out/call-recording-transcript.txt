@@ -1,0 +1,5 @@
+The thing in front picker detection 불
+
+[ 0.00- 4.12] The thing in front picker
+[ 4.12- 4.64] detection
+[ 4.64-23.18] 불
