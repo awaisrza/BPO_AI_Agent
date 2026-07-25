@@ -83,7 +83,6 @@ async def handle_spoken_chunk_frame(
                     ),
                     direction,
                 )
-                await asyncio.sleep(0.015)
         else:
             await processor.push_frame(
                 TTSAudioRawFrame(

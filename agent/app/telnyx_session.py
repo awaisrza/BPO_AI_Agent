@@ -194,7 +194,13 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             inbound_encoding=inbound_encoding,
             call_control_id=call_control_id,
             api_key=settings.telnyx_api_key,
-            params=TelnyxFrameSerializer.InputParams(auto_hang_up=False),
+            params=TelnyxFrameSerializer.InputParams(
+                auto_hang_up=False,
+                sample_rate=TELEPHONY_PIPELINE_RATE,
+                telnyx_sample_rate=8000,
+                inbound_encoding=inbound_encoding,
+                outbound_encoding=outbound_encoding,
+            ),
         )
         transport = FastAPIWebsocketTransport(
             websocket=websocket,
@@ -211,7 +217,10 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
 
         sample_rate = TELEPHONY_PIPELINE_RATE
         build_started = time.monotonic()
-        _event(f"=== BUILDING PIPELINE (sample_rate={sample_rate}) ===")
+        _event(
+            f"=== BUILDING PIPELINE (sample_rate={sample_rate}, "
+            f"telephony_pacing=pipecat-only, codec={inbound_encoding}) ==="
+        )
         pipeline = build_pipeline(
             transport,
             agent_user=agent_user,

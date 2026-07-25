@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
-import time
 from collections.abc import AsyncGenerator, Iterable
 from pathlib import Path
 
@@ -57,23 +56,6 @@ def _chunk_pcm(pcm: bytes, sample_rate: int = TELEPHONY_PIPELINE_RATE) -> Iterab
     chunk_bytes = max(2, sample_rate * 2 * STREAM_FRAME_MS // 1000)
     for offset in range(0, len(pcm), chunk_bytes):
         yield pcm[offset : offset + chunk_bytes]
-
-
-async def _pace_telephony_frames(frame_ms: int = STREAM_FRAME_MS) -> None:
-    """Sleep until the next 20 ms slot so we don't flood Telnyx (causes robotic audio)."""
-    if not hasattr(_pace_telephony_frames, "_next_deadline"):
-        _pace_telephony_frames._next_deadline = time.monotonic()  # type: ignore[attr-defined]
-    deadline: float = _pace_telephony_frames._next_deadline  # type: ignore[attr-defined]
-    deadline += frame_ms / 1000.0
-    _pace_telephony_frames._next_deadline = deadline  # type: ignore[attr-defined]
-    delay = deadline - time.monotonic()
-    if delay > 0:
-        await asyncio.sleep(delay)
-
-
-def _reset_telephony_pacing() -> None:
-    if hasattr(_pace_telephony_frames, "_next_deadline"):
-        del _pace_telephony_frames._next_deadline  # type: ignore[attr-defined]
 
 
 def _apply_chatterbox_dtype_patch(model) -> None:
@@ -416,17 +398,14 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         logger.debug(f"Chatterbox TTS: {text!r}")
-        pace_frames = self._telephony
         try:
             cached = self._cache.get(text.strip())
             if cached is not None:
                 logger.info(f"Chatterbox cache HIT: {text[:48]!r}")
                 await self.stop_ttfb_metrics()
                 await self._stop_rtp_keepalive()
-                if pace_frames:
-                    _reset_telephony_pacing()
-                # Realtime pacing: one {STREAM_FRAME_MS}ms frame every {STREAM_FRAME_MS}ms.
-                # Previously 0.75× frame duration — sent ~25% too fast → Telnyx buffer overflow.
+                # Do NOT sleep between frames here — Pipecat FastAPIWebsocketTransport
+                # already paces at write_audio_frame(). Extra sleeps = gaps / robotic audio.
                 for chunk in _chunk_pcm(cached, self.sample_rate):
                     if self.speech_is_cancelled():
                         return
@@ -436,8 +415,6 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
                         num_channels=1,
                         context_id=context_id,
                     )
-                    if pace_frames:
-                        await _pace_telephony_frames()
                 await self.start_tts_usage_metrics(text)
                 return
 
@@ -462,8 +439,6 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
                 return
             await self.stop_ttfb_metrics()
             await self._stop_rtp_keepalive()
-            if pace_frames:
-                _reset_telephony_pacing()
             for chunk in _chunk_pcm(pcm, self.sample_rate):
                 if self.speech_is_cancelled():
                     return
@@ -473,8 +448,6 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
                     num_channels=1,
                     context_id=context_id,
                 )
-                if pace_frames:
-                    await _pace_telephony_frames()
             await self.start_tts_usage_metrics(text)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Chatterbox TTS error: {exc}")
