@@ -36,8 +36,8 @@ except Exception:  # pragma: no cover
     BotStoppedSpeakingFrame = object  # type: ignore
 
 TELNYX_WIRE_RATE = 8000
-# 20 ms PCM16 @ 8 kHz — flush keepalive silence promptly.
-_KEEPALIVE_PCM_BYTES = TELNYX_WIRE_RATE * 2 * 20 // 1000
+# Batch RTP keepalive silence (~1 s) — not 20 ms per WS message.
+_KEEPALIVE_FLUSH_PCM_BYTES = TELNYX_WIRE_RATE * 2
 
 SendJson = Callable[[str], Awaitable[None]]
 
@@ -71,7 +71,8 @@ def pcm_to_telnyx_media_json(
     if not payload_bytes:
         return None
     duration_ms = len(pcm) * 1000 // (wire_rate * 2)
-    logger.info(
+    log_fn = logger.debug if _is_silence_pcm(pcm) else logger.info
+    log_fn(
         f"Telnyx bulk media: {len(payload_bytes)} bytes {encoding} (~{duration_ms} ms)"
     )
     payload = base64.b64encode(payload_bytes).decode("utf-8")
@@ -125,15 +126,16 @@ if PIPECAT_AVAILABLE:
             logger.debug("Telnyx bulk media: bot playback finished — BotStoppedSpeaking")
             await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
 
-        async def _flush(self) -> int:
+        async def _flush(self) -> tuple[int, bool]:
             if not self._pcm:
-                return 0
+                return 0, True
             pcm = bytes(self._pcm)
             rate = self._rate
+            is_silence = _is_silence_pcm(pcm)
             duration_ms = _playback_duration_ms(
                 pcm, sample_rate=rate, wire_rate=self._wire_rate
             )
-            if not _is_silence_pcm(pcm):
+            if not is_silence:
                 await self._ensure_bot_started()
             msg = pcm_to_telnyx_media_json(
                 pcm,
@@ -144,7 +146,7 @@ if PIPECAT_AVAILABLE:
             self._pcm.clear()
             if msg:
                 await self._send_json(msg)
-            return duration_ms
+            return duration_ms, is_silence
 
         async def process_frame(self, frame, direction):  # type: ignore[no-untyped-def]
             await super().process_frame(frame, direction)
@@ -161,16 +163,17 @@ if PIPECAT_AVAILABLE:
                     self._pcm.extend(frame.audio)
                     if frame.sample_rate:
                         self._rate = frame.sample_rate
-                # Keepalive silence must reach Telnyx within ~3 s — flush often.
-                if _is_silence_pcm(bytes(self._pcm)) and len(self._pcm) >= _KEEPALIVE_PCM_BYTES:
-                    duration_ms = await self._flush()
-                    if duration_ms > 0:
-                        await asyncio.sleep(duration_ms / 1000.0)
+                # Batch keepalive silence (~1 s) — avoids 20 ms WS floods + pipeline sleep.
+                if (
+                    _is_silence_pcm(bytes(self._pcm))
+                    and len(self._pcm) >= _KEEPALIVE_FLUSH_PCM_BYTES
+                ):
+                    await self._flush()
                 return
 
             if isinstance(frame, UtteranceFlushFrame):
-                duration_ms = await self._flush()
-                if duration_ms > 0:
+                duration_ms, is_silence = await self._flush()
+                if duration_ms > 0 and not is_silence:
                     await asyncio.sleep(duration_ms / 1000.0)
                 if frame.final:
                     await self._bot_finished_playback()
