@@ -855,22 +855,23 @@ def build_pipeline(
         speech_renderer,
         tts,
     ]
-    if telephony and telephony_bulk_media_enabled():
-        from .telnyx_media import TelnyxBulkMediaProcessor
+    if telephony:
+        from .telnyx_media import TelnyxBulkMediaProcessor, telephony_bulk_media_enabled
 
-        ws_client = getattr(transport, "_client", None)
-        if ws_client is not None:
+        if telephony_bulk_media_enabled():
+            ws_client = getattr(transport, "_client", None)
+            if ws_client is not None:
 
-            async def _send_json(payload: str) -> None:
-                await ws_client.send(payload)
+                async def _send_json(payload: str) -> None:
+                    await ws_client.send(payload)
 
-            encoding = os.getenv("TELNYX_STREAM_CODEC", "PCMU")
-            processors.append(
-                TelnyxBulkMediaProcessor(send_json=_send_json, encoding=encoding)
-            )
-            logger.info(f"Telnyx bulk media enabled (encoding={encoding})")
-        else:
-            logger.warning("Telnyx bulk media skipped — transport has no WebSocket client")
+                encoding = os.getenv("TELNYX_STREAM_CODEC", "PCMU")
+                processors.append(
+                    TelnyxBulkMediaProcessor(send_json=_send_json, encoding=encoding)
+                )
+                logger.info(f"Telnyx bulk media enabled (encoding={encoding})")
+            else:
+                logger.warning("Telnyx bulk media skipped — transport has no WebSocket client")
     processors.append(transport.output())
 
     return Pipeline(processors)
