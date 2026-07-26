@@ -20,6 +20,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
+  const [gpuMessage, setGpuMessage] = useState("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [campaignStatus, setCampaignStatus] = useState<CampaignStatus>("paused");
@@ -161,13 +162,36 @@ export function CampaignEditorForm({ id }: { id: string }) {
   async function toggleCampaignStatus() {
     setTogglingStatus(true);
     setError("");
+    setGpuMessage("");
 
     try {
       const supabase = createClient();
       const nextStatus: CampaignStatus = campaignStatus === "running" ? "paused" : "running";
       await setCampaignRunningStatus(supabase, id, nextStatus);
 
+      const orchestrate = await fetch(`/api/campaigns/${id}/orchestrate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: nextStatus === "running" ? "start" : "stop" }),
+      });
+      const gpuResult = (await orchestrate.json()) as {
+        ok?: boolean;
+        configured?: boolean;
+        message?: string;
+        error?: string;
+      };
+
+      if (!orchestrate.ok) {
+        if (nextStatus === "running") {
+          await setCampaignRunningStatus(supabase, id, "paused");
+        }
+        throw new Error(gpuResult.error ?? "Could not start GPU fleet.");
+      }
+
       setCampaignStatus(nextStatus);
+      if (gpuResult.message) {
+        setGpuMessage(gpuResult.message);
+      }
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update campaign status.");
@@ -261,7 +285,13 @@ export function CampaignEditorForm({ id }: { id: string }) {
       {campaignStatus === "paused" && botCount > 0 && (
         <p className="mb-6 rounded-lg border border-border bg-surface-raised px-4 py-3 text-sm text-foreground-muted">
           Campaign is paused. Click <strong className="text-foreground">Run campaign</strong> to start all{" "}
-          {botCount} assigned agent{botCount === 1 ? "" : "s"}.
+          {botCount} assigned agent{botCount === 1 ? "" : "s"} and wake the GPU fleet.
+        </p>
+      )}
+
+      {gpuMessage && (
+        <p className="mb-6 rounded-lg border border-status-success/30 bg-status-success-muted px-4 py-3 text-sm text-status-success">
+          {gpuMessage}
         </p>
       )}
 
