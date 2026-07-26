@@ -12,7 +12,13 @@ from loguru import logger
 from .audio_resample import enhance_for_telephony, resample_pcm16
 from .config import settings
 from .chatterbox_paths import resolve_chatterbox_device, resolve_chatterbox_reference
-from .speech_renderer import SpokenChunkFrame, silence_pcm
+from .speech_renderer import (
+    RtpKeepaliveStartFrame,
+    RtpKeepaliveStopFrame,
+    SpokenChunkFrame,
+    iter_pcm_frames,
+    silence_pcm,
+)
 from .tts_spoken_chunk import SpokenChunkTTSSupport, handle_spoken_chunk_frame
 
 try:
@@ -221,7 +227,8 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
         self._cache = cache or {}
         self._infer_lock = asyncio.Lock()
         self._prefetch_tasks: set[asyncio.Task] = set()
-        self._comfort_sent = False
+        self._keepalive_task: asyncio.Task | None = None
+        self._keepalive_stop: asyncio.Event | None = None
         _load_model(self._device)
 
     def clone_with_shared_cache(self) -> ChatterboxTTSService:
@@ -238,25 +245,63 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
     async def cancel_background_work(self) -> None:
         """Stop prefetch/synthesis so the next call's StartFrame is not blocked."""
         self.cancel_speech()
+        await self._stop_rtp_keepalive()
         for task in list(self._prefetch_tasks):
             task.cancel()
         self._prefetch_tasks.clear()
 
-    async def _push_comfort_silence(self, direction) -> None:
-        """Telnyx drops calls after ~3s with no outbound RTP — send silence while TTS starts."""
-        if self._comfort_sent or not self._telephony:
+    async def _start_rtp_keepalive(self, direction) -> None:  # type: ignore[no-untyped-def]
+        """Stream 20 ms silence frames so Telnyx does not drop the call during gaps."""
+        if not self._telephony:
             return
-        self._comfort_sent = True
-        pcm = silence_pcm(600, self.sample_rate)
-        for chunk in _chunk_pcm(pcm, self.sample_rate):
-            await self.push_frame(
-                TTSAudioRawFrame(
-                    audio=chunk,
-                    sample_rate=self.sample_rate,
-                    num_channels=1,
-                ),
-                direction,
-            )
+        if self._keepalive_task and not self._keepalive_task.done():
+            return
+        self._keepalive_stop = asyncio.Event()
+        stop = self._keepalive_stop
+        pcm = silence_pcm(STREAM_FRAME_MS, self.sample_rate)
+        frames = list(iter_pcm_frames(pcm, self.sample_rate, frame_ms=STREAM_FRAME_MS))
+        if not frames:
+            return
+        silent_frame = frames[0]
+
+        async def _loop() -> None:
+            logger.debug("RTP keepalive started")
+            while not stop.is_set():
+                if self.speech_is_cancelled():
+                    break
+                await self.push_frame(
+                    TTSAudioRawFrame(
+                        audio=silent_frame,
+                        sample_rate=self.sample_rate,
+                        num_channels=1,
+                    ),
+                    direction,
+                )
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=STREAM_FRAME_MS / 1000.0)
+                    break
+                except asyncio.TimeoutError:
+                    continue
+            logger.debug("RTP keepalive stopped")
+
+        self._keepalive_task = asyncio.create_task(_loop())
+
+    async def _stop_rtp_keepalive(self) -> None:
+        if self._keepalive_task is None:
+            return
+        if self._keepalive_stop is not None:
+            self._keepalive_stop.set()
+        task = self._keepalive_task
+        self._keepalive_task = None
+        self._keepalive_stop = None
+        try:
+            await asyncio.wait_for(task, timeout=1.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            task.cancel()
+
+    async def _push_comfort_silence(self, direction) -> None:
+        """Telnyx drops calls after ~3s with no outbound RTP — keepalive until speech starts."""
+        await self._start_rtp_keepalive(direction)
 
     async def prefetch_line(self, text: str) -> None:
         """Synthesize upcoming speech while the caller hears the current line."""
@@ -297,7 +342,16 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
 
     async def process_frame(self, frame, direction):  # type: ignore[override]
         if await self.handle_interruption_frame(frame, direction):
+            await self._stop_rtp_keepalive()
             await super().process_frame(frame, direction)
+            return
+        if isinstance(frame, RtpKeepaliveStartFrame):
+            await self._start_rtp_keepalive(direction)
+            await self.push_frame(frame, direction)
+            return
+        if isinstance(frame, RtpKeepaliveStopFrame):
+            await self._stop_rtp_keepalive()
+            await self.push_frame(frame, direction)
             return
         if isinstance(frame, SpokenChunkFrame):
             if frame.prefetch_text:
@@ -313,14 +367,15 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
 
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame | None, None]:
         logger.debug(f"Chatterbox TTS: {text!r}")
+        frame_pace_s = (STREAM_FRAME_MS / 1000.0) * 0.75 if self._telephony else 0.0
         try:
             cached = self._cache.get(text.strip())
             if cached is not None:
                 logger.info(f"Chatterbox cache HIT: {text[:48]!r}")
                 await self.stop_ttfb_metrics()
+                await self._stop_rtp_keepalive()
                 # Pace telephony frames near realtime so Telnyx Media Streams
                 # is not flooded (burst dumps often drop the WS mid-utterance).
-                frame_pace_s = (STREAM_FRAME_MS / 1000.0) * 0.75 if self._telephony else 0.0
                 for chunk in _chunk_pcm(cached, self.sample_rate):
                     if self.speech_is_cancelled():
                         return
@@ -355,6 +410,7 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
             if self.speech_is_cancelled():
                 return
             await self.stop_ttfb_metrics()
+            await self._stop_rtp_keepalive()
             for chunk in _chunk_pcm(pcm, self.sample_rate):
                 if self.speech_is_cancelled():
                     return
@@ -364,6 +420,8 @@ class ChatterboxTTSService(SpokenChunkTTSSupport, TTSService):
                     num_channels=1,
                     context_id=context_id,
                 )
+                if frame_pace_s > 0:
+                    await asyncio.sleep(frame_pace_s)
             await self.start_tts_usage_metrics(text)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Chatterbox TTS error: {exc}")

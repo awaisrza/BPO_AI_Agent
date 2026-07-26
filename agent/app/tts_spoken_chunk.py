@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from collections.abc import AsyncGenerator, Awaitable, Callable
 
 from loguru import logger
 
-from .speech_renderer import SpokenChunkFrame, silence_pcm
+from .speech_renderer import SpokenChunkFrame, iter_pcm_frames, silence_pcm
 
 try:
     from pipecat.frames.frames import Frame, InterruptionFrame, TTSAudioRawFrame
@@ -72,11 +74,24 @@ async def handle_spoken_chunk_frame(
 
     if frame.pause_after_ms > 0 and not getattr(processor, "speech_is_cancelled", lambda: False)():
         pcm = silence_pcm(frame.pause_after_ms, processor.sample_rate)
-        await processor.push_frame(
-            TTSAudioRawFrame(
-                audio=pcm,
-                sample_rate=processor.sample_rate,
-                num_channels=1,
-            ),
-            direction,
-        )
+        telephony = getattr(processor, "_telephony", False)
+        if telephony:
+            for chunk in iter_pcm_frames(pcm, processor.sample_rate, frame_ms=20):
+                await processor.push_frame(
+                    TTSAudioRawFrame(
+                        audio=chunk,
+                        sample_rate=processor.sample_rate,
+                        num_channels=1,
+                    ),
+                    direction,
+                )
+                await asyncio.sleep(0.015)
+        else:
+            await processor.push_frame(
+                TTSAudioRawFrame(
+                    audio=pcm,
+                    sample_rate=processor.sample_rate,
+                    num_channels=1,
+                ),
+                direction,
+            )

@@ -18,7 +18,7 @@ export default function IntegrationsPage() {
         <Card>
           <CardHeader
             title="Voice pipeline"
-            description="Managed by AI Fronter — no setup required."
+            description="Managed by Parasite — no setup required."
             action={<Badge variant="brand">Included</Badge>}
           />
           <CardBody className="space-y-3 text-body text-foreground-muted">

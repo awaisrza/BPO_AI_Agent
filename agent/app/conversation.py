@@ -76,6 +76,15 @@ _CONSENT = {
     "got it",
     "i see",
     "sounds good",
+    "that's good",
+    "that is good",
+    "thats good",
+    "thank you",
+    "thanks",
+    "i'm good",
+    "im good",
+    "i am good",
+    "all good",
 }
 _QUALIFY_YES = {"yes", "yeah", "yep", "sure", "correct", "absolutely", "definitely"}
 _NEGATIVE = (
@@ -251,11 +260,20 @@ class ConversationEngine:
         self._last_reply = text
         return Turn(text, Action.SPEAK)
 
+    def _consent_already_in_last_reply(self) -> bool:
+        consent = self._consent_prompt().strip().lower()
+        if not consent:
+            return False
+        return consent in self._last_reply.strip().lower()
+
     def _escalate(self) -> Turn:
         """Move forward when we would repeat the same line again."""
         if not self._pitch_confirmed:
             if self._consent_misses == 0:
                 self._consent_misses += 1
+                # Pitch already ends with the consent question — do not repeat it verbatim.
+                if self._consent_already_in_last_reply():
+                    return self._speak_new(self._short_prompt)
                 return self._speak_new(self._consent_prompt())
             return self._speak_new(self._short_prompt)
 
@@ -372,21 +390,16 @@ class ConversationEngine:
                 turn = self._respond_offscript_pitch(utterance)
                 if turn:
                     return turn
-                return self._escalate()
+                # No KB hit — keep the script moving (do not escalate into consent).
+                return self._deliver_pitch()
             if _is_greeting_ack_only(utterance):
                 return self._deliver_pitch()
             return self._deliver_pitch()
 
         if self.state == State.QUALIFY:
             if not self._pitch_confirmed:
-                if intent == Intent.POSITIVE and _is_consent(utterance):
-                    self._pitch_confirmed = True
-                    self._consent_misses = 0
-                    self._answered_kb_pre_consent = False
-                    return self._next_qualifier()
-                if self._answered_kb_pre_consent and _matches_phrase(
-                    utterance, ("all right", "alright", "okay", "ok", "sure", "fine", "got it")
-                ):
+                # Any affirmative after the pitch counts as consent — thank you, yes, sure, etc.
+                if intent == Intent.POSITIVE or _is_consent(utterance):
                     self._pitch_confirmed = True
                     self._consent_misses = 0
                     self._answered_kb_pre_consent = False

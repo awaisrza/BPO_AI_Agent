@@ -12,11 +12,11 @@ import {
   Settings,
   Users,
   BarChart3,
-  PhoneCall,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOrg } from "@/components/layout/org-provider";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 
@@ -38,12 +38,31 @@ const configNav: NavItem[] = [
   { href: "/billing", label: "Billing", icon: CreditCard },
 ];
 
+function ParasiteMark({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className={className}
+      strokeWidth={1.75}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Stylized P built from a call-wave arc */}
+      <path d="M7 20V5.5A1.5 1.5 0 0 1 8.5 4H13a5 5 0 0 1 0 10H7" />
+      <path d="M16.5 17.5c1.6-1.3 2.5-3.3 2.5-5.5" opacity="0.55" />
+    </svg>
+  );
+}
+
 function NavSection({ title, items }: { title: string; items: NavItem[] }) {
   const pathname = usePathname();
 
   return (
-    <div className="mb-4">
-      <p className="mb-1.5 px-3 text-2xs font-medium uppercase tracking-wider text-foreground-faint">
+    <div className="mb-5">
+      <p className="mb-1.5 px-3 text-2xs font-medium uppercase tracking-wider text-sidebar-faint">
         {title}
       </p>
       <div className="space-y-0.5">
@@ -57,17 +76,19 @@ function NavSection({ title, items }: { title: string; items: NavItem[] }) {
               className={cn(
                 "group relative flex items-center gap-2.5 rounded-md px-3 py-2 text-body font-medium transition-colors",
                 active
-                  ? "bg-brand-muted text-foreground"
-                  : "text-foreground-muted hover:bg-surface-overlay hover:text-foreground-secondary",
+                  ? "bg-sidebar-active text-sidebar-text"
+                  : "text-sidebar-muted hover:bg-sidebar-raised hover:text-sidebar-text",
               )}
             >
               {active && (
-                <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-brand" />
+                <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-sidebar-accent" />
               )}
               <Icon
                 className={cn(
                   "h-4 w-4 shrink-0",
-                  active ? "text-brand" : "text-foreground-faint group-hover:text-foreground-muted",
+                  active
+                    ? "text-sidebar-accent"
+                    : "text-sidebar-faint group-hover:text-sidebar-muted",
                 )}
                 strokeWidth={1.75}
               />
@@ -84,14 +105,16 @@ export function Sidebar() {
   const org = useOrg();
 
   return (
-    <aside className="hidden h-full w-60 shrink-0 flex-col border-r border-surface-border bg-surface lg:flex">
-      <div className="flex h-14 items-center gap-2.5 border-b border-surface-border-subtle px-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-muted">
-          <PhoneCall className="h-4 w-4 text-brand" strokeWidth={1.75} />
+    <aside className="hidden h-full w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar lg:flex">
+      <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-4">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-sidebar-accent/15 text-sidebar-accent">
+          <ParasiteMark className="h-5 w-5" />
         </div>
         <div className="min-w-0">
-          <p className="truncate text-body font-semibold text-foreground">AI Fronter</p>
-          <p className="text-2xs text-foreground-faint">Call center platform</p>
+          <p className="truncate font-display text-base font-semibold tracking-tight text-sidebar-text">
+            Parasite
+          </p>
+          <p className="text-2xs text-sidebar-faint">AI fronting for BPOs</p>
         </div>
       </div>
 
@@ -101,16 +124,21 @@ export function Sidebar() {
         <NavSection title="Configuration" items={configNav} />
       </nav>
 
-      <div className="border-t border-surface-border-subtle p-4">
-        <p className="truncate text-body font-medium text-foreground-secondary">{org.name}</p>
-        <p className="mt-0.5 text-caption text-foreground-faint">
-          {org.plan} plan · {org.botsActive}/{org.botsIncluded} agents
-        </p>
-        {org.pilot && (
-          <span className="mt-2 inline-flex items-center rounded-sm bg-status-warning-muted px-2 py-0.5 text-2xs font-medium text-status-warning">
-            Pilot
-          </span>
-        )}
+      <div className="border-t border-sidebar-border p-4">
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-body font-medium text-sidebar-text">{org.name}</p>
+            <p className="mt-0.5 text-caption text-sidebar-faint">
+              {org.plan} plan · {org.botsActive}/{org.botsIncluded} agents
+            </p>
+            {org.pilot && (
+              <span className="mt-2 inline-flex items-center rounded-sm bg-sidebar-accent/10 px-2 py-0.5 text-2xs font-medium text-sidebar-accent">
+                Pilot
+              </span>
+            )}
+          </div>
+          <ThemeToggle variant="sidebar" className="-mr-2 -mt-1" />
+        </div>
       </div>
     </aside>
   );

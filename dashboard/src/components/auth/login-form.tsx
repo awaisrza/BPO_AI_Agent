@@ -68,7 +68,7 @@ export function LoginForm() {
   return (
     <div className="rounded-lg border border-surface-border bg-surface-raised p-6 sm:p-8">
       <div className="mb-6 border-b border-surface-border-subtle pb-6">
-        <p className="data-label">AI Fronter</p>
+        <p className="data-label">Parasite</p>
         <h1 className="mt-2 text-xl font-semibold text-foreground">Sign in</h1>
         <p className="mt-1.5 text-body text-foreground-muted">Access your call center dashboard.</p>
       </div>

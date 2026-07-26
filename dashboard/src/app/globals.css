@@ -4,46 +4,104 @@
 
 @layer base {
   :root {
-    /* Backgrounds */
-    --bg-base: #09090b;
-    --bg-raised: #0f0f12;
-    --bg-overlay: #141418;
-    --bg-hover: #18181c;
+    /* Canvas — warm off-white, light-first */
+    --bg-base: #f6f5f1;
+    --bg-raised: #ffffff;
+    --bg-overlay: #edebe4;
+    --bg-hover: #e7e5dd;
 
-    /* Text */
-    --text-primary: #fafafa;
-    --text-secondary: #d4d4d8;
-    --text-muted: #a1a1aa;
-    --text-faint: #71717a;
+    /* Text — ink with a faint green cast */
+    --text-primary: #1b1f1c;
+    --text-secondary: #3d423e;
+    --text-muted: #636963;
+    --text-faint: #8b9089;
 
     /* Borders */
-    --border-default: #27272a;
-    --border-subtle: #1c1c1f;
+    --border-default: #dfdcd2;
+    --border-subtle: #e9e7df;
 
-    /* Brand accent — single primary */
-    --brand: #3b82f6;
-    --brand-hover: #2563eb;
-    --brand-muted: rgba(59, 130, 246, 0.12);
+    /* Brand — Parasite pine green */
+    --brand: #1a6b52;
+    --brand-hover: #14523f;
+    --brand-muted: rgba(26, 107, 82, 0.1);
     --brand-foreground: #ffffff;
 
+    /* Sidebar — deep pine panel that carries the brand */
+    --sidebar-bg: #15211b;
+    --sidebar-raised: #1d2c25;
+    --sidebar-border: #263830;
+    --sidebar-text: #eef2ee;
+    --sidebar-muted: #a3b3a9;
+    --sidebar-faint: #6d7f74;
+    --sidebar-accent: #67d4a5;
+    --sidebar-active: rgba(103, 212, 165, 0.12);
+
     /* Status */
-    --status-success: #22c55e;
-    --status-success-muted: rgba(34, 197, 94, 0.12);
-    --status-warning: #f59e0b;
-    --status-warning-muted: rgba(245, 158, 11, 0.12);
-    --status-danger: #ef4444;
-    --status-danger-muted: rgba(239, 68, 68, 0.12);
-    --status-info: #60a5fa;
-    --status-info-muted: rgba(96, 165, 250, 0.12);
+    --status-success: #15803d;
+    --status-success-muted: rgba(21, 128, 61, 0.1);
+    --status-warning: #b45309;
+    --status-warning-muted: rgba(180, 83, 9, 0.1);
+    --status-danger: #dc2626;
+    --status-danger-muted: rgba(220, 38, 38, 0.08);
+    --status-info: #0e6b8f;
+    --status-info-muted: rgba(14, 107, 143, 0.08);
 
     /* Radius — 6px to 10px */
     --radius-sm: 6px;
     --radius-md: 8px;
     --radius-lg: 10px;
 
-    /* Shadows — minimal */
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-focus: 0 0 0 2px var(--bg-base), 0 0 0 4px rgba(59, 130, 246, 0.4);
+    /* Shadows — single soft layer */
+    --shadow-sm: 0 1px 2px rgba(27, 31, 28, 0.06);
+    --shadow-focus: 0 0 0 2px var(--bg-base), 0 0 0 4px rgba(26, 107, 82, 0.35);
+  }
+
+  .dark {
+    /* Canvas — near-black with gray steps */
+    --bg-base: #0a0a0b;
+    --bg-raised: #141416;
+    --bg-overlay: #1c1c1f;
+    --bg-hover: #232326;
+
+    /* Text — gray ramp */
+    --text-primary: #f4f4f5;
+    --text-secondary: #c9c9ce;
+    --text-muted: #92929a;
+    --text-faint: #66666e;
+
+    /* Borders */
+    --border-default: #26262a;
+    --border-subtle: #1e1e21;
+
+    /* Brand — brightened pine for contrast on black */
+    --brand: #34b98a;
+    --brand-hover: #4ecda0;
+    --brand-muted: rgba(52, 185, 138, 0.14);
+    --brand-foreground: #0a0a0b;
+
+    /* Sidebar — black panel, one step darker than canvas cards */
+    --sidebar-bg: #060607;
+    --sidebar-raised: #131315;
+    --sidebar-border: #1e1e21;
+    --sidebar-text: #f4f4f5;
+    --sidebar-muted: #92929a;
+    --sidebar-faint: #5c5c63;
+    --sidebar-accent: #4ecda0;
+    --sidebar-active: rgba(78, 205, 160, 0.1);
+
+    /* Status — lifted for dark contrast */
+    --status-success: #34d27b;
+    --status-success-muted: rgba(52, 210, 123, 0.12);
+    --status-warning: #e8a13c;
+    --status-warning-muted: rgba(232, 161, 60, 0.12);
+    --status-danger: #f0564f;
+    --status-danger-muted: rgba(240, 86, 79, 0.12);
+    --status-info: #4db3d9;
+    --status-info-muted: rgba(77, 179, 217, 0.12);
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-focus: 0 0 0 2px var(--bg-base), 0 0 0 4px rgba(52, 185, 138, 0.4);
   }
 
   * {
@@ -59,8 +117,12 @@
   }
 
   ::selection {
-    background: rgba(59, 130, 246, 0.25);
+    background: rgba(26, 107, 82, 0.18);
     color: var(--text-primary);
+  }
+
+  .dark ::selection {
+    background: rgba(52, 185, 138, 0.25);
   }
 }
 
@@ -74,11 +136,28 @@
   }
 
   .metric-value {
-    @apply text-2xl font-semibold tracking-tight text-foreground tabular-nums;
+    @apply font-display text-2xl font-semibold tracking-tight text-foreground tabular-nums;
   }
 
   .data-label {
     @apply text-caption font-medium uppercase tracking-wide text-foreground-faint;
+  }
+
+  /* Subtle top wash so the canvas isn't a flat gray void */
+  .canvas-atmosphere {
+    background-image: radial-gradient(
+      70rem 22rem at 50% -8rem,
+      rgba(26, 107, 82, 0.05),
+      transparent 65%
+    );
+  }
+
+  .dark .canvas-atmosphere {
+    background-image: radial-gradient(
+      70rem 22rem at 50% -8rem,
+      rgba(52, 185, 138, 0.05),
+      transparent 65%
+    );
   }
 }
 

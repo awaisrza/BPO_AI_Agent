@@ -94,9 +94,9 @@ export function AssignBotForm() {
 
       <Field label="Campaign" description="Which outbound campaign this bot dials for.">
         {campaigns.length === 0 ? (
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-foreground-muted">
             No campaigns yet.{" "}
-            <Link href="/campaigns/new" className="text-zinc-300 underline hover:text-white">
+            <Link href="/campaigns/new" className="text-foreground-secondary underline hover:text-foreground">
               Create one first
             </Link>
             .

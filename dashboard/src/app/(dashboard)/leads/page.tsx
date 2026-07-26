@@ -70,7 +70,7 @@ export default function LeadsPage() {
                 <option>Qualified</option>
               </Select>
               <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-600" />
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-foreground-faint" />
                 <Input placeholder="Search phone..." className="w-44 py-1.5 pl-8 text-xs" />
               </div>
             </div>
@@ -89,12 +89,12 @@ export default function LeadsPage() {
             <TableBody>
               {leads.map((lead) => (
                 <TableRow key={lead.phone}>
-                  <TableCell className="font-mono text-zinc-300">{lead.phone}</TableCell>
-                  <TableCell className="text-zinc-500">{lead.name}</TableCell>
+                  <TableCell className="font-mono text-foreground-secondary">{lead.phone}</TableCell>
+                  <TableCell className="text-foreground-muted">{lead.name}</TableCell>
                   <TableCell>{leadStatus(lead.status)}</TableCell>
-                  <TableCell className="text-zinc-500">{lead.campaign}</TableCell>
-                  <TableCell className="text-zinc-600">{lead.lastAttempt}</TableCell>
-                  <TableCell className="text-zinc-500">{lead.outcome}</TableCell>
+                  <TableCell className="text-foreground-muted">{lead.campaign}</TableCell>
+                  <TableCell className="text-foreground-faint">{lead.lastAttempt}</TableCell>
+                  <TableCell className="text-foreground-muted">{lead.outcome}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

@@ -19,6 +19,7 @@ try:
         DataFrame,
         Frame,
         InterruptionFrame,
+        SystemFrame,
         TTSSpeakFrame,
         UserStartedSpeakingFrame,
         VADUserStartedSpeakingFrame,
@@ -32,6 +33,9 @@ except Exception:  # pragma: no cover
     DataFrame = object  # type: ignore
     FrameProcessor = object  # type: ignore
     FrameDirection = object  # type: ignore
+    SystemFrame = object  # type: ignore
+    RtpKeepaliveStartFrame = object  # type: ignore
+    RtpKeepaliveStopFrame = object  # type: ignore
 
 
 # --- Spoken text normalization -------------------------------------------------
@@ -282,6 +286,17 @@ def silence_pcm(duration_ms: int, sample_rate: int) -> bytes:
     return b"\x00\x00" * samples
 
 
+def iter_pcm_frames(
+    pcm: bytes,
+    sample_rate: int,
+    *,
+    frame_ms: int = 20,
+) -> Iterable[bytes]:
+    chunk_bytes = max(2, sample_rate * 2 * frame_ms // 1000)
+    for offset in range(0, len(pcm), chunk_bytes):
+        yield pcm[offset : offset + chunk_bytes]
+
+
 if PIPECAT_AVAILABLE:
 
     @dataclass
@@ -292,6 +307,18 @@ if PIPECAT_AVAILABLE:
         pause_after_ms: int = 0
         reset_barge_in: bool = False
         prefetch_text: str = ""
+
+    @dataclass
+    class RtpKeepaliveStartFrame(SystemFrame):
+        """Ask downstream TTS to stream comfort silence until real audio starts."""
+
+        pass
+
+    @dataclass
+    class RtpKeepaliveStopFrame(SystemFrame):
+        """Stop comfort silence before streaming real speech."""
+
+        pass
 
     class BargeInProcessor(FrameProcessor):  # type: ignore[misc]
         """Emit ``InterruptionFrame`` when the caller speaks over the bot."""

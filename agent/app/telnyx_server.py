@@ -158,6 +158,14 @@ def _place_telnyx_call(*, to_number: str, from_number: str, answer_url: str) -> 
         "StatusCallbackMethod": "POST",
     }
     last_exc: Exception | None = None
+    retryable = (
+        httpx.ConnectError,
+        httpx.ReadTimeout,
+        httpx.WriteTimeout,
+        httpx.ReadError,
+        httpx.NetworkError,
+        httpx.RemoteProtocolError,
+    )
     for attempt in range(1, _TELNYX_API_RETRIES + 1):
         try:
             with httpx.Client(timeout=45.0) as client:
@@ -165,7 +173,7 @@ def _place_telnyx_call(*, to_number: str, from_number: str, answer_url: str) -> 
             if resp.status_code != 200:
                 raise RuntimeError(f"Telnyx API error ({resp.status_code}): {resp.text}")
             return resp.json()
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
+        except retryable as exc:
             last_exc = exc
             _event(
                 f"Telnyx API network error (attempt {attempt}/{_TELNYX_API_RETRIES}): {exc}"
@@ -378,6 +386,22 @@ def run_telnyx_server(
                     "Dial aborted to avoid a silent call with no media.\n"
                 )
                 return
+            # Brief Telnyx API reachability check before placing the call.
+            for probe in range(1, 4):
+                try:
+                    httpx.head("https://api.telnyx.com", timeout=10.0)
+                    break
+                except Exception as exc:
+                    _event(f"Telnyx API probe failed ({probe}/3): {exc}")
+                    if probe == 3:
+                        print(
+                            "\n*** TELNYX API UNREACHABLE ***\n"
+                            "The GPU cannot reach https://api.telnyx.com right now.\n"
+                            "Check Telnyx status, firewall, or retry in 30–60 seconds.\n"
+                            "  curl -I https://api.telnyx.com\n"
+                        )
+                        return
+                    time.sleep(3.0 * probe)
             result = _place_telnyx_call(
                 to_number=dial_to,
                 from_number=from_number,
