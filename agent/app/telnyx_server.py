@@ -366,14 +366,25 @@ def run_telnyx_server(
                 pub = httpx.get(answer_url, timeout=20.0)
                 _event(f"=== PUBLIC /answer status={pub.status_code} body={pub.text[:120]!r} ===")
                 ws_url = _websocket_url()
-                if "Connect" not in pub.text and "Stream" not in pub.text:
+                if pub.status_code != 200 or (
+                    "Connect" not in pub.text and "Stream" not in pub.text
+                ):
                     _event("WARNING: /answer TeXML missing Connect/Stream")
+                    print(
+                        "\n*** PUBLIC TUNNEL NOT REACHABLE ***\n"
+                        f"Got HTTP {pub.status_code} from {answer_url}\n"
+                        f"Start cloudflared: cloudflared tunnel --url http://127.0.0.1:{port}\n"
+                        "Copy the new https URL into agent/.env.local (LOCAL_SERVER_URL=...), "
+                        "update Telnyx TeXML app URL, then restart run_telnyx.py.\n"
+                        "Dial aborted to avoid 'application error' on the phone.\n"
+                    )
+                    return
                 _event(f"=== EXPECT WS URL: {ws_url} ===")
             except Exception as exc:
                 _event(f"=== PUBLIC /answer FAILED: {exc} ===")
                 print(
-                    "\n*** NGROK TUNNEL NOT REACHABLE ***\n"
-                    "Restart ngrok, copy the new https URL into agent/.env.local "
+                    "\n*** PUBLIC TUNNEL NOT REACHABLE ***\n"
+                    "Restart cloudflared, copy the new https URL into agent/.env.local "
                     "(LOCAL_SERVER_URL=...), then restart run_telnyx.py.\n"
                     "Dial aborted to avoid a silent call with no media.\n"
                 )

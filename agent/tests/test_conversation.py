@@ -153,6 +153,48 @@ def test_loose_positive_does_not_skip_qualifiers():
     assert "100 dollars" not in turn.reply
 
 
+def test_garbled_yeah_does_not_advance_qualify():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare review. Do you have a moment?",
+        qualifying_questions=[
+            "Do you have Part A and B?",
+            "Are you interested in reviewing your plan options this year?",
+        ],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("ok")
+    e.handle("yes")
+    turn = e.handle("Oh yeah, I think that's a bit.")
+    assert "Part A" in turn.reply
+    assert "plan options" not in turn.reply
+
+
+def test_soft_go_on_advances_qualify():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare review. Do you have a moment?",
+        qualifying_questions=["Do you have Part A and B?", "Interested in plan review?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("ok")
+    e.handle("yes")
+    turn = e.handle("okay, go on")
+    assert "plan review" in turn.reply.lower() or "Interested" in turn.reply
+
+
+def test_fsm_fallback_lines_in_telephony_cache():
+    from app.pipeline import _script_cache_lines
+    from app.speech_renderer import prepare_for_speech
+
+    script = make_engine().script
+    cache = set(_script_cache_lines(script, telephony=True))
+    assert prepare_for_speech("Sorry — could you say yes or no?") in cache
+    assert prepare_for_speech("Sorry, could you repeat that?") in cache
+
+
 def test_all_right_during_qualify_advances():
     e = make_engine()
     e.open()

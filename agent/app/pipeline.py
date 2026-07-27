@@ -84,6 +84,9 @@ _STT_GREETING_FIXES = {
     "i'm dead": "I'm good",
     "im dead": "I'm good",
     "i am dead": "I am good",
+    "being good": "I'm good",
+    "been good": "I'm good",
+    "doing good": "I'm good",
 }
 
 
@@ -363,6 +366,18 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
                 lines.append(f"{answer} {question}")
     if telephony:
         lines.append(TELEPHONY_KB_MISS_REPLY)
+        for fallback in (
+            "Sorry — could you say yes or no?",
+            "Sorry, could you repeat that?",
+            engine._short_prompt,
+            (
+                "I totally get that — it's just a quick eligibility check. "
+                "Takes about thirty seconds, fair enough?"
+            ),
+        ):
+            spoken = prepare_for_speech(fallback)
+            if spoken:
+                lines.append(spoken)
     raw = [line.strip() for line in lines if line and line.strip()]
     return iter_chunk_texts(
         raw,

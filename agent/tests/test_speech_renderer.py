@@ -96,6 +96,13 @@ def test_written_to_spoken_rewrite():
     assert "in order to" not in joined
 
 
+def test_stt_greeting_fixes():
+    from app.pipeline import _normalize_caller_stt
+
+    assert _normalize_caller_stt("Being good.") == "I'm good"
+    assert _normalize_caller_stt("being good") == "I'm good"
+
+
 def test_script_cache_covers_kb_anchor_chunks():
     from app.config import ScriptConfig
     from app.conversation import ConversationEngine

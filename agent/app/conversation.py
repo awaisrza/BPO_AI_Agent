@@ -149,15 +149,44 @@ def _is_consent(utterance: str) -> bool:
 
 
 def _is_qualify_yes(utterance: str) -> bool:
-    if _is_consent(utterance):
-        return True
     u = utterance.strip().lower()
     if not u:
         return False
-    if _matches_phrase(u, ("i do", "i have")):
+    words = [w for w in u.replace(",", " ").replace(".", " ").split() if w]
+    # Clear Medicare / ownership affirmatives even in longer PSTN replies.
+    if _matches_phrase(
+        u,
+        (
+            "i do",
+            "i have",
+            "part a",
+            "part b",
+            "both parts",
+            "have medicare",
+            "on medicare",
+        ),
+    ):
         return True
-    words = set(u.replace(",", " ").replace(".", " ").split())
-    return bool(words & _QUALIFY_YES)
+    # Embedded "yeah" in a long garbled sentence is not consent (e.g. "oh yeah I think that's a bit").
+    if len(words) <= 4:
+        if _matches_phrase(u, _QUALIFY_YES) or _is_consent(u):
+            return True
+    if _matches_phrase(
+        u,
+        (
+            "go on",
+            "go ahead",
+            "sounds good",
+            "i like",
+            "that works",
+            "that's fine",
+            "thats fine",
+            "okay go",
+            "ok go",
+        ),
+    ):
+        return True
+    return False
 
 
 def _is_greeting_ack_only(utterance: str) -> bool:
