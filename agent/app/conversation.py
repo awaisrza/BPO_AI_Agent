@@ -166,6 +166,40 @@ def _is_qualify_yes(utterance: str) -> bool:
     return bool(words & _QUALIFY_YES)
 
 
+_AGE_QUESTION_MARKERS = ("how old", "your age", "what age")
+
+
+def _qualifier_expects_age(question: str) -> bool:
+    q = question.strip().lower()
+    return any(marker in q for marker in _AGE_QUESTION_MARKERS)
+
+
+def _parse_age_years(utterance: str) -> int | None:
+    """Extract age from replies like 'I'm 60', 'my age is 60', or '60 years old'."""
+    u = utterance.strip().lower().replace(",", " ")
+    patterns = (
+        r"\b(?:i'?m|i am|im)\s+(\d{1,3})\b",
+        r"\b(?:my age is|age is)\s+(\d{1,3})\b",
+        r"\b(\d{1,3})\s*(?:years?\s*old)\b",
+        r"^\s*(\d{1,3})\s*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, u)
+        if match:
+            age = int(match.group(1))
+            if 18 <= age <= 120:
+                return age
+    return None
+
+
+def _is_qualify_answer(utterance: str, current_question: str | None) -> bool:
+    if _is_qualify_yes(utterance):
+        return True
+    if current_question and _qualifier_expects_age(current_question):
+        return _parse_age_years(utterance) is not None
+    return False
+
+
 def _is_greeting_reply(utterance: str) -> bool:
     """Answer to 'how are you today?' — always play the pitch, never a KB line."""
     u = utterance.strip().lower().rstrip(".")
@@ -253,6 +287,15 @@ class ConversationEngine:
         line = (text or "").strip()
         if line:
             self._pending_followup = line
+
+    def _current_qualifier_question(self) -> str | None:
+        if self._qualify_idx <= 0:
+            return None
+        questions = self.script.qualifying_questions
+        idx = self._qualify_idx - 1
+        if idx < len(questions):
+            return questions[idx]
+        return None
 
     def _consent_prompt(self) -> str:
         pitch = prepare_for_speech(self.script.pitch)
@@ -453,7 +496,7 @@ class ConversationEngine:
                     return turn
                 return self._escalate()
 
-            if _is_qualify_yes(utterance):
+            if _is_qualify_answer(utterance, self._current_qualifier_question()):
                 self._positives += 1
                 return self._next_qualifier()
 

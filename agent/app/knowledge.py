@@ -158,6 +158,10 @@ def answer_offscript(
         return prepare_for_speech(match.answer)
 
     if telephony:
+        # Never block PSTN on Gemini during qualify — re-ask or cached fallback only.
+        if context == "qualify":
+            logger.info("Off-script during qualify -> telephony fallback (no Gemini)")
+            return prepare_for_speech(TELEPHONY_KB_MISS_REPLY)
         # Prefer instant cached line over Gemini wait (3s+ silence kills PSTN calls).
         if not _telephony_worth_gemini(question):
             logger.info("Off-script short/unclear miss -> telephony fallback (no Gemini)")
