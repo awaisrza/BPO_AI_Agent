@@ -42,6 +42,8 @@ class ScriptConfig(BaseModel):
     transfer_closer_user: str | None = None
     transfer_closer_name: str | None = None
     knowledge_base: list[KnowledgeEntry] = Field(default_factory=list)
+    qualify_age_min: int = 65
+    qualify_age_max: int = 85
 
     @classmethod
     def from_script_json(cls, data: dict) -> "ScriptConfig":
@@ -65,6 +67,8 @@ class ScriptConfig(BaseModel):
             transfer_closer_user=data.get("transfer_closer_user"),
             transfer_closer_name=data.get("transfer_closer_name"),
             knowledge_base=parse_knowledge_base(data.get("knowledge_base")),
+            qualify_age_min=int(data.get("qualify_age_min", 65)),
+            qualify_age_max=int(data.get("qualify_age_max", 85)),
         )
 
     @classmethod

@@ -129,7 +129,7 @@
     },
     {
       "topic": "How old age question",
-      "answer": "Just to confirm you qualify — what age are you?",
+      "answer": "You need to be between 65 and 85 to qualify — what age are you?",
       "triggers": [
         "why do you need my age",
         "why age",
@@ -155,6 +155,8 @@
     "How old are you?",
     "Do you make your own decisions?"
   ],
+  "qualify_age_min": 65,
+  "qualify_age_max": 85,
   "transfer_closer_name": "<br />",
   "transfer_closer_user": "<br />"
 }

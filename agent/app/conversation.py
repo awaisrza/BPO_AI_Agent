@@ -187,16 +187,20 @@ def _parse_age_years(utterance: str) -> int | None:
         match = re.search(pattern, u)
         if match:
             age = int(match.group(1))
-            if 18 <= age <= 120:
+            if 1 <= age <= 120:
                 return age
     return None
 
 
+def _age_in_qualify_range(age: int, *, min_age: int, max_age: int) -> bool:
+    return min_age <= age <= max_age
+
+
 def _is_qualify_answer(utterance: str, current_question: str | None) -> bool:
-    if _is_qualify_yes(utterance):
-        return True
     if current_question and _qualifier_expects_age(current_question):
         return _parse_age_years(utterance) is not None
+    if _is_qualify_yes(utterance):
+        return True
     return False
 
 
@@ -503,7 +507,21 @@ class ConversationEngine:
                     return turn
                 return self._escalate()
 
-            if _is_qualify_answer(utterance, self._current_qualifier_question()):
+            current_q = self._current_qualifier_question()
+            if current_q and _qualifier_expects_age(current_q):
+                age = _parse_age_years(utterance)
+                if age is not None:
+                    if _age_in_qualify_range(
+                        age,
+                        min_age=self.script.qualify_age_min,
+                        max_age=self.script.qualify_age_max,
+                    ):
+                        self._positives += 1
+                        return self._next_qualifier()
+                    self.state = State.END
+                    return Turn(self.script.not_interested_line, Action.HANGUP)
+
+            if _is_qualify_answer(utterance, current_q):
                 self._positives += 1
                 return self._next_qualifier()
 

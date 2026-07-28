@@ -465,17 +465,59 @@ def test_yes_with_question_mark_counts_as_consent():
     assert "how old" in turn.reply.lower()
 
 
-def test_age_answer_advances_from_how_old_question():
+def test_age_in_range_advances_qualify():
     script = ScriptConfig(
         greeting="Hi.",
         pitch="Medicare check. Do you have Part A and B?",
         qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        qualify_age_min=65,
+        qualify_age_max=85,
     )
     e = ConversationEngine(script=script)
     e.open()
     e.handle("I'm good.")
     e.handle("Yes.")
-    turn = e.handle("I'm 60.")
+    for age in ("I'm 67.", "65", "85"):
+        e2 = ConversationEngine(script=script)
+        e2.open()
+        e2.handle("I'm good.")
+        e2.handle("Yes.")
+        turn = e2.handle(age)
+        assert "make your own decisions" in turn.reply.lower(), age
+
+
+def test_age_outside_range_disqualifies():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare check. Do you have Part A and B?",
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        qualify_age_min=65,
+        qualify_age_max=85,
+        not_interested_line="Thanks anyway, goodbye.",
+    )
+    for age in ("I'm 60.", "90", "64"):
+        e = ConversationEngine(script=script)
+        e.open()
+        e.handle("I'm good.")
+        e.handle("Yes.")
+        turn = e.handle(age)
+        assert turn.action.name == "HANGUP"
+        assert "goodbye" in turn.reply.lower()
+
+
+def test_age_answer_advances_from_how_old_question():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare check. Do you have Part A and B?",
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        qualify_age_min=65,
+        qualify_age_max=85,
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("I'm good.")
+    e.handle("Yes.")
+    turn = e.handle("I'm 72.")
     assert "make your own decisions" in turn.reply.lower()
     assert "how old" not in turn.reply.lower()
 
@@ -485,6 +527,8 @@ def test_bare_age_answer_advances_qualify():
         greeting="Hi.",
         pitch="Medicare check. Do you have Part A and B?",
         qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        qualify_age_min=65,
+        qualify_age_max=85,
     )
     e = ConversationEngine(script=script)
     e.open()
