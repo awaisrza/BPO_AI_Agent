@@ -93,6 +93,7 @@ def test_greeting_ack_runs_fsm_on_event_loop():
     fronter = _make_fronter(engine=engine)
 
     assert not fronter._engine_may_block("I am good.")
+    assert not fronter._engine_may_block("Yes?")
 
     async def _run() -> None:
         await fronter._handle_caller("I am good.")
@@ -120,7 +121,7 @@ def test_handle_caller_does_not_block_event_loop():
     )
     engine = ConversationEngine(script=script, answer_offscript=slow_offscript)
     engine.open()
-    engine.handle("ok")  # enter QUALIFY pre-consent so an off-script question is used
+    # Stay in PITCH — substantive off-script questions may still use the executor.
     fronter = _make_fronter(engine=engine)
 
     ticks: list[float] = []

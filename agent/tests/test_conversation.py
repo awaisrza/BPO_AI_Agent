@@ -449,6 +449,22 @@ def test_im_being_good_spurious_qualify_redelivers_pitch():
     assert "Part A" not in turn.reply
 
 
+def test_yes_with_question_mark_counts_as_consent():
+    from app.conversation import Intent, heuristic_classifier
+
+    assert heuristic_classifier("Yes?") == Intent.POSITIVE
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare check. Do you have Part A and B?",
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("I'm good.")
+    turn = e.handle("Yes?")
+    assert "how old" in turn.reply.lower()
+
+
 def test_age_answer_advances_from_how_old_question():
     script = ScriptConfig(
         greeting="Hi.",

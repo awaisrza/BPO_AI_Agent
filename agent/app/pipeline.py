@@ -29,8 +29,14 @@ from .conversation import (
     Action,
     ConversationEngine,
     Intent,
+    State,
+    _is_consent,
+    _is_greeting_ack_only,
+    _is_greeting_reply,
+    _is_qualify_answer,
     _looks_like_question,
 )
+from .knowledge import _telephony_worth_gemini
 
 # Dedicated pool for FSM turns that may call Gemini. Do NOT use the default
 # asyncio executor here — Chatterbox TTS also parks CUDA synth on that pool,
@@ -317,8 +323,20 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         # Local KB hit is sync and cheap — no need to leave the event loop.
         if self._engine._kb_only_answer(text):
             return False
+        if _is_consent(text) or _is_greeting_reply(text) or _is_greeting_ack_only(text):
+            return False
+        if self._engine.state == State.QUALIFY:
+            if _is_qualify_answer(text, self._engine._current_qualifier_question()):
+                return False
+            # Telephony qualify uses instant KB-miss fallback — never Gemini.
+            if self._telephony:
+                return False
         intent = self._engine.classify(text, self._engine.state.value)
-        return intent in (Intent.QUESTION, Intent.NEGATIVE)
+        if intent not in (Intent.QUESTION, Intent.NEGATIVE):
+            return False
+        if self._telephony and intent == Intent.QUESTION and not _telephony_worth_gemini(text):
+            return False
+        return True
 
     async def _run_engine(self, text: str):
         """Run the FSM without starving keepalive; only park a worker for Gemini."""

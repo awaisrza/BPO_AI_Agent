@@ -240,6 +240,13 @@ def heuristic_classifier(utterance: str, _context: str = "") -> Intent:
     u = utterance.strip().lower()
     if not u:
         return Intent.UNCLEAR
+    # "Yes?" / "Yeah?" are consent — not real questions (STT often adds "?").
+    if u.endswith("?"):
+        core = u.rstrip("?").strip()
+        if not _looks_like_question(core) and (
+            _is_consent(core) or _matches_phrase(core, _QUALIFY_YES)
+        ):
+            return Intent.POSITIVE
     if _looks_like_question(u):
         return Intent.QUESTION
     if _matches_phrase(u, _NEGATIVE):
