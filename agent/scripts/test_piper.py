@@ -133,13 +133,13 @@ def _load_script(args: argparse.Namespace):
         from app.supabase_scripts import ScriptLoadError, resolve_script
 
         try:
-            script, _label = resolve_script(
+            ctx = resolve_script(
                 campaign_id=args.campaign_id,
                 bot_id=args.bot_id,
             )
         except ScriptLoadError as exc:
             raise SystemExit(f"ERROR: {exc}") from exc
-        return script
+        return ctx.script
 
     return None
 

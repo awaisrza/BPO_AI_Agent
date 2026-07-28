@@ -580,6 +580,7 @@ def build_pipeline(
     mic_test: bool = False,
     sample_rate: int = 16000,
     telephony: bool = False,
+    vicidial_client: ViciDialClient | None = None,
 ) -> Pipeline:
     """Assemble the live pipeline. `transport` provides audio in/out frames."""
     global _cached_stt
@@ -635,7 +636,7 @@ def build_pipeline(
         ),
     )
     call_controller = CallController()
-    vici = None if mic_test else ViciDialClient()
+    vici = None if mic_test else (vicidial_client or ViciDialClient())
     fronter = FronterProcessor(
         engine,
         vici,

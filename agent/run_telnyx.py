@@ -34,14 +34,19 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        script, agent_user = resolve_script(
+        ctx = resolve_script(
             campaign_id=args.campaign_id,
             script_file=args.script_file,
         )
     except ScriptLoadError as exc:
         raise SystemExit(str(exc)) from exc
 
-    run_telnyx_server(script, args.agent_user or agent_user, dial_to=args.dial)
+    run_telnyx_server(
+        ctx.script,
+        args.agent_user or ctx.agent_user,
+        dial_to=args.dial,
+        vicidial_client=ctx.vicidial_client(),
+    )
 
 
 if __name__ == "__main__":

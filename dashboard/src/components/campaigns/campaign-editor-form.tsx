@@ -2,17 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Mic, Pause, Play, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { Pause, Play, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea, Input, Select, Field } from "@/components/ui/input";
+import type { VicidialCampaignOption } from "@/lib/vicidial/campaigns";
 import type { VicidialCloser } from "@/lib/vicidial/closers";
 import { createClient, isSupabaseConfigured, supabaseConfigHelp } from "@/lib/supabase/client";
 import type { CampaignRow, CampaignStatus, KnowledgeEntry, ScriptJson } from "@/lib/types/database";
-import { setCampaignRunningStatus } from "@/lib/campaigns";
 import { DEFAULT_KNOWLEDGE_BASE } from "@/lib/types/database";
 
 export function CampaignEditorForm({ id }: { id: string }) {
@@ -37,7 +37,11 @@ export function CampaignEditorForm({ id }: { id: string }) {
   const [transferLine, setTransferLine] = useState("");
   const [notInterestedLine, setNotInterestedLine] = useState("");
   const [botCount, setBotCount] = useState(0);
-  const [vicidialId, setVicidialId] = useState("—");
+  const [vicidialCampaignId, setVicidialCampaignId] = useState("");
+  const [vicidialCampaigns, setVicidialCampaigns] = useState<VicidialCampaignOption[]>([]);
+  const [vicidialCampaignsLoading, setVicidialCampaignsLoading] = useState(false);
+  const [vicidialCampaignsError, setVicidialCampaignsError] = useState("");
+  const [readinessHint, setReadinessHint] = useState("");
   const [knowledge, setKnowledge] = useState<KnowledgeDraft[]>([]);
 
   useEffect(() => {
@@ -72,7 +76,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
         setTransferPreset(script.transfer_preset ?? "closers-01");
         setTransferCloserUser(script.transfer_closer_user ?? "");
         setTransferCloserName(script.transfer_closer_name ?? "");
-        setVicidialId(row.vicidial_campaign_id ?? "—");
+        setVicidialCampaignId(row.vicidial_campaign_id ?? "");
         setKnowledge(
           (script.knowledge_base?.length ? script.knowledge_base : DEFAULT_KNOWLEDGE_BASE).map(
             toKnowledgeDraft,
@@ -94,7 +98,32 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
     load();
     void loadClosers();
+    void loadVicidialCampaigns();
   }, [id]);
+
+  async function loadVicidialCampaigns() {
+    setVicidialCampaignsLoading(true);
+    setVicidialCampaignsError("");
+
+    try {
+      const res = await fetch("/api/vicidial/campaigns");
+      const data = (await res.json()) as {
+        campaigns?: VicidialCampaignOption[];
+        error?: string;
+      };
+
+      if (!res.ok) {
+        setVicidialCampaignsError(data.error ?? "Could not load ViciDial campaigns.");
+        return;
+      }
+
+      setVicidialCampaigns(data.campaigns ?? []);
+    } catch {
+      setVicidialCampaignsError("Connect ViciDial under Integrations to load campaign list.");
+    } finally {
+      setVicidialCampaignsLoading(false);
+    }
+  }
 
   async function loadClosers() {
     setClosersLoading(true);
@@ -161,13 +190,37 @@ export function CampaignEditorForm({ id }: { id: string }) {
   async function toggleCampaignStatus() {
     setTogglingStatus(true);
     setError("");
+    setReadinessHint("");
 
     try {
-      const supabase = createClient();
-      const nextStatus: CampaignStatus = campaignStatus === "running" ? "paused" : "running";
-      await setCampaignRunningStatus(supabase, id, nextStatus);
+      const action = campaignStatus === "running" ? "stop" : "start";
+      const res = await fetch(`/api/campaigns/${id}/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        message?: string;
+        status?: CampaignStatus;
+        readiness?: { issues?: { level: string; message: string }[] };
+      };
 
-      setCampaignStatus(nextStatus);
+      if (!res.ok) {
+        throw new Error(data.error ?? "Could not update campaign status.");
+      }
+
+      if (data.readiness?.issues) {
+        const warnings = data.readiness.issues
+          .filter((i) => i.level === "warning")
+          .map((i) => i.message)
+          .join(" ");
+        if (warnings) setReadinessHint(warnings);
+      } else if (data.message) {
+        setReadinessHint(data.message);
+      }
+
+      setCampaignStatus(data.status ?? (action === "start" ? "running" : "paused"));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update campaign status.");
@@ -203,7 +256,11 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
       const { error: updateError } = await supabase
         .from("campaigns")
-        .update({ name: trimmedName, script_json })
+        .update({
+          name: trimmedName,
+          script_json,
+          vicidial_campaign_id: vicidialCampaignId.trim() || null,
+        })
         .eq("id", id);
 
       if (updateError) throw updateError;
@@ -260,8 +317,14 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
       {campaignStatus === "paused" && botCount > 0 && (
         <p className="mb-6 rounded-lg border border-border bg-surface-raised px-4 py-3 text-sm text-foreground-muted">
-          Campaign is paused. Click <strong className="text-foreground">Run campaign</strong> to start all{" "}
-          {botCount} assigned agent{botCount === 1 ? "" : "s"}.
+          Campaign is paused. Click <strong className="text-foreground">Run campaign</strong> when ViciDial
+          campaign ID and agent logins are set — supervisor on your GPU will pick up running campaigns.
+        </p>
+      )}
+
+      {readinessHint && (
+        <p className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200/90">
+          {readinessHint}
         </p>
       )}
 
@@ -299,6 +362,41 @@ export function CampaignEditorForm({ id }: { id: string }) {
                   }}
                   placeholder="e.g. Medicare AEP v2"
                 />
+              </Field>
+              <Field
+                label="ViciDial campaign ID"
+                description="Must match the campaign ID in the BPO dialer (hopper / lists)."
+                className="sm:col-span-2"
+              >
+                <div className="flex gap-2">
+                  <Input
+                    list="vicidial-campaign-options"
+                    value={vicidialCampaignId}
+                    onChange={(e) => {
+                      setVicidialCampaignId(e.target.value);
+                      setSaved(false);
+                    }}
+                    placeholder="e.g. MEDICARE01"
+                    className="font-mono text-sm"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={vicidialCampaignsLoading}
+                    onClick={() => void loadVicidialCampaigns()}
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${vicidialCampaignsLoading ? "animate-spin" : ""}`} />
+                  </Button>
+                </div>
+                {vicidialCampaignsError && (
+                  <p className="mt-1.5 text-xs text-status-danger">{vicidialCampaignsError}</p>
+                )}
+                <datalist id="vicidial-campaign-options">
+                  {vicidialCampaigns.map((c) => (
+                    <option key={c.id} value={c.id} />
+                  ))}
+                </datalist>
               </Field>
             </CardBody>
           </Card>
@@ -543,8 +641,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
             <CardBody className="space-y-5">
               <SettingRow label="Campaign" value={campaignName || "—"} />
               <SettingRow label="Script" value={scriptLabel || "—"} />
-              <SettingRow label="Voice" value="Sarah · US English" icon={Mic} />
-              <SettingRow label="ViciDial ID" value={vicidialId} mono />
+              <SettingRow label="ViciDial ID" value={vicidialCampaignId || "—"} mono />
               <SettingRow
                 label="Status"
                 value={campaignStatus === "running" ? "Running — agents can go live" : "Paused"}

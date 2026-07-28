@@ -177,7 +177,12 @@ def _place_telnyx_call(*, to_number: str, from_number: str, answer_url: str) -> 
     ) from last_exc
 
 
-def create_telnyx_app(script: ScriptConfig, agent_user: str) -> FastAPI:
+def create_telnyx_app(
+    script: ScriptConfig,
+    agent_user: str,
+    *,
+    vicidial_client=None,
+) -> FastAPI:
     app = FastAPI(title="AI Fronter Telnyx Phone Test")
 
     @app.get("/health")
@@ -262,7 +267,12 @@ def create_telnyx_app(script: ScriptConfig, agent_user: str) -> FastAPI:
     async def websocket_endpoint(websocket: WebSocket) -> None:
         _event("=== /ws INCOMING ===")
         try:
-            await run_telnyx_call(websocket, script, agent_user)
+            await run_telnyx_call(
+                websocket,
+                script,
+                agent_user,
+                vicidial_client=vicidial_client,
+            )
         except Exception as exc:
             _event(f"=== /ws ERROR: {exc} ===\n{traceback.format_exc()}")
             try:
@@ -308,6 +318,7 @@ def run_telnyx_server(
     agent_user: str,
     *,
     dial_to: str | None = None,
+    vicidial_client=None,
 ) -> None:
     """Start the Telnyx phone-test server and optionally place one outbound call."""
     _require_telnyx()
@@ -339,7 +350,7 @@ def run_telnyx_server(
         _build_tts(script=script, sample_rate=TELEPHONY_PIPELINE_RATE, telephony=True)
     _event("Pre-warm complete.")
 
-    app = create_telnyx_app(script, agent_user)
+    app = create_telnyx_app(script, agent_user, vicidial_client=vicidial_client)
 
     print("\n=== AI FRONTER — TELNYX PHONE TEST ===")
     print(f"Public URL:  {settings.local_server_url}")

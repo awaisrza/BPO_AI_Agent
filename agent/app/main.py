@@ -24,6 +24,7 @@ import sys
 from loguru import logger
 
 from .config import ScriptConfig
+from .bot_context import BotRunContext
 from .conversation import Action, ConversationEngine
 from .supabase_scripts import ScriptLoadError, resolve_script
 from .browser_call_server import run_browser_server
@@ -32,7 +33,7 @@ from .phone_server import run_phone_server
 from .telnyx_server import run_telnyx_server
 
 
-def _load_script_from_args(args: argparse.Namespace) -> tuple[ScriptConfig, str]:
+def _load_script_from_args(args: argparse.Namespace) -> BotRunContext:
     if args.campaign_id and args.bot_id:
         print("Use only one of --campaign-id or --bot-id.", file=sys.stderr)
         sys.exit(1)
@@ -64,7 +65,7 @@ def run_simulation(script: ScriptConfig) -> None:
         print("\nbye")
 
 
-async def _run_live_async(script: ScriptConfig, agent_user: str) -> None:
+async def _run_live_async(ctx: BotRunContext) -> None:
     try:
         from pipecat.pipeline.worker import PipelineParams, PipelineWorker
         from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
@@ -89,9 +90,10 @@ async def _run_live_async(script: ScriptConfig, agent_user: str) -> None:
 
     pipeline = build_pipeline(
         transport,
-        agent_user=agent_user,
-        script=script,
+        agent_user=ctx.agent_user,
+        script=ctx.script,
         mic_test=True,
+        vicidial_client=ctx.vicidial_client(),
     )
     worker = PipelineWorker(
         pipeline,
@@ -104,8 +106,11 @@ async def _run_live_async(script: ScriptConfig, agent_user: str) -> None:
     )
 
     print("\n=== AI FRONTER — LIVE MIC TEST ===")
-    print(f"Script: {script.greeting[:50]}...")
-    print(f"Qualifiers: {len(script.qualifying_questions)} question(s)")
+    print(f"Script: {ctx.script.greeting[:50]}...")
+    print(f"Qualifiers: {len(ctx.script.qualifying_questions)} question(s)")
+    if ctx.vicidial_campaign_id:
+        print(f"ViciDial campaign: {ctx.vicidial_campaign_id}")
+    print(f"Agent user: {ctx.agent_user}")
     print("Speak into your microphone. The bot will greet you, then follow the script.")
     print("Press Ctrl-C to quit.\n")
 
@@ -114,9 +119,9 @@ async def _run_live_async(script: ScriptConfig, agent_user: str) -> None:
     await runner.run()
 
 
-def run_live(script: ScriptConfig, agent_user: str) -> None:
+def run_live(ctx: BotRunContext) -> None:
     try:
-        asyncio.run(_run_live_async(script, agent_user))
+        asyncio.run(_run_live_async(ctx))
     except KeyboardInterrupt:
         logger.info("Stopped.")
 
@@ -165,26 +170,31 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    script, agent_user = _load_script_from_args(args)
+    ctx = _load_script_from_args(args)
     modes = sum(bool(x) for x in (args.live, args.browser, args.daily, args.phone, args.telnyx))
     if modes > 1:
         print("Use only one of --live, --browser, --daily, --phone, or --telnyx.", file=sys.stderr)
         sys.exit(1)
     if args.browser:
-        run_browser_server(script, agent_user)
+        run_browser_server(ctx.script, ctx.agent_user)
     elif args.daily:
         try:
-            asyncio.run(run_daily_call(script, agent_user))
+            asyncio.run(run_daily_call(ctx.script, ctx.agent_user))
         except KeyboardInterrupt:
             logger.info("Stopped.")
     elif args.phone:
-        run_phone_server(script, agent_user, dial_to=args.dial)
+        run_phone_server(ctx.script, ctx.agent_user, dial_to=args.dial)
     elif args.telnyx:
-        run_telnyx_server(script, agent_user, dial_to=args.dial)
+        run_telnyx_server(
+            ctx.script,
+            ctx.agent_user,
+            dial_to=args.dial,
+            vicidial_client=ctx.vicidial_client(),
+        )
     elif args.live:
-        run_live(script, agent_user)
+        run_live(ctx)
     else:
-        run_simulation(script)
+        run_simulation(ctx.script)
 
 
 if __name__ == "__main__":

@@ -40,7 +40,13 @@ def _event(msg: str) -> None:
     logger.info(line.strip())
 
 
-async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> None:
+async def run_telnyx_call(
+    websocket,
+    script: ScriptConfig,
+    agent_user: str,
+    *,
+    vicidial_client=None,
+) -> None:
     """Handle one inbound or outbound Telnyx call over Media Streams."""
     from pipecat.pipeline.worker import PipelineParams, PipelineWorker
     from pipecat.runner.utils import parse_telephony_websocket
@@ -114,6 +120,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             mic_test=True,
             sample_rate=sample_rate,
             telephony=True,
+            vicidial_client=vicidial_client,
         )
         _event(
             f"=== PIPELINE BUILT in {(time.monotonic() - build_started) * 1000:.0f}ms ==="

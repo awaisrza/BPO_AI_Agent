@@ -104,13 +104,8 @@ export function Sidebar() {
       <div className="border-t border-surface-border-subtle p-4">
         <p className="truncate text-body font-medium text-foreground-secondary">{org.name}</p>
         <p className="mt-0.5 text-caption text-foreground-faint">
-          {org.plan} plan · {org.botsActive}/{org.botsIncluded} agents
+          {org.botsActive}/{org.botsIncluded} agents
         </p>
-        {org.pilot && (
-          <span className="mt-2 inline-flex items-center rounded-sm bg-status-warning-muted px-2 py-0.5 text-2xs font-medium text-status-warning">
-            Pilot
-          </span>
-        )}
       </div>
     </aside>
   );
