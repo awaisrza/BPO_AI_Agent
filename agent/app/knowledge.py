@@ -123,7 +123,22 @@ def _telephony_worth_gemini(question: str) -> bool:
         return False
     # Clarifiers / asides while the bot is pitching — never wait on Gemini.
     joined = " ".join(words)
-    if joined in {"thats what", "what is that", "what was that", "say that again", "come again"}:
+    skip_phrases = (
+        "thats what",
+        "what is that",
+        "what was that",
+        "say that again",
+        "come again",
+        "what is it about",
+        "what is this about",
+        "whats it about",
+        "whats this about",
+        "what is this call about",
+        "yeah what is it about",
+    )
+    if joined in skip_phrases:
+        return False
+    if any(p in joined for p in ("what is it about", "what is this about", "why are you calling")):
         return False
     return True
 

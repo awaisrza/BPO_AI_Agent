@@ -17,7 +17,7 @@
     },
     {
       "topic": "Who is calling",
-      "triggers": ["who is calling", "why are you calling", "what do you want"],
+      "triggers": ["who is calling", "why are you calling", "what do you want", "what is it about", "what is this about", "what's it about"],
       "answer": "This is Alex from ABC Benefits on a recorded line — I'll be quick."
     },
     {
