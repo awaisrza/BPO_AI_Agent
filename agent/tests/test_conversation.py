@@ -414,6 +414,41 @@ def test_im_good_after_greeting_delivers_pitch_not_kb_objection():
     assert "totally get that" not in turn.reply.lower()
 
 
+def test_im_being_good_after_greeting_delivers_pitch_not_kb():
+    """Whisper often hears 'I'm being good' — must play pitch, not objection KB."""
+    import json
+    from pathlib import Path
+
+    data = json.loads(
+        (Path(__file__).resolve().parents[1] / "scripts/campaigns/4c3aaed2-2dc6-4828-9d19-1024636dc0ac.json").read_text()
+    )
+    script = ScriptConfig(
+        greeting=data["greeting"],
+        pitch=data["pitch"],
+        qualifying_questions=data["qualifying_questions"],
+        knowledge_base=parse_knowledge_base(data["knowledge_base"]),
+    )
+    from app.knowledge import answer_offscript as kb_answer
+
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base, telephony=True),
+    )
+    e.open()
+    turn = e.handle("I'm being good.")
+    assert "Medicare plan" in turn.reply
+    assert "totally get that" not in turn.reply.lower()
+
+
+def test_im_being_good_spurious_qualify_redelivers_pitch():
+    e = make_engine()
+    e.open()
+    e.state = State.QUALIFY
+    e._pitch_confirmed = False
+    turn = e.handle("I'm being good.")
+    assert "Part A" not in turn.reply
+
+
 def test_third_kb_in_pitch_advances_to_pitch():
     from app.knowledge import answer_offscript as kb_answer
 

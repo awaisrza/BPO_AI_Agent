@@ -104,6 +104,13 @@ _STT_GREETING_FIXES = {
     "i'm dead": "I'm good",
     "im dead": "I'm good",
     "i am dead": "I am good",
+    "being good": "I'm good",
+    "i'm being good": "I'm good",
+    "im being good": "I'm good",
+    "doing good": "I'm good",
+    "i'm doing good": "I'm good",
+    "im doing good": "I'm good",
+    "been good": "I'm good",
 }
 
 

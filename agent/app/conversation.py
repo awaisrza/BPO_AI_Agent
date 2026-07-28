@@ -181,6 +181,13 @@ def _is_greeting_reply(utterance: str) -> bool:
             "i'm fine",
             "im fine",
             "doing well",
+            "doing good",
+            "i'm doing good",
+            "im doing good",
+            "being good",
+            "i'm being good",
+            "im being good",
+            "been good",
         },
     ):
         return True
@@ -403,10 +410,9 @@ class ConversationEngine:
         is_question = intent == Intent.QUESTION or bool(self._kb_only_answer(utterance))
 
         if self.state == State.PITCH:
-            # "I'm good / fine / great" must never hit KB (e.g. false "not interested"
-            # overlap on Supabase triggers) — that blocks the pitch and after two KB
-            # hits the next real question gets the whole pitch again.
-            if _is_greeting_reply(utterance):
+            # Greeting replies must win over KB false positives (e.g. "good" overlapping
+            # "not a good time") and over loose POSITIVE token matches.
+            if _is_greeting_reply(utterance) or _is_greeting_ack_only(utterance):
                 return self._deliver_pitch()
             if is_question:
                 if self._pitch_kb_answers >= self._max_pitch_kb_answers:
@@ -416,15 +422,13 @@ class ConversationEngine:
                     return turn
                 # No KB hit — keep the script moving (do not escalate into consent).
                 return self._deliver_pitch()
-            if _is_greeting_ack_only(utterance):
-                return self._deliver_pitch()
             return self._deliver_pitch()
 
         if self.state == State.QUALIFY:
             if not self._pitch_confirmed:
                 # Greeting reply ("I'm good") is not pitch consent — e.g. after spurious STT
                 # during the hello line advanced state to QUALIFY without a real pitch answer.
-                if _is_greeting_reply(utterance):
+                if _is_greeting_reply(utterance) or _is_greeting_ack_only(utterance):
                     return self._deliver_pitch()
                 # Any affirmative after the pitch counts as consent — thank you, yes, sure, etc.
                 if intent == Intent.POSITIVE or _is_consent(utterance):
