@@ -190,3 +190,11 @@ def test_hangup_defers_termination_until_bot_finishes_speaking():
 def test_stt_click_fragment_is_ignored():
     assert not _is_meaningful_caller_text("Click")
     assert not _is_meaningful_caller_text("click.")
+
+
+def test_bare_numeric_age_is_meaningful():
+    assert _is_meaningful_caller_text("65")
+    assert _is_meaningful_caller_text("60")
+    assert _is_meaningful_caller_text("100")
+    assert not _is_meaningful_caller_text("7")
+    assert not _is_meaningful_caller_text("12")

@@ -132,8 +132,14 @@ def _is_meaningful_caller_text(text: str) -> bool:
     if t in _STT_IGNORE:
         return False
     words = [w for w in t.replace(",", " ").split() if w]
-    if len(words) == 1 and len(words[0]) <= 2 and words[0] not in {"no", "yes"}:
-        return False
+    if len(words) == 1:
+        w = words[0]
+        if w.isdigit():
+            age = int(w)
+            if 18 <= age <= 120:
+                return True
+        if len(w) <= 2 and w not in {"no", "yes", "ok", "ya"}:
+            return False
     return True
 
 

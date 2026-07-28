@@ -480,6 +480,20 @@ def test_age_answer_advances_from_how_old_question():
     assert "how old" not in turn.reply.lower()
 
 
+def test_bare_age_answer_advances_qualify():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare check. Do you have Part A and B?",
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("I'm good.")
+    e.handle("Yes.")
+    turn = e.handle("65")
+    assert "make your own decisions" in turn.reply.lower()
+
+
 def test_third_kb_in_pitch_advances_to_pitch():
     from app.knowledge import answer_offscript as kb_answer
 
