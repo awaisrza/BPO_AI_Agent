@@ -1,64 +1,159 @@
 {
-  "label": "Medicare USA",
-  "greeting": "Hi, this is Alex calling on a recorded line. How are you today?",
-  "pitch": "Great — I'll be quick. I'm calling about your Medicare plan. Do you have a moment for a quick eligibility check?",
-  "qualifying_questions": [
-    "Do you have Medicare Part A and Part B?",
-    "Are you interested in reviewing your plan options this year?"
-  ],
-  "transfer_line": "Perfect — let me connect you with a licensed specialist right now, one moment.",
-  "not_interested_line": "No problem at all, thanks for your time. Have a great day!",
-  "transfer_preset": "closers-01",
+  "label": "Healthcare Benefits Medicare",
+  "pitch": "I'm calling because you qualify for some free Medicare benefits with your current Medicare plan. Do you have Medicare Part A and Part B?",
+  "greeting": "Hey, this is Alex calling from Healthcare Benefits. How are you doing today?",
+  "transfer_line": "Perfect — you're eligible for more benefits. Let me transfer you to my senior supervisor.",
   "knowledge_base": [
     {
-      "topic": "Who are you with",
-      "triggers": ["who are you", "who are you with", "what company", "who is this"],
-      "answer": "I'm Alex with ABC Benefits — a licensed Medicare benefits group. I'll keep this quick."
-    },
-    {
-      "topic": "Who is calling",
-      "triggers": ["who is calling", "why are you calling", "what do you want", "what is it about", "what is this about", "what's it about"],
-      "answer": "This is Alex from ABC Benefits on a recorded line — I'll be quick."
-    },
-    {
       "topic": "How did you get my number",
-      "triggers": ["how did you get my number", "how did you get", "where did you get", "how did you get my name"],
-      "answer": "Your number came from a public Medicare outreach list. I can remove you if you'd like — it's just a thirty-second check first."
+      "answer": "Your number came from a public Medicare outreach list. I can remove you if you'd like — it's just a quick eligibility check first.",
+      "triggers": [
+        "how did you get my number",
+        "where did you get my number",
+        "how'd you get my number",
+        "where'd you get my number",
+        "how did you get this number"
+      ]
     },
     {
       "topic": "Already have benefits",
-      "triggers": ["already have", "already on medicare", "have insurance"],
-      "answer": "That's great — a lot of folks still qualify for extra savings they didn't know about. Worth a quick thirty-second check?"
+      "answer": "That's great — a lot of folks still qualify for extra benefits they didn't know about. Worth a quick check?",
+      "triggers": [
+        "already have all the benefits",
+        "already have benefits",
+        "have all the benefits i need",
+        "don't need anything else",
+        "happy with my plan",
+        "already covered",
+        "i have everything i need",
+        "already on medicare"
+      ]
+    },
+    {
+      "topic": "Who are you with",
+      "answer": "I'm Alex with Healthcare Benefits — a licensed Medicare benefits group. I'll keep this quick.",
+      "triggers": [
+        "who are you with",
+        "what company",
+        "who do you work for",
+        "what agency",
+        "who is your company",
+        "what's your company"
+      ]
+    },
+    {
+      "topic": "Who is calling",
+      "answer": "This is Alex from Healthcare Benefits — I'm calling about free Medicare benefits you may qualify for.",
+      "triggers": [
+        "who is this",
+        "who are you",
+        "who's calling",
+        "what company are you",
+        "who is calling",
+        "why are you calling",
+        "what do you want",
+        "what is it about",
+        "what is this about",
+        "what's it about"
+      ]
     },
     {
       "topic": "Don't need benefits",
-      "triggers": ["don't need", "do not need", "not interested in benefits"],
-      "answer": "I hear you — this is just a free eligibility review. No cost and no obligation. Takes about thirty seconds."
+      "answer": "I hear you — this is just a free eligibility review. No cost and no obligation. Takes about thirty seconds.",
+      "triggers": [
+        "don't need no benefits",
+        "don't need benefits",
+        "don't want benefits",
+        "i don't need that",
+        "no benefits"
+      ]
     },
     {
       "topic": "Not interested",
-      "triggers": ["not interested", "no thanks"],
-      "answer": "I totally get that — it's just a quick Medicare eligibility check. Takes about thirty seconds, fair enough?"
+      "answer": "I totally get that — it's just a quick Medicare eligibility check. Takes about thirty seconds, fair enough?",
+      "triggers": [
+        "not interested",
+        "no thanks",
+        "not for me",
+        "leave me alone"
+      ]
     },
     {
       "topic": "Do not call again",
-      "triggers": ["do not call", "don't call again", "remove me", "stop calling"],
-      "answer": "I'm sorry about that — I can note that for you. Before I update it, it's just a thirty-second eligibility check — fair enough?"
+      "answer": "I'm sorry about that — I can note that for you. Before I update it, it's just a quick eligibility check — fair enough?",
+      "triggers": [
+        "don't call me again",
+        "stop calling",
+        "take me off your list",
+        "remove my number",
+        "do not call",
+        "never call again",
+        "put me on do not call"
+      ]
     },
     {
       "topic": "Is this a scam",
-      "triggers": ["scam", "spam", "legitimate", "fraud", "real company"],
-      "answer": "This is a legitimate call from a licensed Medicare benefits group. It may be recorded for quality assurance."
+      "answer": "This is a legitimate call from a licensed Medicare benefits group. It may be recorded for quality assurance.",
+      "triggers": [
+        "scam",
+        "spam",
+        "legitimate",
+        "real company",
+        "fraud",
+        "is this real"
+      ]
     },
     {
       "topic": "How much does it cost",
-      "triggers": ["how much", "cost", "price", "free", "catch"],
-      "answer": "The review is free. A licensed specialist can go over exact numbers if you qualify."
+      "answer": "The review is free. A licensed specialist can go over exact numbers if you qualify.",
+      "triggers": [
+        "how much",
+        "cost",
+        "price",
+        "is it free",
+        "what's the catch",
+        "free of cost"
+      ]
     },
     {
       "topic": "Call me back later",
-      "triggers": ["call me back", "not a good time", "busy", "later"],
-      "answer": "Sure — what time works best for you tomorrow?"
+      "answer": "Sure — what time works best for you tomorrow?",
+      "triggers": [
+        "call me back",
+        "not a good time",
+        "busy right now",
+        "call later",
+        "i'm busy"
+      ]
+    },
+    {
+      "topic": "How old age question",
+      "answer": "Just to confirm you qualify — what age are you?",
+      "triggers": [
+        "why do you need my age",
+        "why age",
+        "how old do i need to be",
+        "why how old"
+      ]
+    },
+    {
+      "topic": "Decision maker",
+      "answer": "No problem — do you usually make your own healthcare decisions, or does someone else help?",
+      "triggers": [
+        "why decisions",
+        "decision maker",
+        "my spouse decides",
+        "my wife decides",
+        "my husband decides"
+      ]
     }
-  ]
+  ],
+  "transfer_preset": "closers-01",
+  "not_interested_line": "Understood — I'll remove your number. Thanks for your time. Have a great day.",
+  "qualifying_questions": [
+    "How old are you?",
+    "Do you make your own decisions?"
+  ],
+  "transfer_closer_name": "<br />",
+  "transfer_closer_user": "<br />"
 }
