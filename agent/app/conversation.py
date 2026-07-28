@@ -181,11 +181,6 @@ def _is_greeting_reply(utterance: str) -> bool:
             "i'm fine",
             "im fine",
             "doing well",
-            "doing good",
-            "i'm doing good",
-            "im doing good",
-            "being good",
-            "been good",
         },
     ):
         return True
