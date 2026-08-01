@@ -48,8 +48,8 @@ def _load_script(args: argparse.Namespace):
     if args.campaign_id:
         from app.supabase_scripts import resolve_script
 
-        script, _ = resolve_script(campaign_id=args.campaign_id)
-        return script
+        ctx = resolve_script(campaign_id=args.campaign_id)
+        return ctx.script
     if args.script_file:
         import json
 

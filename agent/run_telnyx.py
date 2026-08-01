@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import argparse
 
-from app.config import ScriptConfig
-from app.supabase_scripts import ScriptLoadError, resolve_script
+from app.supabase_client import ScriptLoadError
+from app.supabase_scripts import resolve_script
 from app.telnyx_server import run_telnyx_server
 
 
@@ -34,14 +34,14 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        script, agent_user = resolve_script(
+        ctx = resolve_script(
             campaign_id=args.campaign_id,
             script_file=args.script_file,
         )
     except ScriptLoadError as exc:
         raise SystemExit(str(exc)) from exc
 
-    run_telnyx_server(script, args.agent_user or agent_user, dial_to=args.dial)
+    run_telnyx_server(ctx.script, args.agent_user or ctx.agent_user, dial_to=args.dial)
 
 
 if __name__ == "__main__":

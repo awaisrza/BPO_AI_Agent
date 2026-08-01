@@ -1,0 +1,24 @@
+; AI Fronter — Asterisk dialplan snippets (copy into extensions_custom.conf)
+;
+; Replace GPU host/ports with your fleet supervisor /status output.
+; Each ViciDial agent login must land on the matching extension.
+
+[ai-fronter-agents]
+; ViciDial remote-agent extension pattern — one stanza per bot login.
+exten => 6666,1,NoOp(AI Fronter bot 6666)
+ same => n,Answer()
+ same => n,EAGI(/usr/local/bin/ai-fronter-bridge.py,6666)
+ same => n,Hangup()
+
+exten => 6667,1,NoOp(AI Fronter bot 6667)
+ same => n,Answer()
+ same => n,EAGI(/usr/local/bin/ai-fronter-bridge.py,6667)
+ same => n,Hangup()
+
+exten => 6668,1,NoOp(AI Fronter bot 6668)
+ same => n,Answer()
+ same => n,EAGI(/usr/local/bin/ai-fronter-bridge.py,6668)
+ same => n,Hangup()
+
+; Optional: route from ViciDial campaign AGI instead of remote-agent extension
+; exten => s,1,AGI(/usr/local/bin/ai-fronter-bridge.py,${VDAD}|${AGENT_USER})

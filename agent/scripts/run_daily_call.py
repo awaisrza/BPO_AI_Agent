@@ -25,8 +25,8 @@ def main() -> None:
     from app.daily_session import run_daily_call
     from app.supabase_scripts import resolve_script
 
-    script, agent_user = resolve_script(campaign_id=args.campaign_id)
-    asyncio.run(run_daily_call(script, agent_user))
+    ctx = resolve_script(campaign_id=args.campaign_id)
+    asyncio.run(run_daily_call(ctx.script, ctx.agent_user))
 
 
 if __name__ == "__main__":

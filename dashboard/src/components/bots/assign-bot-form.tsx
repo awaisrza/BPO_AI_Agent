@@ -14,6 +14,7 @@ type CampaignOption = { id: string; name: string };
 export function AssignBotForm() {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [vicidialAgentUser, setVicidialAgentUser] = useState("");
   const [campaignId, setCampaignId] = useState("");
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
   const [error, setError] = useState("");
@@ -61,6 +62,7 @@ export function AssignBotForm() {
         org_id: orgId,
         name: name.trim(),
         campaign_id: campaignId,
+        vicidial_agent_user: vicidialAgentUser.trim() || null,
         status: "offline",
       });
 
@@ -89,6 +91,19 @@ export function AssignBotForm() {
           placeholder="Bot-01"
           required
           autoFocus
+        />
+      </Field>
+
+      <Field
+        label="ViciDial agent login"
+        description="Must match the agent user in the BPO dialer (e.g. 6666)."
+      >
+        <Input
+          value={vicidialAgentUser}
+          onChange={(e) => setVicidialAgentUser(e.target.value)}
+          placeholder="6666"
+          required
+          className="font-mono"
         />
       </Field>
 
@@ -124,7 +139,7 @@ export function AssignBotForm() {
       )}
 
       <div className="flex gap-3">
-        <Button type="submit" disabled={submitting || !name.trim() || campaigns.length === 0}>
+        <Button type="submit" disabled={submitting || !name.trim() || !vicidialAgentUser.trim() || campaigns.length === 0}>
           {submitting ? "Assigning…" : "Assign bot"}
         </Button>
         <Button type="button" variant="secondary" onClick={() => router.push("/bots")}>

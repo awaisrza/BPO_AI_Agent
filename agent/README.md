@@ -192,7 +192,7 @@ Answer the call. You are the "lead" — talk to the bot on your phone like a rea
 curl -X POST http://localhost:8765/dialout -H "Content-Type: application/json" -d "{\"to_number\":\"+14155551234\"}"
 ```
 
-> **ViciDial production** (next step): register the agent as a SIP extension on the BPO's ViciDial server. That path is not wired yet — use Twilio phone test to validate script + voice quality first.
+> **ViciDial production:** Fleet supervisor + workers + warm transfer are implemented. BPO IT must wire the audio AGI bridge from ViciDial to GPU worker ports — see `docs/vicidial-flow.md` and `scripts/vicidial/README.md`. Use Telnyx phone test to validate script + voice first.
 
 ### Load script from dashboard (Supabase)
 

@@ -25,14 +25,14 @@ from loguru import logger
 
 from .config import ScriptConfig
 from .conversation import Action, ConversationEngine
-from .supabase_scripts import ScriptLoadError, resolve_script
+from .supabase_client import ScriptLoadError, resolve_script
 from .browser_call_server import run_browser_server
 from .daily_session import run_daily_call
 from .phone_server import run_phone_server
 from .telnyx_server import run_telnyx_server
 
 
-def _load_script_from_args(args: argparse.Namespace) -> tuple[ScriptConfig, str]:
+def _load_script_from_args(args: argparse.Namespace):
     if args.campaign_id and args.bot_id:
         print("Use only one of --campaign-id or --bot-id.", file=sys.stderr)
         sys.exit(1)
@@ -165,7 +165,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    script, agent_user = _load_script_from_args(args)
+    ctx = _load_script_from_args(args)
+    script = ctx.script
+    agent_user = ctx.agent_user
     modes = sum(bool(x) for x in (args.live, args.browser, args.daily, args.phone, args.telnyx))
     if modes > 1:
         print("Use only one of --live, --browser, --daily, --phone, or --telnyx.", file=sys.stderr)

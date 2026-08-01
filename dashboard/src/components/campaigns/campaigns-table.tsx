@@ -18,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { createClient, isSupabaseConfigured, supabaseConfigHelp } from "@/lib/supabase/client";
-import { setCampaignRunningStatus, toListItem, type CampaignListItem } from "@/lib/campaigns";
+import { toListItem, type CampaignListItem } from "@/lib/campaigns";
 import { formatSupabaseError } from "@/lib/errors";
 import type { CampaignRow, CampaignStatus } from "@/lib/types/database";
 
@@ -83,16 +83,21 @@ export function CampaignsTable() {
     setBusyId(campaign.id);
 
     try {
-      if (campaign.status !== "running" && campaign.bots === 0) {
-        throw new Error(`Assign at least one agent to "${campaign.name}" before running.`);
+      const action = campaign.status === "running" ? "stop" : "start";
+      const res = await fetch(`/api/campaigns/${campaign.id}/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = (await res.json()) as { error?: string; status?: CampaignStatus };
+      if (!res.ok) {
+        throw new Error(data.error ?? "Could not update campaign.");
       }
 
-      const supabase = createClient();
-      const nextStatus: CampaignStatus = campaign.status === "running" ? "paused" : "running";
-      await setCampaignRunningStatus(supabase, campaign.id, nextStatus);
-
       setCampaigns((prev) =>
-        prev.map((c) => (c.id === campaign.id ? { ...c, status: nextStatus } : c)),
+        prev.map((c) =>
+          c.id === campaign.id ? { ...c, status: data.status ?? (action === "start" ? "running" : "paused") } : c,
+        ),
       );
     } catch (err) {
       setActionError(

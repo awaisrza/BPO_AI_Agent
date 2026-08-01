@@ -76,6 +76,33 @@ class ViciDialClient:
             }
         )
 
+    async def change_campaign(self, agent_user: str, campaign_id: str) -> str:
+        """Point a ViciDial agent seat at the outbound campaign hopper."""
+        return await self._agent_api(
+            {
+                "function": "change_campaign",
+                "agent_user": agent_user,
+                "value": campaign_id,
+            }
+        )
+
+    async def resume_agent(self, agent_user: str) -> str:
+        """Unpause agent so ViciDial auto-dialer can feed calls."""
+        return await self._agent_api(
+            {
+                "function": "external_pause",
+                "agent_user": agent_user,
+                "value": "RESUME",
+            }
+        )
+
+    async def prepare_for_dialing(self, agent_user: str, campaign_id: str) -> None:
+        """Map agent to campaign and resume — BPO must have campaign active + leads in hopper."""
+        result = await self.change_campaign(agent_user, campaign_id)
+        logger.info(f"ViciDial change_campaign({agent_user} -> {campaign_id}): {result[:120]}")
+        result = await self.resume_agent(agent_user)
+        logger.info(f"ViciDial resume_agent({agent_user}): {result[:120]}")
+
     async def hangup(self, agent_user: str) -> str:
         return await self._agent_api(
             {"function": "external_hangup", "agent_user": agent_user, "value": "1"}

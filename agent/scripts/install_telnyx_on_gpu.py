@@ -425,11 +425,11 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        script, agent_user = resolve_script(campaign_id=args.campaign_id)
+        ctx = resolve_script(campaign_id=args.campaign_id)
     except ScriptLoadError as exc:
         raise SystemExit(str(exc)) from exc
 
-    run_telnyx_server(script, args.agent_user or agent_user, dial_to=args.dial)
+    run_telnyx_server(ctx.script, args.agent_user or ctx.agent_user, dial_to=args.dial)
 
 
 if __name__ == "__main__":

@@ -43,6 +43,7 @@ export type BotRow = {
   campaign_id: string | null;
   name: string;
   status: BotStatus;
+  vicidial_agent_user: string | null;
   created_at: string;
   campaigns?: { name: string } | null;
 };
