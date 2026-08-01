@@ -11,6 +11,7 @@ import os
 import time
 import traceback
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -25,6 +26,21 @@ _active_sessions: set[str] = set()
 _session_lock = asyncio.Lock()
 _IDLE_TIMEOUT_S = 45.0
 _IDLE_CHECK_INTERVAL_S = 10.0
+
+
+def _call_data_dict(call_data: Any) -> dict[str, Any]:
+    """Pipecat may return TelnyxCallData (Pydantic) instead of a plain dict."""
+    if isinstance(call_data, dict):
+        return call_data
+    model_dump = getattr(call_data, "model_dump", None)
+    if callable(model_dump):
+        return model_dump()
+    return {
+        "stream_id": getattr(call_data, "stream_id", None),
+        "call_control_id": getattr(call_data, "call_control_id", None),
+        "call_id": getattr(call_data, "call_id", None),
+        "outbound_encoding": getattr(call_data, "outbound_encoding", None),
+    }
 
 
 def _event(msg: str) -> None:
@@ -100,12 +116,13 @@ async def run_vicidial_call(websocket, ctx: BotRunContext) -> None:
     try:
         await websocket.accept()
         transport_type, call_data = await parse_telephony_websocket(websocket)
-        _event(f"=== parsed transport={transport_type} keys={list(call_data.keys())} ===")
+        cd = _call_data_dict(call_data)
+        _event(f"=== parsed transport={transport_type} keys={list(cd.keys())} ===")
 
-        stream_id = call_data.get("stream_id") or f"vd-{ctx.agent_user}-{int(time.time())}"
+        stream_id = cd.get("stream_id") or f"vd-{ctx.agent_user}-{int(time.time())}"
         call_control_id = (
-            call_data.get("call_control_id")
-            or call_data.get("call_id")
+            cd.get("call_control_id")
+            or cd.get("call_id")
             or stream_id
         )
         session_key = call_control_id
@@ -119,7 +136,7 @@ async def run_vicidial_call(websocket, ctx: BotRunContext) -> None:
 
         shutdown = _CallShutdown(session_key=session_key, websocket=websocket)
 
-        encoding = call_data.get("outbound_encoding") or "PCMU"
+        encoding = cd.get("outbound_encoding") or "PCMU"
         serializer = TelnyxFrameSerializer(
             stream_id=stream_id,
             outbound_encoding=encoding,

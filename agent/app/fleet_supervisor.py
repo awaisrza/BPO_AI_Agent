@@ -110,11 +110,15 @@ class FleetSupervisor:
             f"Starting worker: {' '.join(cmd)} "
             f"(ViciDial user={bot.get('vicidial_agent_user')}, media port={media_port})"
         )
+        # Log to a file — PIPE without a reader fills and can hang/kill the worker.
+        log_path = Path(f"/tmp/fleet_worker_{bot_id[:8]}.log")
+        log_fh = open(log_path, "a", encoding="utf-8")
+        logger.info(f"Worker log: {log_path}")
         proc = subprocess.Popen(
             cmd,
             cwd=str(_AGENT_ROOT),
             env=env,
-            stdout=subprocess.PIPE,
+            stdout=log_fh,
             stderr=subprocess.STDOUT,
             text=True,
         )
