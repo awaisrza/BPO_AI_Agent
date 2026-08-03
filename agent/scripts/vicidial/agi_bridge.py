@@ -62,12 +62,11 @@ SLIN_CHUNK_BYTES = 320
 # 20 ms @ 8 kHz ulaw.
 ULAW_CHUNK_BYTES = 160
 
+DEFAULT_LOG_PATH = Path("/var/log/ai-fronter-bridge.log")
 DEFAULT_CONFIG_PATHS = (
     Path("/etc/ai-fronter/agent_port_map.json"),
     Path(__file__).resolve().parent / "agent_port_map.json",
 )
-
-_log_lock = threading.Lock()
 
 
 def _log(msg: str) -> None:
@@ -75,13 +74,26 @@ def _log(msg: str) -> None:
     with _log_lock:
         sys.stderr.write(line)
         sys.stderr.flush()
-        log_path = os.getenv("AI_FRONTER_LOG", "").strip()
-        if log_path:
-            try:
-                with open(log_path, "a", encoding="utf-8") as fh:
-                    fh.write(line)
-            except OSError:
-                pass
+        log_path = os.getenv("AI_FRONTER_LOG", "").strip() or str(DEFAULT_LOG_PATH)
+        try:
+            with open(log_path, "a", encoding="utf-8") as fh:
+                fh.write(line)
+        except OSError:
+            pass
+
+
+_log_lock = threading.Lock()
+
+
+def _bootstrap_gpu_silence(ws: websocket.WebSocket, *, chunks: int = 50) -> None:
+    """Send ~1 s PCMU silence so the GPU telephony pipeline starts (matches --test-ws)."""
+    silence_ulaw = b"\xff" * ULAW_CHUNK_BYTES
+    for i in range(chunks):
+        payload = base64.b64encode(silence_ulaw).decode("ascii")
+        ws.send(_media_message(payload))
+        if i == 0:
+            _log("Sent bootstrap silence to GPU")
+        time.sleep(0.02)
 
 
 class AGI:
@@ -258,6 +270,7 @@ class GpuBridge:
         _log(f"Sent Telnyx start stream_id={self.stream_id}")
         self._recv_thread = threading.Thread(target=self._recv_loop, name="gpu-ws-recv", daemon=True)
         self._recv_thread.start()
+        _bootstrap_gpu_silence(self._ws)
 
     def _recv_loop(self) -> None:
         assert self._ws is not None
@@ -288,6 +301,9 @@ class GpuBridge:
                     if out:
                         try:
                             os.write(eagi_fd, out)
+                            if not getattr(self, "_wrote_audio", False):
+                                self._wrote_audio = True
+                                _log(f"EAGI wrote first bot audio ({len(out)} bytes)")
                         except OSError as exc:
                             _log(f"EAGI write failed: {exc}")
                             self._stop.set()
@@ -329,6 +345,9 @@ class GpuBridge:
             if payload_b64:
                 try:
                     ws.send(_media_message(payload_b64))
+                    if not getattr(self, "_sent_caller_audio", False):
+                        self._sent_caller_audio = True
+                        _log(f"EAGI sent first caller audio to GPU ({len(chunk)} bytes)")
                 except websocket.WebSocketException as exc:
                     _log(f"GPU send failed: {exc}")
                     break

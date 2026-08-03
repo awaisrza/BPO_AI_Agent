@@ -145,5 +145,5 @@ ViciDial → SIP → Telnyx → GPU Telnyx server (works for tests, adds latency
 |---------|--------|
 | `no GPU port for agent` | Run campaign first; verify `/status` lists agent; fix `agent_port_map.json` |
 | `GPU unreachable` | Firewall 8800–8802 from dialer IP; `curl http://GPU:8800/health` |
-| No bot audio | EAGI format — try `AI_FRONTER_EAGI_FORMAT=ulaw`; check Asterisk logs |
+| No bot audio | Run EAGI **directly** on customer channel (138368→ai-fronter-route), not `Dial(Local/6666)`; use `AI_FRONTER_EAGI_FORMAT=ulaw`; check `/var/log/ai-fronter-bridge.log` for "EAGI wrote first bot audio" |
 | Call drops immediately | Worker not running; duplicate session; check `/tmp/vicidial_events.log` on GPU |

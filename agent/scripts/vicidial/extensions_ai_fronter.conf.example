@@ -1,24 +1,48 @@
-; AI Fronter — Asterisk dialplan snippets (copy into extensions_custom.conf)
+; AI Fronter — Asterisk dialplan (copy to /etc/asterisk/extensions_custom.conf)
 ;
-; Replace GPU host/ports with your fleet supervisor /status output.
-; Each ViciDial agent login must land on the matching extension.
+; Answered outbound: Local/9… ;1 → 138368@default → ai-fronter-route → EAGI (same channel).
+; Do NOT Dial(Local/6666) for the customer — nested Local breaks EAGI audio to/from PSTN.
+;
+; Find VDAD ext: grep VDAD_local_optimize /etc/asterisk/extensions*.conf
 
-[ai-fronter-agents]
-; ViciDial remote-agent extension pattern — one stanza per bot login.
-exten => 6666,1,NoOp(AI Fronter bot 6666)
- same => n,Answer()
+[ai-fronter-route]
+; EAGI on the outbound Local ;1 leg (paired with ;2 = SIP/customer)
+exten => s,1,NoOp(AI Fronter HIT customer to bot — direct EAGI)
+ same => n,Set(__AI_FRONTER_EAGI_FORMAT=ulaw)
  same => n,EAGI(/usr/local/bin/ai-fronter-bridge.py,6666)
  same => n,Hangup()
 
-exten => 6667,1,NoOp(AI Fronter bot 6667)
+[ai-fronter-agents]
+; Manual test only: asterisk -rx "channel originate Local/6666@ai-fronter-agents application Wait 60"
+exten => 6666,1,NoOp(AI Fronter bot 6666 manual test)
  same => n,Answer()
- same => n,EAGI(/usr/local/bin/ai-fronter-bridge.py,6667)
+ same => n,Set(__AI_FRONTER_EAGI_FORMAT=ulaw)
+ same => n,EAGI(/usr/local/bin/ai-fronter-bridge.py,6666)
  same => n,Hangup()
 
-exten => 6668,1,NoOp(AI Fronter bot 6668)
- same => n,Answer()
- same => n,EAGI(/usr/local/bin/ai-fronter-bridge.py,6668)
+[default]
+exten => _9.,1,Goto(vicidial-auto-external,${EXTEN:1},1)
+
+exten => 138368,1,NoOp(AI Fronter VDAD answered outbound to bot)
+ same => n,AGI(agi-VDAD_local_optimize.agi,${EXTEN})
+ same => n,Goto(ai-fronter-route,s,1)
  same => n,Hangup()
 
-; Optional: route from ViciDial campaign AGI instead of remote-agent extension
-; exten => s,1,AGI(/usr/local/bin/ai-fronter-bridge.py,${VDAD}|${AGENT_USER})
+exten => 9600666,1,Goto(ai-fronter-route,s,1)
+exten => 9606666,1,Goto(ai-fronter-route,s,1)
+exten => 6666,1,Wait(3600)
+
+[vicidial-auto]
+exten => 9600666,1,Goto(ai-fronter-route,s,1)
+exten => 9606666,1,Goto(ai-fronter-route,s,1)
+
+[vicidial-auto-internal]
+exten => 9600666,1,Goto(ai-fronter-route,s,1)
+exten => 9606666,1,Goto(ai-fronter-route,s,1)
+
+[vicidial-auto-external]
+exten => _923XXXXXXXXX,1,AGI(agi://127.0.0.1:4577/call_log)
+ same => n,Set(CALLERID(num)=+19482194316)
+ same => n,Set(CALLERID(all)="+19482194316" <+19482194316>)
+ same => n,Dial(SIP/${EXTEN}@TELNYX,60,To)
+ same => n,Hangup()
