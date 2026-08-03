@@ -229,6 +229,19 @@ def _ulaw_payload_to_eagi(ulaw: bytes, *, eagi_fmt: str) -> bytes:
     return audioop.ulaw2lin(ulaw, 2)
 
 
+def _parse_gpu_media(raw: str | bytes) -> bytes | None:
+    try:
+        msg = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if msg.get("event") != "media":
+        return None
+    payload_b64 = (msg.get("media") or {}).get("payload")
+    if not payload_b64:
+        return None
+    return base64.b64decode(payload_b64)
+
+
 def _media_message(payload_b64: str) -> str:
     return json.dumps({"event": "media", "media": {"payload": payload_b64}})
 
@@ -255,6 +268,55 @@ class GpuBridge:
         self._ws: websocket.WebSocket | None = None
         self._stop = threading.Event()
         self._recv_thread: threading.Thread | None = None
+        self._wrote_audio = False
+        self._sent_caller_audio = False
+        self._gpu_media_packets = 0
+
+    def _write_ulaw_to_eagi(self, ulaw: bytes) -> bool:
+        out = _ulaw_payload_to_eagi(ulaw, eagi_fmt=self.eagi_fmt)
+        if not out:
+            return False
+        try:
+            os.write(EAGI_FD, out)
+            self._gpu_media_packets += 1
+            if not self._wrote_audio:
+                self._wrote_audio = True
+                _log(f"EAGI wrote first bot audio ({len(out)} bytes)")
+            return True
+        except OSError as exc:
+            _log(f"EAGI write failed: {exc}")
+            self._stop.set()
+            return False
+
+    def _handle_gpu_raw(self, raw: str | bytes) -> bool:
+        ulaw = _parse_gpu_media(raw)
+        if ulaw is None:
+            return False
+        return self._write_ulaw_to_eagi(ulaw)
+
+    def _sync_greeting_from_gpu(self, *, chunks: int = 50) -> bool:
+        """Mirror --test-ws: send silence and recv greeting in the main thread."""
+        assert self._ws is not None
+        ws = self._ws
+        silence_ulaw = b"\xff" * ULAW_CHUNK_BYTES
+        got = False
+        for _ in range(chunks):
+            ws.send(_media_message(base64.b64encode(silence_ulaw).decode("ascii")))
+            time.sleep(0.02)
+            try:
+                ws.settimeout(0.05)
+                raw = ws.recv()
+            except websocket.WebSocketTimeoutException:
+                continue
+            if not raw:
+                _log("GPU WebSocket closed during sync greeting")
+                self._stop.set()
+                break
+            if self._handle_gpu_raw(raw):
+                got = True
+        if got:
+            _log(f"Sync greeting OK ({self._gpu_media_packets} packets to EAGI so far)")
+        return got
 
     def connect(self) -> None:
         timeout = float(os.getenv("AI_FRONTER_WS_TIMEOUT", "8") or "8")
@@ -268,9 +330,10 @@ class GpuBridge:
         )
         self._ws.send(json.dumps(start))
         _log(f"Sent Telnyx start stream_id={self.stream_id}")
+        if not self._sync_greeting_from_gpu():
+            _log("WARNING: no bot audio from GPU during sync greeting (check GPU worker log)")
         self._recv_thread = threading.Thread(target=self._recv_loop, name="gpu-ws-recv", daemon=True)
         self._recv_thread.start()
-        _bootstrap_gpu_silence(self._ws)
 
     def _recv_loop(self) -> None:
         assert self._ws is not None
@@ -293,21 +356,8 @@ class GpuBridge:
                     continue
                 event = msg.get("event")
                 if event == "media":
-                    payload_b64 = (msg.get("media") or {}).get("payload")
-                    if not payload_b64:
-                        continue
-                    ulaw = base64.b64decode(payload_b64)
-                    out = _ulaw_payload_to_eagi(ulaw, eagi_fmt=self.eagi_fmt)
-                    if out:
-                        try:
-                            os.write(eagi_fd, out)
-                            if not getattr(self, "_wrote_audio", False):
-                                self._wrote_audio = True
-                                _log(f"EAGI wrote first bot audio ({len(out)} bytes)")
-                        except OSError as exc:
-                            _log(f"EAGI write failed: {exc}")
-                            self._stop.set()
-                            break
+                    if self._handle_gpu_raw(raw):
+                        pass
                 elif event == "clear":
                     _log("GPU sent clear (interruption)")
                 elif event == "stop":
@@ -328,6 +378,12 @@ class GpuBridge:
         while not self._stop.is_set():
             ready, _, _ = select.select([eagi_fd], [], [], 0.2)
             if not ready:
+                # Keep GPU pipeline alive between utterances (Telnyx-style keepalive).
+                try:
+                    silence = base64.b64encode(b"\xff" * ULAW_CHUNK_BYTES).decode("ascii")
+                    ws.send(_media_message(silence))
+                except websocket.WebSocketException:
+                    break
                 continue
             try:
                 chunk = os.read(eagi_fd, read_size)
@@ -345,7 +401,7 @@ class GpuBridge:
             if payload_b64:
                 try:
                     ws.send(_media_message(payload_b64))
-                    if not getattr(self, "_sent_caller_audio", False):
+                    if not self._sent_caller_audio:
                         self._sent_caller_audio = True
                         _log(f"EAGI sent first caller audio to GPU ({len(chunk)} bytes)")
                 except websocket.WebSocketException as exc:
@@ -408,7 +464,10 @@ def run_eagi(agent_user: str) -> int:
         bridge.pump_caller_audio()
     finally:
         bridge.close()
-        _log("Bridge session ended")
+        _log(
+            f"Bridge session ended (gpu_packets={bridge._gpu_media_packets}, "
+            f"caller_sent={bridge._sent_caller_audio})"
+        )
 
     return 0
 
