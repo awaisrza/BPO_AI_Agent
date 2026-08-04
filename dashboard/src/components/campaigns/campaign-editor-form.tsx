@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pause, Play, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { Pause, PhoneCall, Play, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,11 @@ export function CampaignEditorForm({ id }: { id: string }) {
   const [vicidialCampaignsError, setVicidialCampaignsError] = useState("");
   const [readinessHint, setReadinessHint] = useState("");
   const [knowledge, setKnowledge] = useState<KnowledgeDraft[]>([]);
+  const [testPhone, setTestPhone] = useState("+923142222318");
+  const [testListId, setTestListId] = useState("101");
+  const [testOutboundCid, setTestOutboundCid] = useState("+19482194316");
+  const [testDialing, setTestDialing] = useState(false);
+  const [testDialResult, setTestDialResult] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -183,6 +188,60 @@ export function CampaignEditorForm({ id }: { id: string }) {
   function removeKnowledgeEntry(index: number) {
     setKnowledge((prev) => prev.filter((_, i) => i !== index));
     setSaved(false);
+  }
+
+  async function runTestDial() {
+    setTestDialing(true);
+    setError("");
+    setTestDialResult("");
+
+    try {
+      const res = await fetch(`/api/campaigns/${id}/test-dial`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          phone: testPhone.trim(),
+          list_id: testListId.trim() || undefined,
+          outbound_cid: testOutboundCid.trim() || undefined,
+          start_campaign: true,
+        }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        message?: string;
+        gpuMessage?: string;
+        workerHealth?: string;
+        steps?: { step: string; ok: boolean; detail: string }[];
+        hopperPreview?: string;
+        campaignStarted?: boolean;
+      };
+
+      if (!res.ok) {
+        throw new Error(data.error ?? "Test dial failed.");
+      }
+
+      const parts: string[] = [];
+      if (data.message) parts.push(data.message);
+      if (data.gpuMessage) parts.push(`GPU: ${data.gpuMessage}`);
+      if (data.workerHealth) parts.push(`Worker: ${data.workerHealth}`);
+      if (data.steps?.length) {
+        const stepLines = data.steps.map(
+          (s) => `${s.ok ? "✓" : "○"} ${s.step}: ${s.detail}`,
+        );
+        parts.push(stepLines.join("\n"));
+      }
+      if (data.hopperPreview) parts.push(`Hopper:\n${data.hopperPreview}`);
+      setTestDialResult(parts.filter(Boolean).join("\n\n"));
+
+      if (data.campaignStarted) {
+        setCampaignStatus("running");
+        router.refresh();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Test dial failed.");
+    } finally {
+      setTestDialing(false);
+    }
   }
 
   async function toggleCampaignStatus() {
@@ -625,6 +684,59 @@ export function CampaignEditorForm({ id }: { id: string }) {
         </div>
 
         <div className="space-y-6">
+          <Card>
+            <CardHeader
+              title="Test dial"
+              description="One click: start GPU worker, activate ViciDial campaign, and dial this number."
+            />
+            <CardBody className="space-y-4">
+              <Field label="Phone number" description="Include country code (E.164).">
+                <Input
+                  value={testPhone}
+                  onChange={(e) => setTestPhone(e.target.value)}
+                  placeholder="+923142222318"
+                  className="font-mono text-sm"
+                />
+              </Field>
+              <Field
+                label="ViciDial list ID"
+                description="Active lead list tied to this campaign (e.g. 101)."
+              >
+                <Input
+                  value={testListId}
+                  onChange={(e) => setTestListId(e.target.value)}
+                  placeholder="101"
+                  className="font-mono text-sm"
+                />
+              </Field>
+              <Field
+                label="Outbound caller ID"
+                description="Set once in ViciDial Admin/SQL as +19482194316 (Test dial does not update this — API strips +)."
+              >
+                <Input
+                  value={testOutboundCid}
+                  onChange={(e) => setTestOutboundCid(e.target.value)}
+                  placeholder="+19482194316"
+                  className="font-mono text-sm"
+                />
+              </Field>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => void runTestDial()}
+                disabled={testDialing || botCount === 0 || !vicidialCampaignId.trim()}
+              >
+                <PhoneCall className="h-4 w-4" />
+                {testDialing ? "Setting up dial…" : "Test dial this number"}
+              </Button>
+              {testDialResult && (
+                <p className="whitespace-pre-wrap rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100/90">
+                  {testDialResult}
+                </p>
+              )}
+            </CardBody>
+          </Card>
+
           <Card>
             <CardHeader title="Settings" />
             <CardBody className="space-y-5">

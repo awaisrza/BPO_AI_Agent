@@ -95,7 +95,7 @@ async def run_fleet_worker(bot_id: str) -> None:
         while not stop.is_set():
             if ctx.bot_id:
                 try:
-                    patch_bot_status(ctx.bot_id, "idle")
+                    await asyncio.to_thread(patch_bot_status, ctx.bot_id, "idle")
                 except Exception as exc:
                     logger.warning(f"Heartbeat failed: {exc}")
             try:

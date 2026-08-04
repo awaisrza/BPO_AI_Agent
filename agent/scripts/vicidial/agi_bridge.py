@@ -206,9 +206,21 @@ def build_telnyx_start(
 
 
 def _eagi_format() -> str:
-    fmt = os.getenv("AI_FRONTER_EAGI_FORMAT", "slin").strip().lower()
+    fmt = os.getenv("AI_FRONTER_EAGI_FORMAT", "ulaw").strip().lower()
     if fmt not in ("slin", "ulaw"):
-        fmt = "slin"
+        fmt = "ulaw"
+    return fmt
+
+
+def _resolve_eagi_format(agi: AGI) -> str:
+    """Dialplan sets channel var __AI_FRONTER_EAGI_FORMAT; env is fallback."""
+    for name in ("AI_FRONTER_EAGI_FORMAT", "__AI_FRONTER_EAGI_FORMAT"):
+        val = agi.get_variable(name).strip().lower()
+        if val in ("slin", "ulaw"):
+            _log(f"EAGI format from channel variable {name}={val}")
+            return val
+    fmt = _eagi_format()
+    _log(f"EAGI format from env/default={fmt}")
     return fmt
 
 
@@ -294,13 +306,15 @@ class GpuBridge:
             return False
         return self._write_ulaw_to_eagi(ulaw)
 
-    def _sync_greeting_from_gpu(self, *, chunks: int = 50) -> bool:
+    def _sync_greeting_from_gpu(self, *, chunks: int | None = None) -> bool:
         """Mirror --test-ws: send silence and recv greeting in the main thread."""
         assert self._ws is not None
         ws = self._ws
+        if chunks is None:
+            chunks = int(os.getenv("AI_FRONTER_GREETING_CHUNKS", "500") or "500")
         silence_ulaw = b"\xff" * ULAW_CHUNK_BYTES
         got = False
-        for _ in range(chunks):
+        for i in range(chunks):
             ws.send(_media_message(base64.b64encode(silence_ulaw).decode("ascii")))
             time.sleep(0.02)
             try:
@@ -448,7 +462,7 @@ def run_eagi(agent_user: str) -> int:
         call_control_id=call_control_id,
         caller=caller,
         callee=callee,
-        eagi_fmt=_eagi_format(),
+        eagi_fmt=_resolve_eagi_format(agi),
     )
 
     try:
@@ -459,6 +473,8 @@ def run_eagi(agent_user: str) -> int:
         return 1
 
     agi.command("VERBOSE \"AI Fronter: bridged to GPU\" 1")
+    if bridge._gpu_media_packets == 0:
+        agi.command("VERBOSE \"AI Fronter: waiting for bot greeting\" 1")
 
     try:
         bridge.pump_caller_audio()
@@ -489,9 +505,10 @@ def run_test_ws(agent_user: str) -> int:
     ws.send(json.dumps(start))
     _log("Start sent — waiting for media (Ctrl+C to exit)...")
 
-    # Send ~1 s silence so pipeline wakes up.
-    silence_ulaw = b"\xff" * 160
-    for _ in range(50):
+    chunks = int(os.getenv("AI_FRONTER_GREETING_CHUNKS", "500") or "500")
+    silence_ulaw = b"\xff" * ULAW_CHUNK_BYTES
+    got = False
+    for _ in range(chunks):
         payload = base64.b64encode(silence_ulaw).decode("ascii")
         ws.send(_media_message(payload))
         time.sleep(0.02)
@@ -502,11 +519,14 @@ def run_test_ws(agent_user: str) -> int:
                 data = json.loads(msg)
                 if data.get("event") == "media":
                     _log("Received bot audio from GPU (OK)")
+                    got = True
                     break
         except websocket.WebSocketTimeoutException:
             pass
 
     ws.close()
+    if not got:
+        _log("WARNING: no bot audio from GPU during test-ws")
     _log("Test complete")
     return 0
 

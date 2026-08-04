@@ -194,7 +194,7 @@ async def run_vicidial_call(websocket, ctx: BotRunContext) -> None:
         if ctx.bot_id:
             from .fleet_worker import patch_bot_status
 
-            patch_bot_status(ctx.bot_id, "live")
+            await asyncio.to_thread(patch_bot_status, ctx.bot_id, "live")
 
         async def _idle_watchdog() -> None:
             try:
@@ -232,4 +232,4 @@ async def run_vicidial_call(websocket, ctx: BotRunContext) -> None:
         if ctx.bot_id:
             from .fleet_worker import patch_bot_status
 
-            patch_bot_status(ctx.bot_id, "idle")
+            await asyncio.to_thread(patch_bot_status, ctx.bot_id, "idle")

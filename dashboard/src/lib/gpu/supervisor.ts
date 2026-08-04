@@ -23,11 +23,20 @@ export async function syncGpuSupervisor(campaignId: string, action: "start" | "s
   const path = action === "start" ? "/sync" : "/stop";
   const query = `?campaign_id=${encodeURIComponent(campaignId)}`;
 
-  const res = await fetch(`${baseUrl}${path}${query}`, {
-    method: "POST",
-    headers: supervisorHeaders(),
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}${path}${query}`, {
+      method: "POST",
+      headers: supervisorHeaders(),
+      cache: "no-store",
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "network error";
+    throw new Error(
+      `GPU supervisor unreachable at ${baseUrl} (${reason}). ` +
+        "Leave GPU_SUPERVISOR_URL unset to use the poll loop (~20s), or expose port 8770 on the GPU.",
+    );
+  }
 
   const body = (await res.json()) as Record<string, unknown>;
   if (!res.ok) {
