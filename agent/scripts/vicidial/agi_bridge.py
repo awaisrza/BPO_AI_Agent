@@ -467,6 +467,17 @@ class AudioSocketGpuBridge:
         self._gpu_media_packets = 0
         self._write_lock = threading.Lock()
         self._recv_thread_started = False
+        self._last_as_write_time = 0.0
+
+    def _touch_as_write(self) -> None:
+        self._last_as_write_time = time.monotonic()
+
+    def _maybe_keepalive_as(self) -> None:
+        """Asterisk needs outbound frames even while we read caller audio."""
+        if time.monotonic() - self._last_as_write_time < 0.018:
+            return
+        if self._send_as_silence():
+            self._touch_as_write()
 
     def _as_realtime_pace(self) -> bool:
         return os.getenv("AI_FRONTER_AS_REALTIME_PACE", "true").strip().lower() in (
@@ -499,6 +510,7 @@ class AudioSocketGpuBridge:
                     self._stop.set()
                     return False
                 wrote = True
+                self._touch_as_write()
                 if paced:
                     time.sleep(0.02)
         if not wrote:
@@ -696,7 +708,10 @@ class AudioSocketGpuBridge:
         """Keep Asterisk AudioSocket fed between bot utterances (avoids 'Failed to receive frame')."""
         silence_slin = b"\x00" * SLIN_CHUNK_BYTES
         with self._write_lock:
-            return _as_write_frame(self._conn, _AS_TYPE_AUDIO, silence_slin)
+            ok = _as_write_frame(self._conn, _AS_TYPE_AUDIO, silence_slin)
+        if ok:
+            self._touch_as_write()
+        return ok
 
     def pump_caller_audio(self) -> None:
         assert self._ws is not None
@@ -704,6 +719,7 @@ class AudioSocketGpuBridge:
         self._conn.settimeout(0.02)
         silence = base64.b64encode(b"\xff" * ULAW_CHUNK_BYTES).decode("ascii")
         while not self._stop.is_set():
+            self._maybe_keepalive_as()
             try:
                 msg_type, payload = _as_read_frame(self._conn)
             except socket.timeout:
@@ -711,7 +727,6 @@ class AudioSocketGpuBridge:
                     ws.send(_media_message(silence))
                 except websocket.WebSocketException:
                     break
-                self._send_as_silence()
                 continue
             except OSError as exc:
                 _log(f"AudioSocket read ended: {exc}")
