@@ -156,8 +156,9 @@ class Settings(BaseModel):
         in ("1", "true", "yes")
     )
     # One TTS bulk message for the opening hello — avoids a 2–3s gap before "How are you today?"
+    # Off by default: split greeting plays the first line instantly from cache.
     telephony_greeting_single_chunk: bool = Field(
-        default_factory=lambda: os.getenv("TELEPHONY_GREETING_SINGLE_CHUNK", "true").strip().lower()
+        default_factory=lambda: os.getenv("TELEPHONY_GREETING_SINGLE_CHUNK", "false").strip().lower()
         in ("1", "true", "yes")
     )
     telephony_utterance_max_words: int = Field(

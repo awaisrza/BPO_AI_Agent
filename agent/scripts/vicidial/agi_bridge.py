@@ -239,6 +239,25 @@ def resolve_media_port(agent_user: str) -> tuple[str, int]:
     )
 
 
+def _wait_gpu_ready(gpu_host: str, media_port: int, *, timeout_s: float = 20.0) -> bool:
+    """Wait until /health reports ready (not busy on another call)."""
+    url = f"http://{gpu_host}:{media_port}/health"
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            req = Request(url, headers={"Accept": "application/json"})
+            with urlopen(req, timeout=3) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            ready = payload.get("ready", True)
+            if ready is True or str(ready).lower() == "true":
+                return True
+            _log("GPU worker busy (ready=false) — waiting for prior call to finish")
+        except (URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
+            _log(f"GPU health check failed ({url}): {exc}")
+        time.sleep(0.5)
+    return False
+
+
 def build_telnyx_connected() -> dict[str, str]:
     return {"event": "connected", "version": "1.0.0"}
 
@@ -445,16 +464,17 @@ class AudioSocketGpuBridge:
         self._gpu_media_packets = 0
         self._write_lock = threading.Lock()
 
-    def _write_ulaw_to_as(self, ulaw: bytes) -> bool:
+    def _write_ulaw_to_as(self, ulaw: bytes, *, paced: bool | None = None) -> bool:
         if not ulaw:
             return False
         slin = audioop.ulaw2lin(ulaw, 2)
         chunk = SLIN_CHUNK_BYTES
-        realtime = os.getenv("AI_FRONTER_AS_REALTIME_PACE", "true").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        )
+        if paced is None:
+            paced = os.getenv("AI_FRONTER_AS_REALTIME_PACE", "false").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            )
         wrote = False
         with self._write_lock:
             for offset in range(0, len(slin), chunk):
@@ -463,7 +483,7 @@ class AudioSocketGpuBridge:
                     self._stop.set()
                     return False
                 wrote = True
-                if realtime:
+                if paced:
                     time.sleep(0.02)
         if not wrote:
             return False
@@ -473,11 +493,11 @@ class AudioSocketGpuBridge:
             _log(f"AudioSocket wrote first bot audio ({len(slin)} bytes slin, chunked)")
         return True
 
-    def _handle_gpu_raw(self, raw: str | bytes) -> bool:
+    def _handle_gpu_raw(self, raw: str | bytes, *, paced: bool | None = None) -> bool:
         ulaw = _parse_gpu_media(raw)
         if ulaw is None:
             return False
-        return self._write_ulaw_to_as(ulaw)
+        return self._write_ulaw_to_as(ulaw, paced=paced)
 
     def _sync_greeting_from_gpu(self, *, chunks: int | None = None) -> bool:
         assert self._ws is not None
@@ -507,7 +527,7 @@ class AudioSocketGpuBridge:
                 _log("GPU WebSocket closed during sync greeting")
                 self._stop.set()
                 break
-            if self._handle_gpu_raw(raw):
+            if self._handle_gpu_raw(raw, paced=False):
                 got = True
                 audio_messages += 1
         if got:
@@ -517,7 +537,16 @@ class AudioSocketGpuBridge:
             )
         return got
 
-    def connect(self) -> None:
+    def _close_ws(self) -> None:
+        if self._recv_thread is not None:
+            self._recv_thread.join(timeout=1)
+            self._recv_thread = None
+        if self._ws is not None:
+            with contextlib.suppress(Exception):
+                self._ws.close()
+            self._ws = None
+
+    def _open_ws_and_sync_greeting(self) -> bool:
         timeout = float(os.getenv("AI_FRONTER_WS_TIMEOUT", "8") or "8")
         _log(f"Connecting WebSocket {self.ws_url}")
         self._ws = websocket.create_connection(self.ws_url, timeout=timeout)
@@ -529,10 +558,44 @@ class AudioSocketGpuBridge:
             callee=self.callee,
         )
         _log(f"Sent Telnyx connected+start stream_id={self.stream_id}")
-        # Allow GPU pipeline (Chatterbox prewarm/build) to start before bootstrap silence.
         time.sleep(float(os.getenv("AI_FRONTER_HANDSHAKE_WAIT_S", "2") or "2"))
-        if not self._sync_greeting_from_gpu():
+        return self._sync_greeting_from_gpu()
+
+    def connect(self) -> None:
+        gpu_host = self.ws_url.split("//", 1)[-1].split("/", 1)[0]
+        host_part, _, port_part = gpu_host.rpartition(":")
+        media_port = int(port_part or "8800")
+        wait_s = float(os.getenv("AI_FRONTER_GPU_READY_WAIT_S", "20") or "20")
+        if not _wait_gpu_ready(host_part or "127.0.0.1", media_port, timeout_s=wait_s):
+            _log(
+                f"WARNING: GPU not ready after {wait_s:.0f}s "
+                "(prior call may still be running on worker)"
+            )
+
+        retries = int(os.getenv("AI_FRONTER_WS_CONNECT_RETRIES", "2") or "2")
+        got = False
+        for attempt in range(1, max(1, retries) + 1):
+            if attempt > 1:
+                _log(f"Retrying GPU WebSocket (attempt {attempt}/{retries})")
+                time.sleep(1.0)
+            try:
+                got = self._open_ws_and_sync_greeting()
+            except Exception as exc:  # noqa: BLE001
+                _log(f"WebSocket connect failed: {exc}")
+                self._close_ws()
+                if attempt >= retries:
+                    raise
+                continue
+            if got:
+                break
             _log("WARNING: no bot audio from GPU during sync greeting (check GPU worker log)")
+            self._close_ws()
+            if attempt >= retries:
+                break
+
+        if self._ws is None:
+            raise websocket.WebSocketException("GPU WebSocket not connected")
+
         self._recv_thread = threading.Thread(target=self._recv_loop, name="gpu-ws-recv", daemon=True)
         self._recv_thread.start()
 
@@ -604,11 +667,7 @@ class AudioSocketGpuBridge:
 
     def close(self) -> None:
         self._stop.set()
-        if self._ws is not None:
-            with contextlib.suppress(Exception):
-                self._ws.close()
-        if self._recv_thread is not None:
-            self._recv_thread.join(timeout=2)
+        self._close_ws()
         with contextlib.suppress(OSError):
             self._conn.close()
 
@@ -936,13 +995,15 @@ def run_eagi(agent_user: str) -> int:
 
 
 def run_test_ws(agent_user: str) -> int:
-    """Connect to GPU, send start, wait briefly — no Asterisk required."""
+    """Connect to GPU, send start, wait for greeting — no Asterisk required."""
     gpu_host, media_port = resolve_media_port(agent_user)
     ws_url = f"ws://{gpu_host}:{media_port}/ws"
     stream_id = f"test-{uuid.uuid4().hex[:8]}"
     _log(f"Test mode: {ws_url}")
+    _log("NOTE: do not run test-ws immediately before a live dial — it holds the GPU call slot")
 
-    ws = websocket.create_connection(ws_url, timeout=8)
+    timeout = float(os.getenv("AI_FRONTER_WS_TIMEOUT", "8") or "8")
+    ws = websocket.create_connection(ws_url, timeout=timeout)
     _send_telnyx_handshake(
         ws,
         stream_id=stream_id,
@@ -951,11 +1012,14 @@ def run_test_ws(agent_user: str) -> int:
         callee=agent_user,
     )
     _log("Connected+start sent — waiting for media (Ctrl+C to exit)...")
-    time.sleep(0.05)
+    time.sleep(float(os.getenv("AI_FRONTER_HANDSHAKE_WAIT_S", "2") or "2"))
 
-    chunks = int(os.getenv("AI_FRONTER_GREETING_CHUNKS", "500") or "500")
+    chunks = int(os.getenv("AI_FRONTER_GREETING_CHUNKS", "200") or "200")
     silence_ulaw = b"\xff" * ULAW_CHUNK_BYTES
     got = False
+    audio_messages = 0
+    idle_after_audio = 0
+    max_idle = int(os.getenv("AI_FRONTER_GREETING_IDLE_CHUNKS", "30") or "30")
     for _ in range(chunks):
         payload = base64.b64encode(silence_ulaw).decode("ascii")
         ws.send(_media_message(payload))
@@ -963,18 +1027,28 @@ def run_test_ws(agent_user: str) -> int:
         try:
             ws.settimeout(0.05)
             msg = ws.recv()
-            if msg:
-                data = json.loads(msg)
-                if data.get("event") == "media":
-                    _log("Received bot audio from GPU (OK)")
-                    got = True
-                    break
         except websocket.WebSocketTimeoutException:
-            pass
+            if got:
+                idle_after_audio += 1
+                if idle_after_audio >= max_idle:
+                    break
+            continue
+        idle_after_audio = 0
+        if not msg:
+            break
+        try:
+            data = json.loads(msg)
+        except json.JSONDecodeError:
+            continue
+        if data.get("event") == "media":
+            audio_messages += 1
+            if not got:
+                _log("Received bot audio from GPU (OK)")
+            got = True
 
     try:
         ws.send(json.dumps({"event": "stop", "stream_id": stream_id}))
-        time.sleep(2.0)
+        time.sleep(0.5)
     except websocket.WebSocketException:
         pass
     ws.close()

@@ -27,6 +27,25 @@ _session_lock = asyncio.Lock()
 _call_runner_lock = asyncio.Lock()
 _IDLE_TIMEOUT_S = 120.0
 _IDLE_CHECK_INTERVAL_S = 10.0
+_GREETING_STARTUP_TIMEOUT_S = 15.0
+
+
+def call_runner_ready() -> bool:
+    """True when the worker can accept a new ViciDial media WebSocket."""
+    return not _call_runner_lock.locked()
+
+
+async def _ensure_websocket_accepted(websocket) -> None:
+    """Accept only if Uvicorn/Starlette has not already accepted the socket."""
+    try:
+        from starlette.websockets import WebSocketState
+
+        if websocket.application_state == WebSocketState.CONNECTING:
+            await websocket.accept()
+    except RuntimeError as exc:
+        # Newer uvicorn accepts before the handler runs — second accept crashes.
+        if "websocket.accept" not in str(exc):
+            raise
 
 
 def _call_data_dict(call_data: Any) -> dict[str, Any]:
@@ -119,9 +138,10 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
     session_key: str | None = None
     shutdown: _CallShutdown | None = None
     idle_watchdog_task: asyncio.Task | None = None
+    greeting_watchdog_task: asyncio.Task | None = None
 
     try:
-        await websocket.accept()
+        await _ensure_websocket_accepted(websocket)
         transport_type, call_data = await parse_telephony_websocket(websocket)
         cd = _call_data_dict(call_data)
         _event(f"=== parsed transport={transport_type} keys={list(cd.keys())} ===")
@@ -172,6 +192,10 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             await shutdown.end_call(reason)
 
         vici = ctx.vicidial_client()
+        build_started = time.monotonic()
+        _event(
+            f"=== BUILDING PIPELINE (bulk_media={telephony_bulk_media_enabled()}) ==="
+        )
         pipeline = build_pipeline(
             transport,
             agent_user=ctx.agent_user,
@@ -183,6 +207,13 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             on_call_should_end=_on_call_should_end,
             is_call_active=lambda: not shutdown.done,
         )
+        build_ms = (time.monotonic() - build_started) * 1000
+        _event(f"=== PIPELINE BUILT in {build_ms:.0f}ms ===")
+        if build_ms > 2000:
+            _event(
+                "WARNING: pipeline build >2s — greeting may miss bridge sync window. "
+                "Ensure fleet_worker pre-warm finished before dialing."
+            )
 
         tts_for_cleanup = pipeline.processors[-2] if pipeline.processors else None
         fronter = next((p for p in pipeline.processors if isinstance(p, FronterProcessor)), None)
@@ -217,17 +248,38 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             except asyncio.CancelledError:
                 pass
 
+        media_ready_at: float | None = None
+
+        async def _greeting_startup_watchdog() -> None:
+            """Release a stuck call slot if Chatterbox never produces greeting audio."""
+            try:
+                await asyncio.sleep(_GREETING_STARTUP_TIMEOUT_S)
+                if shutdown.done or fronter is None or media_ready_at is None:
+                    return
+                if fronter.last_activity_monotonic <= media_ready_at:
+                    _event(
+                        f"=== GREETING STARTUP TIMEOUT ({_GREETING_STARTUP_TIMEOUT_S:.0f}s) — "
+                        "no bot activity after media ready ==="
+                    )
+                    await shutdown.end_call("greeting_startup_timeout")
+            except asyncio.CancelledError:
+                pass
+
         @transport.event_handler("on_client_connected")
         async def on_client_connected(_transport, _client) -> None:
+            nonlocal media_ready_at
+            media_ready_at = time.monotonic()
             _event("=== MEDIA READY — greeting should play within 1s ===")
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client) -> None:
             await shutdown.end_call("remote_hangup")
 
+        connect_started = time.monotonic()
         runner = WorkerRunner(handle_sigint=False)
         await runner.add_workers(worker)
         idle_watchdog_task = asyncio.create_task(_idle_watchdog())
+        greeting_watchdog_task = asyncio.create_task(_greeting_startup_watchdog())
         _event("=== pipeline worker running ===")
         try:
             await runner.run()
@@ -243,6 +295,8 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
     finally:
         if idle_watchdog_task is not None:
             idle_watchdog_task.cancel()
+        if greeting_watchdog_task is not None:
+            greeting_watchdog_task.cancel()
         if session_key:
             async with _session_lock:
                 _active_sessions.discard(session_key)

@@ -76,12 +76,31 @@ SELECT CONCAT('after fix: status=', status, ' campaign=', campaign_id)
 FROM vicidial_remote_agents WHERE user_start='${REMOTE_AGENT}';" || true
 echo
 
-echo "==> 7) GPU bridge test (needs websocket-client + /etc/ai-fronter config)"
+echo "==> 7) GPU health + bridge test"
+GPU_HOST="$(python3 -c "import json; print(json.load(open('/etc/ai-fronter/agent_port_map.json')).get('gpu_host',''))" 2>/dev/null || true)"
+GPU_PORT="$(python3 -c "import json; m=json.load(open('/etc/ai-fronter/agent_port_map.json')); print(m.get('6666') or m.get('agents',{}).get('6666',''))" 2>/dev/null || true)"
+if [[ -n "${GPU_HOST}" && -n "${GPU_PORT}" ]]; then
+  echo "  GPU: ${GPU_HOST}:${GPU_PORT}"
+  curl -s --max-time 5 "http://${GPU_HOST}:${GPU_PORT}/health" || echo "  health: FAILED (worker down or port wrong)"
+else
+  echo "  could not read gpu_host/port from /etc/ai-fronter/agent_port_map.json"
+fi
 if [[ -x /usr/local/bin/ai-fronter-bridge.py ]]; then
-  /usr/local/bin/ai-fronter-bridge.py --test-ws "${REMOTE_AGENT}" 2>&1 | tail -3 || true
+  echo "  bridge sync_greeting installed: $(grep -c '_sync_greeting_from_gpu' /usr/local/bin/ai-fronter-bridge.py 2>/dev/null || echo 0)"
+  echo "  (skip test-ws if you are about to dial — it holds the GPU call slot for ~5s)"
+  /usr/local/bin/ai-fronter-bridge.py --test-ws "${REMOTE_AGENT}" 2>&1 | tail -5 || true
 else
   echo "  ai-fronter-bridge.py not installed"
 fi
+echo
+
+echo "==> 7b) AudioSocket bridge process"
+ps aux | grep -E 'ai-fronter-bridge.*serve-audiosocket|9092' | grep -v grep || \
+  echo "  WARNING: AudioSocket server not running — start: ai-fronter-bridge.py --serve-audiosocket 6666"
+echo
+
+echo "==> 7c) Last bridge log lines"
+tail -8 /var/log/ai-fronter-bridge.log 2>/dev/null || echo "  no bridge log"
 echo
 
 echo "==> 8) Recent dial attempts (watch for 9231 / CONGESTION / CHANUNAVAIL)"

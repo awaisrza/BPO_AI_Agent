@@ -10,16 +10,18 @@ from fastapi import FastAPI, WebSocket
 from loguru import logger
 
 from .bot_context import BotRunContext
-from .vicidial_session import run_vicidial_call
+from .vicidial_session import call_runner_ready, run_vicidial_call
 
 
 def create_worker_app(ctx: BotRunContext) -> FastAPI:
     app = FastAPI(title=f"AI Fronter — {ctx.bot_name}", version="1.0")
 
     @app.get("/health")
-    def health() -> dict[str, str | int | None]:
+    def health() -> dict[str, str | int | None | bool]:
+        ready = call_runner_ready()
         return {
             "ok": "true",
+            "ready": ready,
             "bot_id": ctx.bot_id,
             "agent_user": ctx.agent_user,
             "vicidial_campaign_id": ctx.vicidial_campaign_id,
