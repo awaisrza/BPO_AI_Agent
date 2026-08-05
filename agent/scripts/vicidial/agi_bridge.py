@@ -692,10 +692,16 @@ class AudioSocketGpuBridge:
                 _log(f"GPU recv error: {exc}")
             self._stop.set()
 
+    def _send_as_silence(self) -> bool:
+        """Keep Asterisk AudioSocket fed between bot utterances (avoids 'Failed to receive frame')."""
+        silence_slin = b"\x00" * SLIN_CHUNK_BYTES
+        with self._write_lock:
+            return _as_write_frame(self._conn, _AS_TYPE_AUDIO, silence_slin)
+
     def pump_caller_audio(self) -> None:
         assert self._ws is not None
         ws = self._ws
-        self._conn.settimeout(0.2)
+        self._conn.settimeout(0.02)
         silence = base64.b64encode(b"\xff" * ULAW_CHUNK_BYTES).decode("ascii")
         while not self._stop.is_set():
             try:
@@ -705,6 +711,7 @@ class AudioSocketGpuBridge:
                     ws.send(_media_message(silence))
                 except websocket.WebSocketException:
                     break
+                self._send_as_silence()
                 continue
             except OSError as exc:
                 _log(f"AudioSocket read ended: {exc}")
