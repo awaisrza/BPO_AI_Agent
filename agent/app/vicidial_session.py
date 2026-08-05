@@ -24,7 +24,8 @@ from .telnyx_media import telephony_bulk_media_enabled
 _CRASH_LOG = Path("/tmp/vicidial_events.log")
 _active_sessions: set[str] = set()
 _session_lock = asyncio.Lock()
-_IDLE_TIMEOUT_S = 45.0
+_call_runner_lock = asyncio.Lock()
+_IDLE_TIMEOUT_S = 120.0
 _IDLE_CHECK_INTERVAL_S = 10.0
 
 
@@ -99,6 +100,12 @@ class _CallShutdown:
 
 async def run_vicidial_call(websocket, ctx: BotRunContext) -> None:
     """Handle one live call bridged from ViciDial over WebSocket media."""
+    # One PipelineWorker/runner at a time — concurrent WS sessions break greeting on call #2+.
+    async with _call_runner_lock:
+        await _run_vicidial_call_locked(websocket, ctx)
+
+
+async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
     from pipecat.pipeline.worker import PipelineParams, PipelineWorker
     from pipecat.runner.utils import parse_telephony_websocket
     from pipecat.serializers.telnyx import TelnyxFrameSerializer
@@ -210,6 +217,10 @@ async def run_vicidial_call(websocket, ctx: BotRunContext) -> None:
             except asyncio.CancelledError:
                 pass
 
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(_transport, _client) -> None:
+            _event("=== MEDIA READY — greeting should play within 1s ===")
+
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client) -> None:
             await shutdown.end_call("remote_hangup")
@@ -217,7 +228,13 @@ async def run_vicidial_call(websocket, ctx: BotRunContext) -> None:
         runner = WorkerRunner(handle_sigint=False)
         await runner.add_workers(worker)
         idle_watchdog_task = asyncio.create_task(_idle_watchdog())
-        await runner.run()
+        _event("=== pipeline worker running ===")
+        try:
+            await runner.run()
+        finally:
+            _event("=== pipeline worker finished ===")
+            if not shutdown.done:
+                await shutdown.end_call("runner_finished")
     except Exception:
         _event("=== VICIDIAL CRASH ===\n" + traceback.format_exc())
         if shutdown is not None:

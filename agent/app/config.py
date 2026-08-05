@@ -155,17 +155,26 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("TELEPHONY_SINGLE_UTTERANCE", "true").strip().lower()
         in ("1", "true", "yes")
     )
+    # One TTS bulk message for the opening hello — avoids a 2–3s gap before "How are you today?"
+    telephony_greeting_single_chunk: bool = Field(
+        default_factory=lambda: os.getenv("TELEPHONY_GREETING_SINGLE_CHUNK", "true").strip().lower()
+        in ("1", "true", "yes")
+    )
     telephony_utterance_max_words: int = Field(
         default_factory=lambda: int(os.getenv("TELEPHONY_UTTERANCE_MAX_WORDS", "40") or "40")
     )
     # How long the caller must be silent before VAD considers them done talking.
     # Too low cuts callers off mid-thought; too high adds dead air before the bot replies.
     telephony_vad_stop_secs: float = Field(
-        default_factory=lambda: float(os.getenv("TELEPHONY_VAD_STOP_SECS", "1.3") or "1.3")
+        default_factory=lambda: float(os.getenv("TELEPHONY_VAD_STOP_SECS", "0.9") or "0.9")
+    )
+    # Delay after last STT fragment before answering (telephony only).
+    telephony_caller_flush_s: float = Field(
+        default_factory=lambda: float(os.getenv("TELEPHONY_CALLER_FLUSH_S", "0.25") or "0.25")
     )
     # Breath between a KB/objection answer and the scripted follow-up question.
     telephony_followup_pause_s: float = Field(
-        default_factory=lambda: float(os.getenv("TELEPHONY_FOLLOWUP_PAUSE_S", "1.0") or "1.0")
+        default_factory=lambda: float(os.getenv("TELEPHONY_FOLLOWUP_PAUSE_S", "0.35") or "0.35")
     )
 
     vicidial_base_url: str = Field(default_factory=lambda: os.getenv("VICIDIAL_BASE_URL", ""))

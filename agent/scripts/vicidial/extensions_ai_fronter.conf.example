@@ -6,10 +6,14 @@
 ; Find VDAD ext: grep VDAD_local_optimize /etc/asterisk/extensions*.conf
 
 [ai-fronter-route]
-; EAGI on the outbound Local ;1 leg (paired with ;2 = SIP/customer).
-; Do NOT Answer() here — VDAD already answered; a second Answer can break EAGI fd 3.
-exten => s,1,NoOp(AI Fronter HIT customer to bot — direct EAGI)
- same => n,EAGI(/usr/local/bin/ai-fronter-bridge.py,6666)
+; AudioSocket replaces EAGI when fd 3 is not writable (CyburDial). Start bridge first:
+;   ai-fronter-bridge.py --serve-audiosocket 6666
+exten => s,1,NoOp(AI Fronter HIT — AudioSocket to GPU)
+ same => n,Answer()
+ same => n,Set(AI_UUID=${UUID()})
+ same => n,GotoIf($[${LEN(${AI_UUID})}>0]?asok)
+ same => n,Set(AI_UUID=${SHELL(uuidgen -r | tr -d '\n')})
+ same => n(asok),AudioSocket(${AI_UUID},127.0.0.1:9092)
  same => n,Hangup()
 
 [ai-fronter-agents]

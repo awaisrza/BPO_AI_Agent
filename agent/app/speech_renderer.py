@@ -236,11 +236,18 @@ def render_speech(
     return chunks
 
 
-def render_speech_telephony(text: str, *, max_words: int = 40) -> list[SpeechChunk]:
+def render_speech_telephony(
+    text: str,
+    *,
+    max_words: int = 40,
+    force_single: bool = False,
+) -> list[SpeechChunk]:
     """PSTN: lead sentence first (cached/instant), remainder prefetched while speaking."""
     spoken = normalize_spoken_text(text)
     if not spoken:
         return []
+    if force_single:
+        return [SpeechChunk(text=spoken, pause_after_ms=0)]
 
     sentences = split_spoken_sentences(spoken, max_words=18)
     if len(sentences) <= 1:
@@ -378,6 +385,8 @@ if PIPECAT_AVAILABLE:
             pause_max_ms: int = 700,
             telephony: bool = False,
             telephony_max_words: int = 40,
+            greeting_text: str = "",
+            greeting_single_chunk: bool = False,
         ):
             super().__init__()
             self._controller = controller
@@ -386,6 +395,8 @@ if PIPECAT_AVAILABLE:
             self._pause_max_ms = pause_max_ms
             self._telephony = telephony
             self._telephony_max_words = telephony_max_words
+            self._greeting_text = normalize_spoken_text(greeting_text)
+            self._greeting_single_chunk = greeting_single_chunk
             self._cancel_stream = False
 
         async def process_frame(self, frame, direction):  # type: ignore[override]
@@ -412,9 +423,15 @@ if PIPECAT_AVAILABLE:
                 self._cancel_stream = False
                 self._controller.interrupted = False
                 if self._telephony:
+                    force_single = (
+                        self._greeting_single_chunk
+                        and self._greeting_text
+                        and normalize_spoken_text(frame.text) == self._greeting_text
+                    )
                     chunks = render_speech_telephony(
                         frame.text,
                         max_words=self._telephony_max_words,
+                        force_single=force_single,
                     )
                 else:
                     chunks = render_speech(

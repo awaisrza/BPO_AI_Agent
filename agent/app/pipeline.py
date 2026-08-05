@@ -183,7 +183,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._followup_reply: str | None = None
         self._caller_buffer: str = ""
         self._flush_task: asyncio.Task | None = None
-        self._caller_flush_delay_s = 0.4 if (telephony or telephony_phone_test) else 0.75
+        if telephony or telephony_phone_test:
+            self._caller_flush_delay_s = settings.telephony_caller_flush_s
+        else:
+            self._caller_flush_delay_s = 0.75
         self.last_activity_monotonic: float = time.monotonic()
 
     def _touch_activity(self) -> None:
@@ -595,13 +598,18 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
         lines.append(TELEPHONY_KB_MISS_REPLY)
         lines.append(FALLBACK_REPLY)
     raw = [line.strip() for line in lines if line and line.strip()]
-    return iter_chunk_texts(
+    out = iter_chunk_texts(
         raw,
         telephony=telephony,
         max_words=max_words,
         pause_min_ms=pause_min,
         pause_max_ms=pause_max,
     )
+    if telephony and settings.telephony_greeting_single_chunk:
+        full_greeting = prepare_for_speech(script.greeting)
+        if full_greeting and full_greeting not in out:
+            out.insert(0, full_greeting)
+    return out
 
 
 def _is_chatterbox_backend() -> bool:
@@ -876,6 +884,8 @@ def build_pipeline(
         pause_max_ms=pause_max,
         telephony=telephony and settings.telephony_single_utterance,
         telephony_max_words=settings.telephony_utterance_max_words,
+        greeting_text=script.greeting if telephony else "",
+        greeting_single_chunk=telephony and settings.telephony_greeting_single_chunk,
     )
 
     processors = [

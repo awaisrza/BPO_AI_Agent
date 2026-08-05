@@ -26,6 +26,10 @@ Dependencies on dialer server:
 
 Test without Asterisk:
   python3 ai-fronter-bridge.py --test-ws 6666
+
+AudioSocket (when EAGI fd 3 is broken — CyburDial/Asterisk 18+):
+  python3 ai-fronter-bridge.py --serve-audiosocket 6666
+  Dialplan: Answer() then AudioSocket(${UUID()},127.0.0.1:9092)
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ import fcntl
 import json
 import os
 import select
+import socket
 import sys
 import threading
 import time
@@ -56,6 +61,11 @@ except ImportError as exc:  # pragma: no cover
     )
     raise SystemExit(1) from exc
 
+# AudioSocket TLV types (https://docs.asterisk.org/Configuration/Channel-Drivers/AudioSocket/)
+_AS_TYPE_TERM = 0x00
+_AS_TYPE_UUID = 0x01
+_AS_TYPE_DTMF = 0x03
+_AS_TYPE_AUDIO = 0x10
 # EAGI audio on file descriptor 3 (Asterisk convention).
 EAGI_FD = 3
 SAMPLE_RATE = 8000
@@ -86,6 +96,17 @@ def _log(msg: str) -> None:
 
 
 _log_lock = threading.Lock()
+_audiosocket_lock_guard = threading.Lock()
+_audiosocket_gpu_locks: dict[str, threading.Lock] = {}
+
+
+def _audiosocket_gpu_lock(agent_user: str) -> threading.Lock:
+    with _audiosocket_lock_guard:
+        lock = _audiosocket_gpu_locks.get(agent_user)
+        if lock is None:
+            lock = threading.Lock()
+            _audiosocket_gpu_locks[agent_user] = lock
+        return lock
 
 
 class _CallLock:
@@ -352,6 +373,318 @@ def _media_message(payload_b64: str) -> str:
     return json.dumps({"event": "media", "media": {"payload": payload_b64}})
 
 
+def _as_recv_exact(conn: socket.socket, nbytes: int) -> bytes | None:
+    buf = bytearray()
+    while len(buf) < nbytes:
+        try:
+            chunk = conn.recv(nbytes - len(buf))
+        except OSError:
+            return None
+        if not chunk:
+            return None
+        buf.extend(chunk)
+    return bytes(buf)
+
+
+def _as_read_frame(conn: socket.socket) -> tuple[int | None, bytes]:
+    header = _as_recv_exact(conn, 3)
+    if not header:
+        return None, b""
+    msg_type = header[0]
+    length = int.from_bytes(header[1:3], "big")
+    if length == 0:
+        return msg_type, b""
+    payload = _as_recv_exact(conn, length)
+    if payload is None:
+        return None, b""
+    return msg_type, payload
+
+
+def _as_write_frame(conn: socket.socket, msg_type: int, payload: bytes) -> bool:
+    try:
+        conn.sendall(bytes([msg_type]) + len(payload).to_bytes(2, "big") + payload)
+        return True
+    except OSError as exc:
+        _log(f"AudioSocket write failed: {exc}")
+        return False
+
+
+def _as_uuid_to_str(payload: bytes) -> str:
+    if len(payload) == 16:
+        return str(uuid.UUID(bytes=payload))
+    try:
+        return payload.decode("utf-8", errors="replace").strip()
+    except Exception:
+        return payload.hex()
+
+
+class AudioSocketGpuBridge:
+    """Bidirectional bridge: AudioSocket TCP (slin) ↔ GPU WebSocket."""
+
+    def __init__(
+        self,
+        *,
+        conn: socket.socket,
+        ws_url: str,
+        stream_id: str,
+        call_control_id: str,
+        caller: str,
+        callee: str,
+    ) -> None:
+        self._conn = conn
+        self.ws_url = ws_url
+        self.stream_id = stream_id
+        self.call_control_id = call_control_id
+        self.caller = caller
+        self.callee = callee
+        self._ws: websocket.WebSocket | None = None
+        self._stop = threading.Event()
+        self._recv_thread: threading.Thread | None = None
+        self._wrote_audio = False
+        self._sent_caller_audio = False
+        self._gpu_media_packets = 0
+        self._write_lock = threading.Lock()
+
+    def _write_ulaw_to_as(self, ulaw: bytes) -> bool:
+        if not ulaw:
+            return False
+        slin = audioop.ulaw2lin(ulaw, 2)
+        chunk = SLIN_CHUNK_BYTES
+        realtime = os.getenv("AI_FRONTER_AS_REALTIME_PACE", "true").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        wrote = False
+        with self._write_lock:
+            for offset in range(0, len(slin), chunk):
+                frame = slin[offset : offset + chunk]
+                if not _as_write_frame(self._conn, _AS_TYPE_AUDIO, frame):
+                    self._stop.set()
+                    return False
+                wrote = True
+                if realtime:
+                    time.sleep(0.02)
+        if not wrote:
+            return False
+        self._gpu_media_packets += 1
+        if not self._wrote_audio:
+            self._wrote_audio = True
+            _log(f"AudioSocket wrote first bot audio ({len(slin)} bytes slin, chunked)")
+        return True
+
+    def _handle_gpu_raw(self, raw: str | bytes) -> bool:
+        ulaw = _parse_gpu_media(raw)
+        if ulaw is None:
+            return False
+        return self._write_ulaw_to_as(ulaw)
+
+    def _sync_greeting_from_gpu(self, *, chunks: int | None = None) -> bool:
+        assert self._ws is not None
+        ws = self._ws
+        if chunks is None:
+            chunks = int(os.getenv("AI_FRONTER_GREETING_CHUNKS", "500") or "500")
+        silence_ulaw = b"\xff" * ULAW_CHUNK_BYTES
+        got = False
+        idle_after_audio = 0
+        max_idle = int(os.getenv("AI_FRONTER_GREETING_IDLE_CHUNKS", "60") or "60")
+        min_messages = int(os.getenv("AI_FRONTER_GREETING_MIN_MESSAGES", "1") or "1")
+        audio_messages = 0
+        for _ in range(chunks):
+            ws.send(_media_message(base64.b64encode(silence_ulaw).decode("ascii")))
+            time.sleep(0.02)
+            try:
+                ws.settimeout(0.05)
+                raw = ws.recv()
+            except websocket.WebSocketTimeoutException:
+                if got and audio_messages >= min_messages:
+                    idle_after_audio += 1
+                    if idle_after_audio >= max_idle:
+                        break
+                continue
+            idle_after_audio = 0
+            if not raw:
+                _log("GPU WebSocket closed during sync greeting")
+                self._stop.set()
+                break
+            if self._handle_gpu_raw(raw):
+                got = True
+                audio_messages += 1
+        if got:
+            _log(
+                f"Sync greeting OK ({audio_messages} GPU audio messages, "
+                f"{self._gpu_media_packets} writes to AudioSocket)"
+            )
+        return got
+
+    def connect(self) -> None:
+        timeout = float(os.getenv("AI_FRONTER_WS_TIMEOUT", "8") or "8")
+        _log(f"Connecting WebSocket {self.ws_url}")
+        self._ws = websocket.create_connection(self.ws_url, timeout=timeout)
+        _send_telnyx_handshake(
+            self._ws,
+            stream_id=self.stream_id,
+            call_control_id=self.call_control_id,
+            caller=self.caller,
+            callee=self.callee,
+        )
+        _log(f"Sent Telnyx connected+start stream_id={self.stream_id}")
+        # Allow GPU pipeline (Chatterbox prewarm/build) to start before bootstrap silence.
+        time.sleep(float(os.getenv("AI_FRONTER_HANDSHAKE_WAIT_S", "2") or "2"))
+        if not self._sync_greeting_from_gpu():
+            _log("WARNING: no bot audio from GPU during sync greeting (check GPU worker log)")
+        self._recv_thread = threading.Thread(target=self._recv_loop, name="gpu-ws-recv", daemon=True)
+        self._recv_thread.start()
+
+    def _recv_loop(self) -> None:
+        assert self._ws is not None
+        ws = self._ws
+        try:
+            while not self._stop.is_set():
+                ws.settimeout(0.5)
+                try:
+                    raw = ws.recv()
+                except websocket.WebSocketTimeoutException:
+                    continue
+                if not raw:
+                    _log("GPU WebSocket closed (recv empty)")
+                    self._stop.set()
+                    break
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if msg.get("event") == "media":
+                    self._handle_gpu_raw(raw)
+                elif msg.get("event") == "stop":
+                    _log("GPU sent stop")
+                    self._stop.set()
+                    break
+        except Exception as exc:  # noqa: BLE001
+            if not self._stop.is_set():
+                _log(f"GPU recv error: {exc}")
+            self._stop.set()
+
+    def pump_caller_audio(self) -> None:
+        assert self._ws is not None
+        ws = self._ws
+        self._conn.settimeout(0.2)
+        silence = base64.b64encode(b"\xff" * ULAW_CHUNK_BYTES).decode("ascii")
+        while not self._stop.is_set():
+            try:
+                msg_type, payload = _as_read_frame(self._conn)
+            except socket.timeout:
+                try:
+                    ws.send(_media_message(silence))
+                except websocket.WebSocketException:
+                    break
+                continue
+            except OSError as exc:
+                _log(f"AudioSocket read ended: {exc}")
+                break
+            if msg_type is None:
+                _log("AudioSocket read EOF")
+                break
+            if msg_type == _AS_TYPE_TERM:
+                _log("AudioSocket terminate")
+                break
+            if msg_type == _AS_TYPE_AUDIO and payload:
+                payload_b64 = _slin_to_ulaw_payload(payload)
+                if payload_b64:
+                    try:
+                        ws.send(_media_message(payload_b64))
+                        if not self._sent_caller_audio:
+                            self._sent_caller_audio = True
+                            _log(f"AudioSocket sent first caller audio ({len(payload)} bytes)")
+                    except websocket.WebSocketException as exc:
+                        _log(f"GPU send failed: {exc}")
+                        break
+            elif msg_type not in (_AS_TYPE_UUID, _AS_TYPE_DTMF):
+                _log(f"AudioSocket ignoring frame type=0x{msg_type:02x}")
+
+    def close(self) -> None:
+        self._stop.set()
+        if self._ws is not None:
+            with contextlib.suppress(Exception):
+                self._ws.close()
+        if self._recv_thread is not None:
+            self._recv_thread.join(timeout=2)
+        with contextlib.suppress(OSError):
+            self._conn.close()
+
+
+def _handle_audiosocket_client(conn: socket.socket, addr: tuple, agent_user: str) -> None:
+    peer = f"{addr[0]}:{addr[1]}"
+    _log(f"AudioSocket connect from {peer}")
+    gpu_lock = _audiosocket_gpu_lock(agent_user)
+    if not gpu_lock.acquire(blocking=False):
+        _log(f"AudioSocket rejected: GPU session already active for agent {agent_user}")
+        return
+    try:
+        msg_type, payload = _as_read_frame(conn)
+        if msg_type != _AS_TYPE_UUID:
+            _log(f"AudioSocket expected UUID frame, got 0x{msg_type!r}")
+            return
+        call_uuid = _as_uuid_to_str(payload)
+        _log(f"AudioSocket call uuid={call_uuid}")
+
+        try:
+            gpu_host, media_port = resolve_media_port(agent_user)
+        except RuntimeError as exc:
+            _log(f"ERROR: {exc}")
+            return
+
+        stream_id = f"vd-{agent_user}-{call_uuid[:8]}"
+        bridge = AudioSocketGpuBridge(
+            conn=conn,
+            ws_url=f"ws://{gpu_host}:{media_port}/ws",
+            stream_id=stream_id,
+            call_control_id=stream_id,
+            caller=os.getenv("AI_FRONTER_DEFAULT_CALLER", "+15551234567"),
+            callee=agent_user,
+        )
+        try:
+            bridge.connect()
+        except Exception as exc:  # noqa: BLE001
+            _log(f"WebSocket connect failed: {exc}")
+            return
+        try:
+            bridge.pump_caller_audio()
+        finally:
+            bridge.close()
+            _log(
+                f"AudioSocket session ended (gpu_packets={bridge._gpu_media_packets}, "
+                f"caller_sent={bridge._sent_caller_audio})"
+            )
+    except Exception as exc:  # noqa: BLE001
+        _log(f"AudioSocket handler error: {exc}")
+    finally:
+        gpu_lock.release()
+        with contextlib.suppress(OSError):
+            conn.close()
+
+
+def run_audiosocket_server(agent_user: str) -> int:
+    host = os.getenv("AI_FRONTER_AUDIOSOCKET_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    port = int(os.getenv("AI_FRONTER_AUDIOSOCKET_PORT", "9092") or "9092")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, port))
+    sock.listen(int(os.getenv("AI_FRONTER_AUDIOSOCKET_BACKLOG", "32") or "32"))
+    _log(f"AudioSocket server on {host}:{port} agent={agent_user} (Ctrl+C to stop)")
+    try:
+        while True:
+            conn, addr = sock.accept()
+            # Handle synchronously in the accept thread (same as --test-ws main thread).
+            # Daemon worker threads broke WebSocket greeting recv on some hosts.
+            _handle_audiosocket_client(conn, addr, agent_user)
+    except KeyboardInterrupt:
+        _log("AudioSocket server stopped")
+    finally:
+        sock.close()
+    return 0
+
+
 class GpuBridge:
     """Bidirectional bridge: EAGI fd ↔ GPU WebSocket (Telnyx media JSON)."""
 
@@ -443,7 +776,8 @@ class GpuBridge:
             callee=self.callee,
         )
         _log(f"Sent Telnyx connected+start stream_id={self.stream_id}")
-        time.sleep(0.05)
+        # Allow GPU pipeline (Chatterbox prewarm/build) to start before bootstrap silence.
+        time.sleep(float(os.getenv("AI_FRONTER_HANDSHAKE_WAIT_S", "2") or "2"))
         if not self._sync_greeting_from_gpu():
             _log("WARNING: no bot audio from GPU during sync greeting (check GPU worker log)")
         self._recv_thread = threading.Thread(target=self._recv_loop, name="gpu-ws-recv", daemon=True)
@@ -658,6 +992,11 @@ def main() -> int:
         help="ViciDial agent login (e.g. 6666). Passed from EAGI dialplan arg.",
     )
     parser.add_argument(
+        "--serve-audiosocket",
+        action="store_true",
+        help="Run AudioSocket TCP server (replaces EAGI when fd 3 is broken).",
+    )
+    parser.add_argument(
         "--test-ws",
         action="store_true",
         help="Test WebSocket to GPU without Asterisk (requires agent_user).",
@@ -668,6 +1007,9 @@ def main() -> int:
     if not agent_user:
         _log("ERROR: agent_user required (CLI arg or AI_FRONTER_AGENT_USER)")
         return 1
+
+    if args.serve_audiosocket:
+        return run_audiosocket_server(agent_user)
 
     if args.test_ws:
         return run_test_ws(agent_user)

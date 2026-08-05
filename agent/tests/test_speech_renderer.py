@@ -65,6 +65,16 @@ def test_render_speech_no_paragraph_chunks():
     assert all(len(c.text.split()) <= 14 for c in chunks)
 
 
+def test_render_speech_telephony_force_single():
+    greeting = (
+        "Hi, this is Alex calling on a recorded line. "
+        "How are you today?"
+    )
+    chunks = render_speech_telephony(greeting, force_single=True)
+    assert len(chunks) == 1
+    assert "How are you today?" in chunks[0].text
+
+
 def test_render_speech_telephony_lead_sentence_first():
     greeting = (
         "Hi, this is Alex calling on a recorded line. "
