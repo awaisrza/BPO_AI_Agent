@@ -428,6 +428,10 @@ if PIPECAT_AVAILABLE:
                         and self._greeting_text
                         and normalize_spoken_text(frame.text) == self._greeting_text
                     )
+                    if force_single:
+                        logger.info(
+                            f"SpeechRenderer: greeting as one telephony chunk ({len(frame.text)} chars)"
+                        )
                     chunks = render_speech_telephony(
                         frame.text,
                         max_words=self._telephony_max_words,

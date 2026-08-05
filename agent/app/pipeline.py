@@ -884,7 +884,7 @@ def build_pipeline(
         pause_max_ms=pause_max,
         telephony=telephony and settings.telephony_single_utterance,
         telephony_max_words=settings.telephony_utterance_max_words,
-        greeting_text=script.greeting if telephony else "",
+        greeting_text=prepare_for_speech(script.greeting) if telephony else "",
         greeting_single_chunk=telephony and settings.telephony_greeting_single_chunk,
     )
 
