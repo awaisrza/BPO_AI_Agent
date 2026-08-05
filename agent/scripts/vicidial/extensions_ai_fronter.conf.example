@@ -6,10 +6,9 @@
 ; Find VDAD ext: grep VDAD_local_optimize /etc/asterisk/extensions*.conf
 
 [ai-fronter-route]
-; EAGI on the outbound Local ;1 leg (paired with ;2 = SIP/customer)
+; EAGI on the outbound Local ;1 leg (paired with ;2 = SIP/customer).
+; Do NOT Answer() here — VDAD already answered; a second Answer can break EAGI fd 3.
 exten => s,1,NoOp(AI Fronter HIT customer to bot — direct EAGI)
- same => n,Answer()
- same => n,Set(__AI_FRONTER_EAGI_FORMAT=ulaw)
  same => n,EAGI(/usr/local/bin/ai-fronter-bridge.py,6666)
  same => n,Hangup()
 
@@ -17,7 +16,6 @@ exten => s,1,NoOp(AI Fronter HIT customer to bot — direct EAGI)
 ; Manual test only: asterisk -rx "channel originate Local/6666@ai-fronter-agents application Wait 60"
 exten => 6666,1,NoOp(AI Fronter bot 6666 manual test)
  same => n,Answer()
- same => n,Set(__AI_FRONTER_EAGI_FORMAT=ulaw)
  same => n,EAGI(/usr/local/bin/ai-fronter-bridge.py,6666)
  same => n,Hangup()
 

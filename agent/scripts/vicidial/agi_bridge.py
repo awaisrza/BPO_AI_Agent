@@ -17,7 +17,7 @@ Configuration (first match wins for media port):
 Environment:
   AI_FRONTER_GPU_HOST       GPU public IP (default: from config or 127.0.0.1)
   AI_FRONTER_CONFIG         Path to agent_port_map.json
-  AI_FRONTER_EAGI_FORMAT    slin (default) or ulaw — EAGI fd 3 codec
+  AI_FRONTER_EAGI_FORMAT    slin (default) — Asterisk EAGI fd 3 is always slin
   AI_FRONTER_LOG            Log file path (optional)
   AI_FRONTER_WS_TIMEOUT     WebSocket connect timeout seconds (default 8)
 
@@ -33,6 +33,8 @@ from __future__ import annotations
 import argparse
 import audioop
 import base64
+import contextlib
+import fcntl
 import json
 import os
 import select
@@ -70,19 +72,54 @@ DEFAULT_CONFIG_PATHS = (
 
 
 def _log(msg: str) -> None:
-    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n"
+    pid = os.getpid()
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{pid}] {msg}\n"
     with _log_lock:
-        sys.stderr.write(line)
-        sys.stderr.flush()
         log_path = os.getenv("AI_FRONTER_LOG", "").strip() or str(DEFAULT_LOG_PATH)
         try:
             with open(log_path, "a", encoding="utf-8") as fh:
                 fh.write(line)
+                fh.flush()
         except OSError:
-            pass
+            sys.stderr.write(line)
+            sys.stderr.flush()
 
 
 _log_lock = threading.Lock()
+
+
+class _CallLock:
+    """One bridge instance per uniqueid (guards against duplicate EAGI launches)."""
+
+    def __init__(self, unique_id: str) -> None:
+        safe = unique_id.replace(".", "_").replace("/", "_")
+        self._path = Path(f"/tmp/ai-fronter-{safe}.lock")
+        self._fh = None
+
+    def acquire(self) -> bool:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = open(self._path, "w", encoding="utf-8")
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self._fh.close()
+            self._fh = None
+            return False
+        self._fh.write(f"{os.getpid()}\n")
+        self._fh.flush()
+        return True
+
+    def release(self) -> None:
+        if self._fh is None:
+            return
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        self._fh.close()
+        self._fh = None
+        with contextlib.suppress(OSError):
+            self._path.unlink(missing_ok=True)
 
 
 def _bootstrap_gpu_silence(ws: websocket.WebSocket, *, chunks: int = 50) -> None:
@@ -181,6 +218,10 @@ def resolve_media_port(agent_user: str) -> tuple[str, int]:
     )
 
 
+def build_telnyx_connected() -> dict[str, str]:
+    return {"event": "connected", "version": "1.0.0"}
+
+
 def build_telnyx_start(
     *,
     stream_id: str,
@@ -205,23 +246,76 @@ def build_telnyx_start(
     }
 
 
+def _send_telnyx_handshake(
+    ws: websocket.WebSocket,
+    *,
+    stream_id: str,
+    call_control_id: str,
+    caller: str,
+    callee: str,
+) -> None:
+    """Send connected + start so pipecat parse_telephony_websocket reads both."""
+    ws.send(json.dumps(build_telnyx_connected()))
+    ws.send(
+        json.dumps(
+            build_telnyx_start(
+                stream_id=stream_id,
+                call_control_id=call_control_id,
+                caller=caller,
+                callee=callee,
+            )
+        )
+    )
+
+
 def _eagi_format() -> str:
-    fmt = os.getenv("AI_FRONTER_EAGI_FORMAT", "ulaw").strip().lower()
+    fmt = os.getenv("AI_FRONTER_EAGI_FORMAT", "slin").strip().lower()
     if fmt not in ("slin", "ulaw"):
-        fmt = "ulaw"
+        fmt = "slin"
     return fmt
 
 
 def _resolve_eagi_format(agi: AGI) -> str:
-    """Dialplan sets channel var __AI_FRONTER_EAGI_FORMAT; env is fallback."""
+    """Asterisk EAGI fd 3 is signed-linear PCM @ 8 kHz (not ulaw)."""
+    channel_fmt = ""
     for name in ("AI_FRONTER_EAGI_FORMAT", "__AI_FRONTER_EAGI_FORMAT"):
-        val = agi.get_variable(name).strip().lower()
-        if val in ("slin", "ulaw"):
-            _log(f"EAGI format from channel variable {name}={val}")
-            return val
+        channel_fmt = agi.get_variable(name).strip().lower()
+        if channel_fmt:
+            break
     fmt = _eagi_format()
-    _log(f"EAGI format from env/default={fmt}")
+    if channel_fmt and channel_fmt != fmt:
+        _log(
+            f"NOTE: channel {name}={channel_fmt} ignored — "
+            f"Asterisk EAGI fd 3 uses slin; using {fmt}"
+        )
+    else:
+        _log(f"EAGI audio format={fmt}")
     return fmt
+
+
+def _probe_eagi_fd(agi: AGI) -> bool:
+    """Verify Asterisk passed a writable EAGI audio fd before opening GPU WebSocket."""
+    enhanced = agi.env.get("agi_enhanced", "")
+    network = agi.env.get("agi_network", "")
+    _log(f"AGI env enhanced={enhanced!r} network={network!r} channel={agi.env.get('agi_channel', '?')}")
+    if not enhanced:
+        _log("WARNING: agi_enhanced missing — was this invoked with EAGI() not AGI()?")
+
+    try:
+        st = os.fstat(EAGI_FD)
+        _log(f"EAGI fd {EAGI_FD} open (size={st.st_size})")
+    except OSError as exc:
+        _log(f"EAGI fd {EAGI_FD} unavailable: {exc}")
+        return False
+
+    try:
+        silence = b"\x00" * SLIN_CHUNK_BYTES
+        wrote = os.write(EAGI_FD, silence)
+        _log(f"EAGI fd write probe OK ({wrote} bytes slin)")
+        return True
+    except OSError as exc:
+        _log(f"EAGI fd write probe FAILED: {exc}")
+        return False
 
 
 def _slin_to_ulaw_payload(chunk: bytes) -> str | None:
@@ -283,8 +377,11 @@ class GpuBridge:
         self._wrote_audio = False
         self._sent_caller_audio = False
         self._gpu_media_packets = 0
+        self._eagi_fd_broken = False
 
     def _write_ulaw_to_eagi(self, ulaw: bytes) -> bool:
+        if self._eagi_fd_broken:
+            return False
         out = _ulaw_payload_to_eagi(ulaw, eagi_fmt=self.eagi_fmt)
         if not out:
             return False
@@ -296,7 +393,9 @@ class GpuBridge:
                 _log(f"EAGI wrote first bot audio ({len(out)} bytes)")
             return True
         except OSError as exc:
-            _log(f"EAGI write failed: {exc}")
+            if not self._eagi_fd_broken:
+                _log(f"EAGI write failed: {exc}")
+                self._eagi_fd_broken = True
             self._stop.set()
             return False
 
@@ -336,14 +435,15 @@ class GpuBridge:
         timeout = float(os.getenv("AI_FRONTER_WS_TIMEOUT", "8") or "8")
         _log(f"Connecting WebSocket {self.ws_url}")
         self._ws = websocket.create_connection(self.ws_url, timeout=timeout)
-        start = build_telnyx_start(
+        _send_telnyx_handshake(
+            self._ws,
             stream_id=self.stream_id,
             call_control_id=self.call_control_id,
             caller=self.caller,
             callee=self.callee,
         )
-        self._ws.send(json.dumps(start))
-        _log(f"Sent Telnyx start stream_id={self.stream_id}")
+        _log(f"Sent Telnyx connected+start stream_id={self.stream_id}")
+        time.sleep(0.05)
         if not self._sync_greeting_from_gpu():
             _log("WARNING: no bot audio from GPU during sync greeting (check GPU worker log)")
         self._recv_thread = threading.Thread(target=self._recv_loop, name="gpu-ws-recv", daemon=True)
@@ -436,6 +536,11 @@ class GpuBridge:
 def run_eagi(agent_user: str) -> int:
     agi = AGI()
     unique_id = agi.env.get("agi_uniqueid") or str(uuid.uuid4())
+    call_lock = _CallLock(unique_id)
+    if not call_lock.acquire():
+        _log(f"EAGI duplicate launch rejected uniqueid={unique_id}")
+        return 0
+
     caller = agi.env.get("agi_callerid") or agi.get_variable("CALLERID(num)")
     callee = agi.env.get("agi_extension") or agent_user
     channel = agi.env.get("agi_channel") or "?"
@@ -445,45 +550,53 @@ def run_eagi(agent_user: str) -> int:
         f"caller={caller} channel={channel}"
     )
 
-    try:
-        gpu_host, media_port = resolve_media_port(agent_user)
-    except RuntimeError as exc:
-        _log(f"ERROR: {exc}")
-        agi.command("VERBOSE \"AI Fronter: no GPU port for agent\" 1")
+    if not _probe_eagi_fd(agi):
+        agi.command("VERBOSE \"AI Fronter: EAGI audio fd not writable\" 1")
         return 1
 
-    ws_url = f"ws://{gpu_host}:{media_port}/ws"
-    stream_id = f"vd-{agent_user}-{unique_id}"
-    call_control_id = unique_id
-
-    bridge = GpuBridge(
-        ws_url=ws_url,
-        stream_id=stream_id,
-        call_control_id=call_control_id,
-        caller=caller,
-        callee=callee,
-        eagi_fmt=_resolve_eagi_format(agi),
-    )
-
     try:
-        bridge.connect()
-    except Exception as exc:  # noqa: BLE001
-        _log(f"WebSocket connect failed: {exc}")
-        agi.command(f"VERBOSE \"AI Fronter: GPU unreachable {gpu_host}:{media_port}\" 1")
-        return 1
+        try:
+            gpu_host, media_port = resolve_media_port(agent_user)
+        except RuntimeError as exc:
+            _log(f"ERROR: {exc}")
+            agi.command("VERBOSE \"AI Fronter: no GPU port for agent\" 1")
+            return 1
 
-    agi.command("VERBOSE \"AI Fronter: bridged to GPU\" 1")
-    if bridge._gpu_media_packets == 0:
-        agi.command("VERBOSE \"AI Fronter: waiting for bot greeting\" 1")
+        ws_url = f"ws://{gpu_host}:{media_port}/ws"
+        stream_id = f"vd-{agent_user}-{unique_id}"
+        # Match --test-ws: call_control_id == stream_id (pipecat/Telnyx serializer expects this).
+        call_control_id = stream_id
 
-    try:
-        bridge.pump_caller_audio()
-    finally:
-        bridge.close()
-        _log(
-            f"Bridge session ended (gpu_packets={bridge._gpu_media_packets}, "
-            f"caller_sent={bridge._sent_caller_audio})"
+        bridge = GpuBridge(
+            ws_url=ws_url,
+            stream_id=stream_id,
+            call_control_id=call_control_id,
+            caller=caller,
+            callee=callee,
+            eagi_fmt=_resolve_eagi_format(agi),
         )
+
+        try:
+            bridge.connect()
+        except Exception as exc:  # noqa: BLE001
+            _log(f"WebSocket connect failed: {exc}")
+            agi.command(f"VERBOSE \"AI Fronter: GPU unreachable {gpu_host}:{media_port}\" 1")
+            return 1
+
+        agi.command("VERBOSE \"AI Fronter: bridged to GPU\" 1")
+        if bridge._gpu_media_packets == 0:
+            agi.command("VERBOSE \"AI Fronter: waiting for bot greeting\" 1")
+
+        try:
+            bridge.pump_caller_audio()
+        finally:
+            bridge.close()
+            _log(
+                f"Bridge session ended (gpu_packets={bridge._gpu_media_packets}, "
+                f"caller_sent={bridge._sent_caller_audio})"
+            )
+    finally:
+        call_lock.release()
 
     return 0
 
@@ -496,14 +609,15 @@ def run_test_ws(agent_user: str) -> int:
     _log(f"Test mode: {ws_url}")
 
     ws = websocket.create_connection(ws_url, timeout=8)
-    start = build_telnyx_start(
+    _send_telnyx_handshake(
+        ws,
         stream_id=stream_id,
         call_control_id=stream_id,
         caller="+15551234567",
         callee=agent_user,
     )
-    ws.send(json.dumps(start))
-    _log("Start sent — waiting for media (Ctrl+C to exit)...")
+    _log("Connected+start sent — waiting for media (Ctrl+C to exit)...")
+    time.sleep(0.05)
 
     chunks = int(os.getenv("AI_FRONTER_GREETING_CHUNKS", "500") or "500")
     silence_ulaw = b"\xff" * ULAW_CHUNK_BYTES
@@ -524,6 +638,11 @@ def run_test_ws(agent_user: str) -> int:
         except websocket.WebSocketTimeoutException:
             pass
 
+    try:
+        ws.send(json.dumps({"event": "stop", "stream_id": stream_id}))
+        time.sleep(2.0)
+    except websocket.WebSocketException:
+        pass
     ws.close()
     if not got:
         _log("WARNING: no bot audio from GPU during test-ws")
