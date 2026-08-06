@@ -196,7 +196,7 @@ export function VicidialIntegrationForm() {
       <CardBody className="space-y-4">
         <Field
           label="Server URL"
-          description="Server root only — not the admin login page. Example: http://178.238.231.150"
+          description="Server root only — not the admin login page. Use the IP that responds from your PC, e.g. http://169.58.105.180"
         >
           <Input
             value={serverUrl}
@@ -204,7 +204,7 @@ export function VicidialIntegrationForm() {
               setServerUrl(e.target.value);
               setSaved(false);
             }}
-            placeholder="http://178.238.231.150"
+            placeholder="http://169.58.105.180"
           />
         </Field>
 

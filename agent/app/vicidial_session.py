@@ -142,7 +142,14 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
 
     try:
         await _ensure_websocket_accepted(websocket)
-        transport_type, call_data = await parse_telephony_websocket(websocket)
+        try:
+            transport_type, call_data = await parse_telephony_websocket(websocket)
+        except ValueError as exc:
+            if "WebSocket closed before receiving telephony handshake" in str(exc):
+                _event("=== VICIDIAL WS closed before handshake (bridge retry/probe) ===")
+                await websocket.close(code=1000)
+                return
+            raise
         cd = _call_data_dict(call_data)
         _event(f"=== parsed transport={transport_type} keys={list(cd.keys())} ===")
 
@@ -256,6 +263,9 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 await asyncio.sleep(_GREETING_STARTUP_TIMEOUT_S)
                 if shutdown.done or fronter is None or media_ready_at is None:
                     return
+                # StartFrame can run before on_client_connected; _opened means greeting queued.
+                if fronter._opened:
+                    return
                 if fronter.last_activity_monotonic <= media_ready_at:
                     _event(
                         f"=== GREETING STARTUP TIMEOUT ({_GREETING_STARTUP_TIMEOUT_S:.0f}s) — "
@@ -269,6 +279,8 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
         async def on_client_connected(_transport, _client) -> None:
             nonlocal media_ready_at
             media_ready_at = time.monotonic()
+            if fronter is not None and fronter._opened:
+                fronter._touch_activity()
             _event("=== MEDIA READY — greeting should play within 1s ===")
 
         @transport.event_handler("on_client_disconnected")

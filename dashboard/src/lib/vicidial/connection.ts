@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { VicidialCredentials } from "./closers";
 import { fetchVicidialClosers, fetchVicidialVersion } from "./closers";
 
@@ -67,6 +68,30 @@ export async function testVicidialConnection(
     }
     throw err;
   }
+}
+
+type OrgVicidialFields = {
+  vicidial_url: string | null;
+  vicidial_user: string | null;
+  vicidial_pass: string | null;
+};
+
+/** Same org join as campaign readiness — works without service role key. */
+export async function getVicidialCredsForCampaign(
+  supabase: SupabaseClient,
+  campaignId: string,
+): Promise<VicidialCredentials & { configured: boolean }> {
+  const { data: campaign } = await supabase
+    .from("campaigns")
+    .select("organizations(vicidial_url, vicidial_user, vicidial_pass)")
+    .eq("id", campaignId)
+    .maybeSingle();
+
+  const org = campaign?.organizations as OrgVicidialFields | OrgVicidialFields[] | null;
+  const orgRow = Array.isArray(org) ? (org[0] ?? null) : org;
+  return resolveVicidialCreds(
+    orgRow ?? { vicidial_url: null, vicidial_user: null, vicidial_pass: null },
+  );
 }
 
 export function resolveVicidialCreds(

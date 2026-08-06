@@ -24,8 +24,20 @@ export async function checkGpuWorkerHealth(): Promise<{
 
   try {
     const res = await fetch(url, { cache: "no-store" });
-    const body = (await res.json()) as Record<string, unknown>;
-    const healthy = res.ok && isHealthOk(body);
+    const raw = await res.text();
+    let body: Record<string, unknown> = {};
+    if (raw.trim()) {
+      try {
+        body = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        return {
+          configured: true,
+          ok: false,
+          message: `GPU worker health URL returned non-JSON (${res.status}): ${raw.slice(0, 120)}`,
+        };
+      }
+    }
+    const healthy = res.ok && (raw.trim() ? isHealthOk(body) : false);
     const agent = typeof body.agent_user === "string" ? body.agent_user : "";
     const campaign =
       typeof body.vicidial_campaign_id === "string" ? body.vicidial_campaign_id : "";

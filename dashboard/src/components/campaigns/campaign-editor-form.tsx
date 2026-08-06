@@ -14,6 +14,7 @@ import type { VicidialCloser } from "@/lib/vicidial/closers";
 import { createClient, isSupabaseConfigured, supabaseConfigHelp } from "@/lib/supabase/client";
 import type { CampaignRow, CampaignStatus, KnowledgeEntry, ScriptJson } from "@/lib/types/database";
 import { DEFAULT_KNOWLEDGE_BASE } from "@/lib/types/database";
+import { readJsonResponse } from "@/lib/fetch-json";
 
 export function CampaignEditorForm({ id }: { id: string }) {
   const router = useRouter();
@@ -111,10 +112,10 @@ export function CampaignEditorForm({ id }: { id: string }) {
     setVicidialCampaignsError("");
     try {
       const res = await fetch("/api/vicidial/campaigns");
-      const data = (await res.json()) as {
+      const data = await readJsonResponse<{
         campaigns?: VicidialCampaignOption[];
         error?: string;
-      };
+      }>(res);
       if (!res.ok) {
         setVicidialCampaignsError(data.error ?? "Could not load ViciDial campaigns.");
         return;
@@ -133,10 +134,10 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
     try {
       const res = await fetch(`/api/vicidial/closers?campaignId=${encodeURIComponent(id)}`);
-      const data = (await res.json()) as {
+      const data = await readJsonResponse<{
         closers?: VicidialCloser[];
         error?: string;
-      };
+      }>(res);
 
       if (!res.ok) {
         setClosers(data.closers ?? []);
@@ -206,7 +207,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
           start_campaign: true,
         }),
       });
-      const data = (await res.json()) as {
+      const data = await readJsonResponse<{
         error?: string;
         message?: string;
         gpuMessage?: string;
@@ -214,10 +215,10 @@ export function CampaignEditorForm({ id }: { id: string }) {
         steps?: { step: string; ok: boolean; detail: string }[];
         hopperPreview?: string;
         campaignStarted?: boolean;
-      };
+      }>(res);
 
       if (!res.ok) {
-        throw new Error(data.error ?? "Test dial failed.");
+        throw new Error(data.error ?? data.message ?? "Test dial failed.");
       }
 
       const parts: string[] = [];
@@ -256,12 +257,12 @@ export function CampaignEditorForm({ id }: { id: string }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action }),
       });
-      const data = (await res.json()) as {
+      const data = await readJsonResponse<{
         error?: string;
         message?: string;
         status?: CampaignStatus;
         readiness?: { issues?: { level: string; message: string }[] };
-      };
+      }>(res);
 
       if (!res.ok) {
         throw new Error(data.error ?? "Could not update campaign status.");

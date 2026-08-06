@@ -107,10 +107,29 @@ export async function fetchVicidialApi(
     ...params,
   });
   const url = `${creds.baseUrl.replace(/\/$/, "")}/vicidial/non_agent_api.php?${query}`;
-  const res = await fetch(url, { cache: "no-store" });
+
+  let res: Response;
+  try {
+    res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(25_000) });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "network error";
+    const host = creds.baseUrl.replace(/^https?:\/\//i, "").split("/")[0];
+    throw new Error(
+      `ViciDial API unreachable at ${host} (${reason}). ` +
+        "Use the dialer's working public IP (e.g. http://169.58.105.180), not a stale or firewalled address.",
+    );
+  }
+
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`ViciDial returned ${res.status}`);
+    const host = creds.baseUrl.replace(/^https?:\/\//i, "").split("/")[0];
+    if (res.status === 504 || res.status === 502) {
+      throw new Error(
+        `ViciDial gateway timed out (${res.status}) for ${host}. ` +
+          "Update Integrations → Server URL to http://169.58.105.180 (or test with curl from your PC).",
+      );
+    }
+    throw new Error(`ViciDial returned ${res.status} for ${host}`);
   }
   return text;
 }

@@ -5,7 +5,7 @@ from pathlib import Path
 PATH = Path("/usr/local/bin/ai-fronter-bridge.py")
 text = PATH.read_text(encoding="utf-8")
 
-if "_maybe_keepalive_as" in text:
+if "_maybe_keepalive_as" in text and "_send_as_silence" in text:
     print("Already patched.")
     raise SystemExit(0)
 
@@ -44,6 +44,11 @@ new_silence = """    def _send_as_silence(self) -> bool:
 """
 if old_silence in text:
     text = text.replace(old_silence, new_silence, 1)
+elif "_send_as_silence" not in text:
+    anchor = "    def pump_caller_audio(self) -> None:"
+    if anchor not in text:
+        raise SystemExit("ERROR: missing pump_caller_audio — deploy full agi_bridge.py")
+    text = text.replace(anchor, new_silence + "\n" + anchor, 1)
 
 old_loop = """        while not self._stop.is_set():
             try:

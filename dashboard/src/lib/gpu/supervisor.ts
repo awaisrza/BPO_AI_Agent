@@ -38,7 +38,20 @@ export async function syncGpuSupervisor(campaignId: string, action: "start" | "s
     );
   }
 
-  const body = (await res.json()) as Record<string, unknown>;
+  const raw = await res.text();
+  let body: Record<string, unknown> = {};
+  if (raw.trim()) {
+    try {
+      body = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      throw new Error(
+        `GPU supervisor returned non-JSON (${res.status}): ${raw.slice(0, 200) || "(empty body)"}`,
+      );
+    }
+  } else if (!res.ok) {
+    throw new Error(`Supervisor ${path} failed (${res.status}) with empty body.`);
+  }
+
   if (!res.ok) {
     const detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body);
     throw new Error(detail || `Supervisor ${path} failed (${res.status}).`);

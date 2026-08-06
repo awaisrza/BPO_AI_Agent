@@ -46,7 +46,12 @@ async function vd(
   creds: VicidialCredentials,
   params: Record<string, string>,
 ): Promise<string> {
-  return fetchVicidialApi(creds, params);
+  try {
+    return await fetchVicidialApi(creds, params);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "network error";
+    return `ERROR: ${reason}`;
+  }
 }
 
 /** Mirror agent/scripts/vicidial/run_test_dial.sh for dashboard one-click test. */
