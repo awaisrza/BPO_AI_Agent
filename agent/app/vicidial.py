@@ -66,6 +66,71 @@ class ViciDialClient:
             }
         )
 
+    async def ra_call_control(
+        self,
+        agent_user: str,
+        call_id: str,
+        *,
+        stage: str,
+        ingroup_choices: str | None = None,
+        phone_number: str | None = None,
+        status: str | None = None,
+    ) -> str:
+        """Remote-agent call control (hangup / blind transfer). Requires ViciDial call ID."""
+        params: dict[str, str] = {
+            "function": "ra_call_control",
+            "agent_user": agent_user,
+            "value": call_id,
+            "stage": stage,
+        }
+        if ingroup_choices:
+            params["ingroup_choices"] = ingroup_choices
+        if phone_number:
+            params["phone_number"] = phone_number
+        if status:
+            params["status"] = status
+        result = await self._agent_api(params)
+        logger.info(f"ViciDial ra_call_control {stage}: {result[:200]}")
+        return result
+
+    async def remote_agent_transfer(
+        self,
+        agent_user: str,
+        call_id: str,
+        *,
+        ingroup: str | None = None,
+        extension: str | None = None,
+        status: str = "XFER",
+    ) -> str:
+        """Blind transfer for a remote agent seat (e.g. AI bot on AudioSocket)."""
+        if extension:
+            return await self.ra_call_control(
+                agent_user,
+                call_id,
+                stage="EXTENSIONTRANSFER",
+                phone_number=extension,
+                status=status,
+            )
+        ingroup = (ingroup or "DEFAULTINGROUP").strip() or "DEFAULTINGROUP"
+        return await self.ra_call_control(
+            agent_user,
+            call_id,
+            stage="INGROUPTRANSFER",
+            ingroup_choices=ingroup,
+            status=status,
+        )
+
+    async def remote_agent_hangup(
+        self, agent_user: str, call_id: str, *, status: str = "NI"
+    ) -> str:
+        return await self.ra_call_control(
+            agent_user, call_id, stage="HANGUP", status=status
+        )
+
+    @staticmethod
+    def api_succeeded(result: str) -> bool:
+        return result.strip().upper().startswith("SUCCESS:")
+
     async def set_disposition(self, agent_user: str, status: str) -> str:
         """Set the call status (e.g. 'XFER', 'NI' for not interested, 'AM' for answering machine)."""
         return await self._agent_api(

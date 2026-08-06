@@ -48,6 +48,32 @@ async def _ensure_websocket_accepted(websocket) -> None:
             raise
 
 
+def _looks_like_vicidial_call_id(value: str) -> bool:
+    token = (value or "").strip()
+    if len(token) < 12:
+        return False
+    return token[0] in ("V", "Y") and token[1:].replace("-", "").isalnum()
+
+
+def _extract_vicidial_call_id(cd: dict[str, Any]) -> str | None:
+    """Remote-agent call ID from bridge Telnyx start (ra_call_control value)."""
+    for key in ("vicidial_call_id",):
+        raw = cd.get(key)
+        if raw and _looks_like_vicidial_call_id(str(raw)):
+            return str(raw).strip()
+    body = cd.get("body")
+    if isinstance(body, dict):
+        raw = body.get("vicidial_call_id")
+        if raw and _looks_like_vicidial_call_id(str(raw)):
+            return str(raw).strip()
+        start = body.get("start")
+        if isinstance(start, dict):
+            raw = start.get("vicidial_call_id")
+            if raw and _looks_like_vicidial_call_id(str(raw)):
+                return str(raw).strip()
+    return None
+
+
 def _call_data_dict(call_data: Any) -> dict[str, Any]:
     """Pipecat may return TelnyxCallData (Pydantic) instead of a plain dict."""
     if isinstance(call_data, dict):
@@ -151,6 +177,9 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 return
             raise
         cd = _call_data_dict(call_data)
+        vicidial_call_id = _extract_vicidial_call_id(cd)
+        if vicidial_call_id:
+            _event(f"=== ViciDial remote call id={vicidial_call_id} ===")
         _event(f"=== parsed transport={transport_type} keys={list(cd.keys())} ===")
 
         stream_id = cd.get("stream_id") or f"vd-{ctx.agent_user}-{int(time.time())}"
@@ -211,6 +240,7 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             sample_rate=TELEPHONY_PIPELINE_RATE,
             telephony=True,
             vicidial_client=vici,
+            vicidial_call_id=vicidial_call_id,
             on_call_should_end=_on_call_should_end,
             is_call_active=lambda: not shutdown.done,
         )

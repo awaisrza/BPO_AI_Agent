@@ -60,6 +60,21 @@ def _make_fronter(*, engine=None, telephony: bool = True) -> FronterProcessor:
     )
 
 
+def test_effective_caller_flush_delay_varies_by_state():
+    from app.config import settings
+    from app.conversation import State
+
+    engine = _medicare_engine()
+    fronter = _make_fronter(engine=engine)
+
+    engine.state = State.PITCH
+    assert fronter._effective_caller_flush_delay_s() == settings.telephony_greeting_caller_flush_s
+
+    engine._pitch_confirmed = True
+    engine.state = State.QUALIFY
+    assert fronter._effective_caller_flush_delay_s() == settings.telephony_qualify_caller_flush_s
+
+
 def test_collapse_caller_queue_merges_instead_of_discarding():
     """Two utterances queued while the bot was busy must both survive — the old
     behavior picked one 'winning' utterance by priority and silently dropped the

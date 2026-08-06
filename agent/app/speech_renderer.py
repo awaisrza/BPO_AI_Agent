@@ -457,7 +457,7 @@ if PIPECAT_AVAILABLE:
                     # Keep RTP alive between sentences on PSTN (Telnyx drops silent gaps).
                     pause_ms = chunk.pause_after_ms
                     if self._telephony and idx < len(chunks) - 1 and pause_ms <= 0:
-                        pause_ms = 180
+                        pause_ms = 240
                     await self.push_frame(
                         SpokenChunkFrame(
                             text=chunk.text,

@@ -271,8 +271,9 @@ def build_telnyx_start(
     call_control_id: str,
     caller: str,
     callee: str,
+    vicidial_call_id: str = "",
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "event": "start",
         "sequence_number": "1",
         "stream_id": stream_id,
@@ -287,6 +288,11 @@ def build_telnyx_start(
             },
         },
     }
+    vd_id = (vicidial_call_id or "").strip()
+    if vd_id:
+        payload["vicidial_call_id"] = vd_id
+        payload["start"]["vicidial_call_id"] = vd_id
+    return payload
 
 
 def _send_telnyx_handshake(
@@ -296,6 +302,7 @@ def _send_telnyx_handshake(
     call_control_id: str,
     caller: str,
     callee: str,
+    vicidial_call_id: str = "",
 ) -> None:
     """Send connected + start so pipecat parse_telephony_websocket reads both."""
     ws.send(json.dumps(build_telnyx_connected()))
@@ -306,9 +313,71 @@ def _send_telnyx_handshake(
                 call_control_id=call_control_id,
                 caller=caller,
                 callee=callee,
+                vicidial_call_id=vicidial_call_id,
             )
         )
     )
+
+
+def _looks_like_vicidial_call_id(value: str) -> bool:
+    """ViciDial remote-agent call IDs start with V or Y and are ~20 chars."""
+    token = (value or "").strip()
+    if len(token) < 12:
+        return False
+    return token[0] in ("V", "Y") and token[1:].replace("-", "").isalnum()
+
+
+def _lookup_vicidial_call_id(agent_user: str) -> str:
+    """Read active remote-agent call ID from vicidial_live_agents (AudioSocket path)."""
+    if os.getenv("AI_FRONTER_SKIP_VD_CALL_ID_LOOKUP", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return ""
+    mysql_user = os.getenv("AI_FRONTER_MYSQL_USER", "").strip()
+    mysql_pass = os.getenv("AI_FRONTER_MYSQL_PASS", "").strip()
+    mysql_db = os.getenv("AI_FRONTER_MYSQL_DB", "asterisk").strip() or "asterisk"
+    if not mysql_user:
+        for path in (
+            Path("/etc/astguiclient.conf"),
+            Path("/usr/share/astguiclient/ADMIN_settings.txt"),
+        ):
+            if not path.is_file():
+                continue
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if line.startswith("VARDB_user") and "=" in line:
+                    mysql_user = line.split("=", 1)[1].strip()
+                elif line.startswith("VARDB_pass") and "=" in line:
+                    mysql_pass = line.split("=", 1)[1].strip()
+                elif line.startswith("VARDB_database") and "=" in line:
+                    mysql_db = line.split("=", 1)[1].strip() or mysql_db
+            if mysql_user:
+                break
+    if not mysql_user:
+        return ""
+    sql = (
+        "SELECT callerid FROM vicidial_live_agents "
+        f"WHERE user='{agent_user.replace(chr(39), chr(39) + chr(39))}' "
+        "AND callerid IS NOT NULL AND callerid != '' LIMIT 1;"
+    )
+    try:
+        import subprocess
+
+        proc = subprocess.run(
+            ["mysql", "-N", "-B", "-u", mysql_user, f"-p{mysql_pass}", mysql_db, "-e", sql],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        candidate = (proc.stdout or "").strip().splitlines()[0].strip() if proc.stdout else ""
+        if _looks_like_vicidial_call_id(candidate):
+            _log(f"ViciDial call ID from live_agents: {candidate}")
+            return candidate
+    except Exception as exc:  # noqa: BLE001
+        _log(f"ViciDial call ID lookup failed: {exc}")
+    return ""
 
 
 def _eagi_format() -> str:
@@ -452,6 +521,7 @@ class AudioSocketGpuBridge:
         call_control_id: str,
         caller: str,
         callee: str,
+        vicidial_call_id: str = "",
     ) -> None:
         self._conn = conn
         self.ws_url = ws_url
@@ -459,6 +529,7 @@ class AudioSocketGpuBridge:
         self.call_control_id = call_control_id
         self.caller = caller
         self.callee = callee
+        self.vicidial_call_id = (vicidial_call_id or "").strip()
         self._ws: websocket.WebSocket | None = None
         self._stop = threading.Event()
         self._recv_thread: threading.Thread | None = None
@@ -621,6 +692,7 @@ class AudioSocketGpuBridge:
             call_control_id=self.call_control_id,
             caller=self.caller,
             callee=self.callee,
+            vicidial_call_id=self.vicidial_call_id,
         )
         _log(f"Sent Telnyx connected+start stream_id={self.stream_id}")
         time.sleep(float(os.getenv("AI_FRONTER_HANDSHAKE_WAIT_S", "2") or "2"))
@@ -780,6 +852,7 @@ def _handle_audiosocket_client(conn: socket.socket, addr: tuple, agent_user: str
             return
 
         stream_id = f"vd-{agent_user}-{call_uuid[:8]}"
+        vd_call_id = _lookup_vicidial_call_id(agent_user)
         bridge = AudioSocketGpuBridge(
             conn=conn,
             ws_url=f"ws://{gpu_host}:{media_port}/ws",
@@ -787,6 +860,7 @@ def _handle_audiosocket_client(conn: socket.socket, addr: tuple, agent_user: str
             call_control_id=stream_id,
             caller=os.getenv("AI_FRONTER_DEFAULT_CALLER", "+15551234567"),
             callee=agent_user,
+            vicidial_call_id=vd_call_id,
         )
         try:
             bridge.connect()
@@ -845,6 +919,7 @@ class GpuBridge:
         caller: str,
         callee: str,
         eagi_fmt: str,
+        vicidial_call_id: str = "",
     ) -> None:
         self.ws_url = ws_url
         self.stream_id = stream_id
@@ -852,6 +927,7 @@ class GpuBridge:
         self.caller = caller
         self.callee = callee
         self.eagi_fmt = eagi_fmt
+        self.vicidial_call_id = (vicidial_call_id or "").strip()
         self._ws: websocket.WebSocket | None = None
         self._stop = threading.Event()
         self._recv_thread: threading.Thread | None = None
@@ -922,6 +998,7 @@ class GpuBridge:
             call_control_id=self.call_control_id,
             caller=self.caller,
             callee=self.callee,
+            vicidial_call_id=self.vicidial_call_id,
         )
         _log(f"Sent Telnyx connected+start stream_id={self.stream_id}")
         # Allow GPU pipeline (Chatterbox prewarm/build) to start before bootstrap silence.
@@ -1024,12 +1101,15 @@ def run_eagi(agent_user: str) -> int:
         return 0
 
     caller = agi.env.get("agi_callerid") or agi.get_variable("CALLERID(num)")
+    vd_call_id = (agi.get_variable("CALLERID(name)") or "").strip()
+    if not _looks_like_vicidial_call_id(vd_call_id):
+        vd_call_id = _lookup_vicidial_call_id(agent_user)
     callee = agi.env.get("agi_extension") or agent_user
     channel = agi.env.get("agi_channel") or "?"
 
     _log(
         f"EAGI start agent={agent_user} uniqueid={unique_id} "
-        f"caller={caller} channel={channel}"
+        f"caller={caller} vd_call_id={vd_call_id or 'unset'} channel={channel}"
     )
 
     if not _probe_eagi_fd(agi):
@@ -1056,6 +1136,7 @@ def run_eagi(agent_user: str) -> int:
             caller=caller,
             callee=callee,
             eagi_fmt=_resolve_eagi_format(agi),
+            vicidial_call_id=vd_call_id,
         )
 
         try:

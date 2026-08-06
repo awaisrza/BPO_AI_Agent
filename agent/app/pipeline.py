@@ -164,6 +164,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         call_controller: CallController | None = None,
         telephony: bool = False,
         telephony_phone_test: bool = False,
+        vicidial_call_id: str | None = None,
         on_call_should_end: "Callable[[str], Awaitable[None]] | None" = None,
         is_call_active: "Callable[[], bool] | None" = None,
     ):
@@ -171,6 +172,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._engine = engine
         self._vici = vicidial
         self._agent_user = agent_user
+        self._vicidial_call_id = (vicidial_call_id or "").strip() or None
         self._mic_test = mic_test
         self._telephony = telephony
         self._telephony_phone_test = telephony_phone_test
@@ -191,6 +193,15 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
     def _touch_activity(self) -> None:
         self.last_activity_monotonic = time.monotonic()
+
+    def _effective_caller_flush_delay_s(self) -> float:
+        if not self._telephony:
+            return self._caller_flush_delay_s
+        if self._engine.state == State.QUALIFY and self._engine._pitch_confirmed:
+            return settings.telephony_qualify_caller_flush_s
+        if self._engine.state == State.PITCH:
+            return settings.telephony_greeting_caller_flush_s
+        return self._caller_flush_delay_s
 
     def _call_live(self) -> bool:
         return self._is_call_active is None or self._is_call_active()
@@ -251,7 +262,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
         async def _delayed_flush() -> None:
             try:
-                await asyncio.sleep(self._caller_flush_delay_s)
+                await asyncio.sleep(self._effective_caller_flush_delay_s())
                 await self._flush_caller_buffer()
             except asyncio.CancelledError:
                 pass
@@ -364,6 +375,80 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             logger.debug(f"FSM handled in {ms:.0f}ms")
         return turn
 
+    def _transfer_extension(self, closer: str) -> str | None:
+        """Dialable extension/number for ra_call_control EXTENSIONTRANSFER."""
+        token = (closer or "").strip()
+        if not token:
+            return None
+        if token.startswith("+") or token.isdigit():
+            return token
+        digits = "".join(ch for ch in token if ch.isdigit())
+        return digits if len(digits) >= 3 else None
+
+    async def _execute_transfer(self) -> None:
+        if self._vici is None:
+            logger.warning("Transfer skipped — no ViciDial client (check Integrations / .env)")
+            return
+        closer = (self._engine.script.transfer_closer_user or "").strip()
+        preset = self._engine.script.transfer_preset or settings.vicidial_transfer_preset
+
+        if self._vicidial_call_id:
+            extension = self._transfer_extension(closer)
+            if extension:
+                logger.info(
+                    f"FSM -> remote-agent EXTENSIONTRANSFER ext={extension} "
+                    f"call_id={self._vicidial_call_id}"
+                )
+                result = await self._vici.remote_agent_transfer(
+                    self._agent_user,
+                    self._vicidial_call_id,
+                    extension=extension,
+                    status="XFER",
+                )
+            else:
+                ingroup = preset or "DEFAULTINGROUP"
+                logger.info(
+                    f"FSM -> remote-agent INGROUPTRANSFER ingroup={ingroup} "
+                    f"call_id={self._vicidial_call_id}"
+                )
+                result = await self._vici.remote_agent_transfer(
+                    self._agent_user,
+                    self._vicidial_call_id,
+                    ingroup=ingroup,
+                    status="XFER",
+                )
+            if not ViciDialClient.api_succeeded(result):
+                logger.error(f"Remote-agent transfer failed: {result[:200]}")
+            return
+
+        if closer:
+            logger.info(f"FSM -> warm transfer to closer {closer}")
+            result = await self._vici.warm_transfer(self._agent_user, closer_user=closer)
+        else:
+            logger.info(f"FSM -> warm transfer (preset={preset})")
+            result = await self._vici.warm_transfer(self._agent_user, preset=preset)
+        await self._vici.set_disposition(self._agent_user, "XFER")
+        if not ViciDialClient.api_succeeded(result):
+            logger.error(f"Warm transfer failed: {result[:200]}")
+
+    async def _execute_hangup(self) -> None:
+        if self._vici is None:
+            logger.warning("Hangup skipped — no ViciDial client")
+            return
+        if self._vicidial_call_id:
+            logger.info(
+                f"FSM -> remote-agent HANGUP call_id={self._vicidial_call_id}"
+            )
+            result = await self._vici.remote_agent_hangup(
+                self._agent_user, self._vicidial_call_id, status="NI"
+            )
+            if not ViciDialClient.api_succeeded(result):
+                logger.error(f"Remote-agent hangup failed: {result[:200]}")
+            return
+        logger.info("FSM -> disposition + hangup")
+        await self._vici.set_disposition(self._agent_user, "NI")
+        await self._vici.hangup(self._agent_user)
+
     async def _handle_caller(self, text: str) -> None:
         if not self._call_live():
             return
@@ -380,23 +465,22 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._followup_reply = followup or None
         if followup:
             logger.info(f"BOT follow-up queued: {followup[:64]!r}")
+        pause_before_speak = 0.0
+        if self._telephony and turn.action == Action.SPEAK:
+            reply = turn.reply.strip()
+            if any(q.strip() == reply for q in self._engine.script.qualifying_questions):
+                pause_before_speak = settings.telephony_qualify_question_pause_s
+        if pause_before_speak > 0:
+            logger.info(f"Telephony qualify pause ({pause_before_speak:.1f}s) before next question")
+            await self._start_telephony_keepalive()
+            await asyncio.sleep(pause_before_speak)
         await self.push_frame(TTSSpeakFrame(turn.reply))
 
         if turn.action == Action.TRANSFER:
             if self._mic_test:
                 logger.info("MIC TEST -> qualified lead (warm transfer simulated)")
             else:
-                closer = self._engine.script.transfer_closer_user
-                if closer:
-                    logger.info(f"FSM -> warm transfer to closer {closer}")
-                    await self._vici.warm_transfer(self._agent_user, closer_user=closer)
-                else:
-                    preset = (
-                        self._engine.script.transfer_preset or settings.vicidial_transfer_preset
-                    )
-                    logger.info(f"FSM -> warm transfer (preset={preset})")
-                    await self._vici.warm_transfer(self._agent_user, preset=preset)
-                await self._vici.set_disposition(self._agent_user, "XFER")
+                await self._execute_transfer()
             if self._telephony:
                 # Defer termination until the closing line's BotStoppedSpeakingFrame
                 # arrives — EndFrame is a SystemFrame and can jump the queue ahead of
@@ -408,9 +492,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             if self._mic_test:
                 logger.info("MIC TEST -> call ended (hangup simulated)")
             else:
-                logger.info("FSM -> disposition + hangup")
-                await self._vici.set_disposition(self._agent_user, "NI")
-                await self._vici.hangup(self._agent_user)
+                await self._execute_hangup()
             if self._telephony:
                 self._pending_terminal_action = "hangup"
             elif not self._telephony_phone_test:
@@ -517,9 +599,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._pending_caller_texts and self._call.can_accept_caller():
                 self._move_pending_to_buffer()
-            if self._call.can_accept_caller() and self._caller_buffer:
-                await self._flush_caller_buffer()
-            elif self._caller_buffer:
+            if self._call.can_accept_caller() and (
+                self._caller_buffer.strip() or self._pending_caller_texts
+            ):
+                # Always wait for flush delay — immediate flush cut callers off mid-answer.
                 self._schedule_caller_flush()
             await self.push_frame(frame, direction)
             return
@@ -806,6 +889,7 @@ def build_pipeline(
     sample_rate: int = 16000,
     telephony: bool = False,
     vicidial_client: ViciDialClient | None = None,
+    vicidial_call_id: str | None = None,
     on_call_should_end: "Callable[[str], Awaitable[None]] | None" = None,
     is_call_active: "Callable[[], bool] | None" = None,
 ) -> Pipeline:
@@ -872,6 +956,7 @@ def build_pipeline(
         call_controller=call_controller,
         telephony=telephony,
         telephony_phone_test=telephony and mic_test,
+        vicidial_call_id=vicidial_call_id,
         on_call_should_end=on_call_should_end,
         is_call_active=is_call_active,
     )

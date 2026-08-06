@@ -167,15 +167,33 @@ class Settings(BaseModel):
     # How long the caller must be silent before VAD considers them done talking.
     # Too low cuts callers off mid-thought; too high adds dead air before the bot replies.
     telephony_vad_stop_secs: float = Field(
-        default_factory=lambda: float(os.getenv("TELEPHONY_VAD_STOP_SECS", "0.9") or "0.9")
+        default_factory=lambda: float(os.getenv("TELEPHONY_VAD_STOP_SECS", "1.15") or "1.15")
     )
     # Delay after last STT fragment before answering (telephony only).
     telephony_caller_flush_s: float = Field(
-        default_factory=lambda: float(os.getenv("TELEPHONY_CALLER_FLUSH_S", "0.25") or "0.25")
+        default_factory=lambda: float(os.getenv("TELEPHONY_CALLER_FLUSH_S", "0.3") or "0.3")
+    )
+    # Faster path after greeting ack ("I'm good") — pitch should feel responsive.
+    telephony_greeting_caller_flush_s: float = Field(
+        default_factory=lambda: float(
+            os.getenv("TELEPHONY_GREETING_CALLER_FLUSH_S", "0.18") or "0.18"
+        )
+    )
+    # Qualify answers often include a pause mid-sentence — wait longer before replying.
+    telephony_qualify_caller_flush_s: float = Field(
+        default_factory=lambda: float(
+            os.getenv("TELEPHONY_QUALIFY_CALLER_FLUSH_S", "0.55") or "0.55"
+        )
+    )
+    # Breath before the next qualify question after a yes/no or age answer.
+    telephony_qualify_question_pause_s: float = Field(
+        default_factory=lambda: float(
+            os.getenv("TELEPHONY_QUALIFY_QUESTION_PAUSE_S", "0.45") or "0.45"
+        )
     )
     # Breath between a KB/objection answer and the scripted follow-up question.
     telephony_followup_pause_s: float = Field(
-        default_factory=lambda: float(os.getenv("TELEPHONY_FOLLOWUP_PAUSE_S", "0.35") or "0.35")
+        default_factory=lambda: float(os.getenv("TELEPHONY_FOLLOWUP_PAUSE_S", "0.5") or "0.5")
     )
 
     vicidial_base_url: str = Field(default_factory=lambda: os.getenv("VICIDIAL_BASE_URL", ""))

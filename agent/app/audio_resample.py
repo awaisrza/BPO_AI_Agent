@@ -71,4 +71,4 @@ def normalize_pcm16(pcm: bytes, *, target_peak: float = 0.92) -> bytes:
 
 def enhance_for_telephony(pcm: bytes) -> bytes:
     """Level-normalize for PSTN; skip harsh pre-emphasis (sounds thin/robotic)."""
-    return normalize_pcm16(pcm, target_peak=0.88)
+    return normalize_pcm16(pcm, target_peak=0.91)
