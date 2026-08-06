@@ -27,7 +27,11 @@ _session_lock = asyncio.Lock()
 _call_runner_lock = asyncio.Lock()
 _IDLE_TIMEOUT_S = 120.0
 _IDLE_CHECK_INTERVAL_S = 10.0
-_GREETING_STARTUP_TIMEOUT_S = 15.0
+_GREETING_KICK_DELAY_S = 2.0
+
+
+def _greeting_startup_timeout_s() -> float:
+    return settings.telephony_greeting_startup_timeout_s
 
 
 def call_runner_ready() -> bool:
@@ -165,6 +169,7 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
     shutdown: _CallShutdown | None = None
     idle_watchdog_task: asyncio.Task | None = None
     greeting_watchdog_task: asyncio.Task | None = None
+    greeting_kick_task: asyncio.Task | None = None
 
     try:
         await _ensure_websocket_accepted(websocket)
@@ -289,8 +294,9 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
 
         async def _greeting_startup_watchdog() -> None:
             """Release a stuck call slot if Chatterbox never produces greeting audio."""
+            timeout_s = _greeting_startup_timeout_s()
             try:
-                await asyncio.sleep(_GREETING_STARTUP_TIMEOUT_S)
+                await asyncio.sleep(timeout_s)
                 if shutdown.done or fronter is None or media_ready_at is None:
                     return
                 # StartFrame can run before on_client_connected; _opened means greeting queued.
@@ -298,12 +304,36 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                     return
                 if fronter.last_activity_monotonic <= media_ready_at:
                     _event(
-                        f"=== GREETING STARTUP TIMEOUT ({_GREETING_STARTUP_TIMEOUT_S:.0f}s) — "
+                        f"=== GREETING STARTUP TIMEOUT ({timeout_s:.0f}s) — "
                         "no bot activity after media ready ==="
                     )
                     await shutdown.end_call("greeting_startup_timeout")
             except asyncio.CancelledError:
                 pass
+
+        async def _kick_greeting_if_stuck() -> None:
+            """Whisper STT can delay StartFrame >15s; play greeting without waiting for it."""
+            try:
+                await asyncio.sleep(_GREETING_KICK_DELAY_S)
+                if shutdown.done or fronter is None or fronter._opened:
+                    return
+                from pipecat.frames.frames import TTSSpeakFrame
+                from pipecat.processors.frame_processor import FrameDirection
+
+                from .speech_renderer import CallState
+
+                _event(
+                    f"=== StartFrame delayed >{_GREETING_KICK_DELAY_S:.0f}s — kicking greeting ==="
+                )
+                fronter._opened = True
+                fronter._touch_activity()
+                fronter._call.state = CallState.LISTENING
+                opening = fronter._engine.open()
+                await fronter.push_frame(TTSSpeakFrame(opening.reply), FrameDirection.DOWNSTREAM)
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                _event(f"=== greeting kick failed: {exc} ===")
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(_transport, _client) -> None:
@@ -312,6 +342,8 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             if fronter is not None and fronter._opened:
                 fronter._touch_activity()
             _event("=== MEDIA READY — greeting should play within 1s ===")
+            nonlocal greeting_kick_task
+            greeting_kick_task = asyncio.create_task(_kick_greeting_if_stuck())
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client) -> None:
@@ -339,6 +371,8 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             idle_watchdog_task.cancel()
         if greeting_watchdog_task is not None:
             greeting_watchdog_task.cancel()
+        if greeting_kick_task is not None:
+            greeting_kick_task.cancel()
         if session_key:
             async with _session_lock:
                 _active_sessions.discard(session_key)

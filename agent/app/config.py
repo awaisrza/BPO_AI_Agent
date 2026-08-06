@@ -195,6 +195,12 @@ class Settings(BaseModel):
     telephony_followup_pause_s: float = Field(
         default_factory=lambda: float(os.getenv("TELEPHONY_FOLLOWUP_PAUSE_S", "0.5") or "0.5")
     )
+    # Pipecat may take >15s to pass StartFrame through Whisper on first connect.
+    telephony_greeting_startup_timeout_s: float = Field(
+        default_factory=lambda: float(
+            os.getenv("TELEPHONY_GREETING_STARTUP_TIMEOUT_S", "30") or "30"
+        )
+    )
 
     vicidial_base_url: str = Field(default_factory=lambda: os.getenv("VICIDIAL_BASE_URL", ""))
     vicidial_user: str = Field(default_factory=lambda: os.getenv("VICIDIAL_API_USER", ""))
