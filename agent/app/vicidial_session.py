@@ -18,7 +18,7 @@ from loguru import logger
 from .bot_context import BotRunContext
 from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
 from .config import settings
-from .pipeline import FronterProcessor, build_pipeline
+from .pipeline import FronterProcessor, build_pipeline, tts_processor_for_cleanup
 from .telnyx_media import telephony_bulk_media_enabled
 
 _CRASH_LOG = Path("/tmp/vicidial_events.log")
@@ -105,17 +105,22 @@ def _event(msg: str) -> None:
     logger.info(line.strip())
 
 
+_CALL_SHUTDOWN_CANCEL_S = 5.0
+
+
 class _CallShutdown:
     def __init__(self, *, session_key: str, websocket) -> None:
         self._session_key = session_key
         self._websocket = websocket
         self._worker = None
         self._tts_for_cleanup = None
+        self._runner_task: asyncio.Task | None = None
         self._done = False
 
-    def attach(self, *, worker, tts_for_cleanup) -> None:
+    def attach(self, *, worker, tts_for_cleanup, runner_task: asyncio.Task | None = None) -> None:
         self._worker = worker
         self._tts_for_cleanup = tts_for_cleanup
+        self._runner_task = runner_task
 
     @property
     def done(self) -> bool:
@@ -127,24 +132,35 @@ class _CallShutdown:
         self._done = True
         _event(f"=== VICIDIAL END CALL (reason={reason}) ===")
 
+        # Close bridge WS first so ViciDial can hear disconnect while we tear down GPU work.
+        try:
+            await self._websocket.close(code=1000)
+        except Exception:
+            pass
+
+        if self._runner_task is not None and not self._runner_task.done():
+            self._runner_task.cancel()
+
         if self._tts_for_cleanup is not None and hasattr(self._tts_for_cleanup, "cancel_background_work"):
             try:
-                await self._tts_for_cleanup.cancel_background_work()
+                await asyncio.wait_for(
+                    self._tts_for_cleanup.cancel_background_work(),
+                    timeout=_CALL_SHUTDOWN_CANCEL_S,
+                )
+            except asyncio.TimeoutError:
+                _event("shutdown: TTS cleanup timed out — releasing call slot")
             except Exception as exc:  # noqa: BLE001
                 _event(f"shutdown: TTS cleanup failed: {exc}")
 
         if self._worker is not None:
             try:
-                await self._worker.cancel()
+                await asyncio.wait_for(self._worker.cancel(), timeout=_CALL_SHUTDOWN_CANCEL_S)
+            except asyncio.TimeoutError:
+                _event("shutdown: worker cancel timed out — releasing call slot")
             except asyncio.CancelledError:
                 pass
             except Exception as exc:  # noqa: BLE001
                 _event(f"shutdown: worker cancel failed: {exc}")
-
-        try:
-            await self._websocket.close(code=1000)
-        except Exception:
-            pass
 
 
 async def run_vicidial_call(websocket, ctx: BotRunContext) -> None:
@@ -257,7 +273,7 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 "Ensure fleet_worker pre-warm finished before dialing."
             )
 
-        tts_for_cleanup = pipeline.processors[-2] if pipeline.processors else None
+        tts_for_cleanup = tts_processor_for_cleanup(pipeline)
         fronter = next((p for p in pipeline.processors if isinstance(p, FronterProcessor)), None)
 
         worker = PipelineWorker(
@@ -355,8 +371,16 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
         idle_watchdog_task = asyncio.create_task(_idle_watchdog())
         greeting_watchdog_task = asyncio.create_task(_greeting_startup_watchdog())
         _event("=== pipeline worker running ===")
-        try:
+
+        async def _run_runner() -> None:
             await runner.run()
+
+        runner_task = asyncio.create_task(_run_runner())
+        shutdown.attach(worker=worker, tts_for_cleanup=tts_for_cleanup, runner_task=runner_task)
+        try:
+            await runner_task
+        except asyncio.CancelledError:
+            pass
         finally:
             _event("=== pipeline worker finished ===")
             if not shutdown.done:

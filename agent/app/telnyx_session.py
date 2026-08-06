@@ -12,7 +12,7 @@ from loguru import logger
 
 from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
 from .config import ScriptConfig, settings
-from .pipeline import FronterProcessor, build_pipeline
+from .pipeline import FronterProcessor, build_pipeline, tts_processor_for_cleanup
 from .telnyx_api import hangup_telnyx_call
 from .telnyx_media import telephony_bulk_media_enabled
 
@@ -47,6 +47,9 @@ def _event(msg: str) -> None:
     logger.info(line.strip())
 
 
+_CALL_SHUTDOWN_CANCEL_S = 5.0
+
+
 class _CallShutdown:
     """Single, idempotent teardown path for a Telnyx call.
 
@@ -77,11 +80,19 @@ class _CallShutdown:
         self._on_begin_shutdown = on_begin_shutdown
         self._worker = None
         self._tts_for_cleanup = None
+        self._runner_task: asyncio.Task | None = None
         self._done = False
 
-    def attach(self, *, worker, tts_for_cleanup) -> None:
+    def attach(
+        self,
+        *,
+        worker,
+        tts_for_cleanup,
+        runner_task: asyncio.Task | None = None,
+    ) -> None:
         self._worker = worker
         self._tts_for_cleanup = tts_for_cleanup
+        self._runner_task = runner_task
 
     @property
     def done(self) -> bool:
@@ -105,15 +116,25 @@ class _CallShutdown:
             except Exception as exc:  # noqa: BLE001
                 _event(f"shutdown: telnyx hangup failed: {exc}")
 
+        if self._runner_task is not None and not self._runner_task.done():
+            self._runner_task.cancel()
+
         if self._tts_for_cleanup is not None and hasattr(self._tts_for_cleanup, "cancel_background_work"):
             try:
-                await self._tts_for_cleanup.cancel_background_work()
+                await asyncio.wait_for(
+                    self._tts_for_cleanup.cancel_background_work(),
+                    timeout=_CALL_SHUTDOWN_CANCEL_S,
+                )
+            except asyncio.TimeoutError:
+                _event("shutdown: TTS cleanup timed out")
             except Exception as exc:  # noqa: BLE001
                 _event(f"shutdown: TTS cleanup failed: {exc}")
 
         if self._worker is not None:
             try:
-                await self._worker.cancel()
+                await asyncio.wait_for(self._worker.cancel(), timeout=_CALL_SHUTDOWN_CANCEL_S)
+            except asyncio.TimeoutError:
+                _event("shutdown: worker cancel timed out")
             except asyncio.CancelledError:
                 pass
             except Exception as exc:  # noqa: BLE001
@@ -241,7 +262,7 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
                 "WARNING: pipeline build >2s — Telnyx may hang up before greeting. "
                 "Ensure pre-warm finished and STT reuse log appears on connect."
             )
-        tts_for_cleanup = pipeline.processors[-2] if pipeline.processors else None
+        tts_for_cleanup = tts_processor_for_cleanup(pipeline)
         fronter = next(
             (p for p in pipeline.processors if isinstance(p, FronterProcessor)), None
         )
@@ -305,8 +326,24 @@ async def run_telnyx_call(websocket, script: ScriptConfig, agent_user: str) -> N
             runner = WorkerRunner()
         await runner.add_workers(worker)
         idle_watchdog_task = asyncio.create_task(_idle_watchdog())
-        await runner.run()
-        _event("=== RUNNER FINISHED ===")
+
+        async def _run_runner() -> None:
+            await runner.run()
+
+        runner_task = asyncio.create_task(_run_runner())
+        shutdown.attach(
+            worker=worker,
+            tts_for_cleanup=tts_for_cleanup,
+            runner_task=runner_task,
+        )
+        try:
+            await runner_task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            _event("=== RUNNER FINISHED ===")
+            if not shutdown.done:
+                await shutdown.end_call("runner_finished", hangup_telnyx=False)
     except Exception:
         tb = traceback.format_exc()
         _event("=== CRASH ===\n" + tb)

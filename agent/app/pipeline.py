@@ -880,6 +880,16 @@ def prewarm_voice_stack(
     logger.info("Voice stack pre-warm complete.")
 
 
+def tts_processor_for_cleanup(pipeline) -> object | None:
+    """Chatterbox TTS for cancel_background_work (not bulk-media/output processors)."""
+    from .chatterbox_tts import ChatterboxTTSService
+
+    for proc in pipeline.processors:
+        if isinstance(proc, ChatterboxTTSService):
+            return proc
+    return None
+
+
 def build_pipeline(
     transport,
     *,
