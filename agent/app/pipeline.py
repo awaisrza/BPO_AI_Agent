@@ -17,6 +17,7 @@ Voice backends (``VOICE_BACKEND`` env):
 from __future__ import annotations
 
 import asyncio
+import os
 
 from loguru import logger
 
@@ -658,6 +659,18 @@ def prewarm_voice_stack(
     logger.info("Voice stack pre-warm complete.")
 
 
+
+
+def tts_processor_for_cleanup(pipeline) -> object | None:
+    """Chatterbox TTS for cancel_background_work (not bulk-media/output processors)."""
+    from .chatterbox_tts import ChatterboxTTSService
+
+    for proc in pipeline.processors:
+        if isinstance(proc, ChatterboxTTSService):
+            return proc
+    return None
+
+
 def build_pipeline(
     transport,
     *,
@@ -742,15 +755,32 @@ def build_pipeline(
         telephony_max_words=settings.telephony_utterance_max_words,
     )
 
-    return Pipeline(
-        [
-            transport.input(),
-            vad,
-            barge_in,
-            stt,
-            fronter,
-            speech_renderer,
-            tts,
-            transport.output(),
-        ]
-    )
+    processors = [
+        transport.input(),
+        vad,
+        barge_in,
+        stt,
+        fronter,
+        speech_renderer,
+        tts,
+    ]
+    if telephony:
+        from .telnyx_media import TelnyxBulkMediaProcessor, telephony_bulk_media_enabled
+
+        if telephony_bulk_media_enabled():
+            ws_client = getattr(transport, "_client", None)
+            if ws_client is not None:
+
+                async def _send_json(payload: str) -> None:
+                    await ws_client.send(payload)
+
+                encoding = os.getenv("TELNYX_STREAM_CODEC", "PCMU")
+                processors.append(
+                    TelnyxBulkMediaProcessor(send_json=_send_json, encoding=encoding)
+                )
+                logger.info(f"Telnyx bulk media enabled (encoding={encoding})")
+            else:
+                logger.warning("Telnyx bulk media skipped — transport has no WebSocket client")
+    processors.append(transport.output())
+
+    return Pipeline(processors)

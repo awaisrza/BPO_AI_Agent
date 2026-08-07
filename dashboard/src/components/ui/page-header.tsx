@@ -24,7 +24,7 @@ export function PageHeader({
         {eyebrow && (
           <p className="data-label mb-2">{eyebrow}</p>
         )}
-        <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
           {title}
         </h1>
         {description && (

@@ -154,6 +154,15 @@ class Settings(BaseModel):
     telephony_utterance_max_words: int = Field(
         default_factory=lambda: int(os.getenv("TELEPHONY_UTTERANCE_MAX_WORDS", "40") or "40")
     )
+    telephony_greeting_single_chunk: bool = Field(
+        default_factory=lambda: os.getenv("TELEPHONY_GREETING_SINGLE_CHUNK", "true").strip().lower()
+        in ("1", "true", "yes")
+    )
+    telephony_greeting_startup_timeout_s: float = Field(
+        default_factory=lambda: float(
+            os.getenv("TELEPHONY_GREETING_STARTUP_TIMEOUT_S", "30") or "30"
+        )
+    )
 
     vicidial_base_url: str = Field(default_factory=lambda: os.getenv("VICIDIAL_BASE_URL", ""))
     vicidial_user: str = Field(default_factory=lambda: os.getenv("VICIDIAL_API_USER", ""))

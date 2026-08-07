@@ -14,6 +14,7 @@ type CampaignOption = { id: string; name: string };
 export function AssignBotForm() {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [vicidialAgentUser, setVicidialAgentUser] = useState("");
   const [campaignId, setCampaignId] = useState("");
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
   const [error, setError] = useState("");
@@ -61,6 +62,7 @@ export function AssignBotForm() {
         org_id: orgId,
         name: name.trim(),
         campaign_id: campaignId,
+        vicidial_agent_user: vicidialAgentUser.trim() || null,
         status: "offline",
       });
 
@@ -92,11 +94,24 @@ export function AssignBotForm() {
         />
       </Field>
 
+      <Field
+        label="ViciDial agent login"
+        description="Exact agent user in their dialer (e.g. 6666, agent001). Required before Run campaign."
+      >
+        <Input
+          value={vicidialAgentUser}
+          onChange={(e) => setVicidialAgentUser(e.target.value)}
+          placeholder="6666"
+          className="font-mono text-sm"
+          required
+        />
+      </Field>
+
       <Field label="Campaign" description="Which outbound campaign this bot dials for.">
         {campaigns.length === 0 ? (
-          <p className="text-sm text-foreground-muted">
+          <p className="text-sm text-zinc-500">
             No campaigns yet.{" "}
-            <Link href="/campaigns/new" className="text-foreground-secondary underline hover:text-foreground">
+            <Link href="/campaigns/new" className="text-zinc-300 underline hover:text-white">
               Create one first
             </Link>
             .

@@ -309,6 +309,12 @@ if PIPECAT_AVAILABLE:
         prefetch_text: str = ""
 
     @dataclass
+    class UtteranceFlushFrame(DataFrame):
+        """End of one spoken line — triggers bulk Telnyx media flush (must stay in-order with audio)."""
+
+        final: bool = False
+
+    @dataclass
     class RtpKeepaliveStartFrame(SystemFrame):
         """Ask downstream TTS to stream comfort silence until real audio starts."""
 

@@ -43,6 +43,7 @@ export type BotRow = {
   campaign_id: string | null;
   name: string;
   status: BotStatus;
+  vicidial_agent_user: string | null;
   created_at: string;
   campaigns?: { name: string } | null;
 };
@@ -70,23 +71,95 @@ export type OrganizationRow = {
 
 export const DEFAULT_KNOWLEDGE_BASE: KnowledgeEntry[] = [
   {
-    topic: "Who is calling?",
-    triggers: ["who is this", "who are you", "who's calling", "what company"],
-    answer: "This is Sarah from ABC Benefits on a recorded line — I'll be quick.",
+    topic: "How did you get my number",
+    triggers: [
+      "how did you get my number",
+      "where did you get my number",
+      "how'd you get my number",
+      "where'd you get my number",
+      "how did you get this number",
+    ],
+    answer:
+      "Your number came from a public Medicare outreach list. I can remove you if you'd like — it's just a thirty-second check first.",
   },
   {
-    topic: "Is this a scam?",
-    triggers: ["scam", "spam", "legitimate", "real company", "fraud"],
-    answer: "This is a legitimate call. It may be recorded for quality assurance.",
+    topic: "Already have benefits",
+    triggers: [
+      "already have all the benefits",
+      "already have benefits",
+      "have all the benefits i need",
+      "don't need anything else",
+      "happy with my plan",
+      "already covered",
+      "i have everything i need",
+    ],
+    answer:
+      "That's great — a lot of folks still qualify for extra savings they didn't know about. Worth a quick thirty-second check?",
   },
   {
-    topic: "How much does it cost?",
-    triggers: ["how much", "cost", "price", "free", "catch"],
-    answer: "The licensed specialist can go over exact numbers after I connect you.",
+    topic: "Who are you with",
+    triggers: [
+      "who are you with",
+      "what company",
+      "who do you work for",
+      "what agency",
+      "who is your company",
+      "what's your company",
+    ],
+    answer:
+      "I'm Alex with ABC Benefits — a licensed Medicare benefits group. I'll keep this quick.",
+  },
+  {
+    topic: "Who is calling",
+    triggers: ["who is this", "who are you", "who's calling", "what company are you"],
+    answer: "This is Alex from ABC Benefits on a recorded line — I'll be quick.",
+  },
+  {
+    topic: "Don't need benefits",
+    triggers: [
+      "don't need no benefits",
+      "don't need benefits",
+      "don't want benefits",
+      "i don't need that",
+      "no benefits",
+    ],
+    answer:
+      "I hear you — this is just a free eligibility review. No cost and no obligation. Takes about thirty seconds.",
+  },
+  {
+    topic: "Not interested",
+    triggers: ["not interested", "no thanks", "not for me", "i'm good", "leave me alone"],
+    answer:
+      "I totally get that — it's just a quick Medicare eligibility check. Takes about thirty seconds, fair enough?",
+  },
+  {
+    topic: "Do not call again",
+    triggers: [
+      "don't call me again",
+      "stop calling",
+      "take me off your list",
+      "remove my number",
+      "do not call",
+      "never call again",
+      "put me on do not call",
+    ],
+    answer:
+      "I'm sorry about that — I can note that for you. Before I update it, it's just a thirty-second eligibility check — fair enough?",
+  },
+  {
+    topic: "Is this a scam",
+    triggers: ["scam", "spam", "legitimate", "real company", "fraud", "is this real"],
+    answer:
+      "This is a legitimate call from a licensed Medicare benefits group. It may be recorded for quality assurance.",
+  },
+  {
+    topic: "How much does it cost",
+    triggers: ["how much", "cost", "price", "is it free", "what's the catch"],
+    answer: "The review is free. A licensed specialist can go over exact numbers if you qualify.",
   },
   {
     topic: "Call me back later",
-    triggers: ["call me back", "not a good time", "busy right now", "later"],
+    triggers: ["call me back", "not a good time", "busy right now", "call later", "i'm busy"],
     answer: "Sure — what time works best for you tomorrow?",
   },
 ];

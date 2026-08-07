@@ -2,25 +2,25 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Mic, Pause, Play, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { Pause, PhoneCall, Play, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea, Input, Select, Field } from "@/components/ui/input";
+import type { VicidialCampaignOption } from "@/lib/vicidial/campaigns";
 import type { VicidialCloser } from "@/lib/vicidial/closers";
 import { createClient, isSupabaseConfigured, supabaseConfigHelp } from "@/lib/supabase/client";
 import type { CampaignRow, CampaignStatus, KnowledgeEntry, ScriptJson } from "@/lib/types/database";
-import { setCampaignRunningStatus } from "@/lib/campaigns";
 import { DEFAULT_KNOWLEDGE_BASE } from "@/lib/types/database";
+import { readJsonResponse } from "@/lib/fetch-json";
 
 export function CampaignEditorForm({ id }: { id: string }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
-  const [gpuMessage, setGpuMessage] = useState("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [campaignStatus, setCampaignStatus] = useState<CampaignStatus>("paused");
@@ -38,8 +38,17 @@ export function CampaignEditorForm({ id }: { id: string }) {
   const [transferLine, setTransferLine] = useState("");
   const [notInterestedLine, setNotInterestedLine] = useState("");
   const [botCount, setBotCount] = useState(0);
-  const [vicidialId, setVicidialId] = useState("—");
+  const [vicidialCampaignId, setVicidialCampaignId] = useState("");
+  const [vicidialCampaigns, setVicidialCampaigns] = useState<VicidialCampaignOption[]>([]);
+  const [vicidialCampaignsLoading, setVicidialCampaignsLoading] = useState(false);
+  const [vicidialCampaignsError, setVicidialCampaignsError] = useState("");
+  const [readinessHint, setReadinessHint] = useState("");
   const [knowledge, setKnowledge] = useState<KnowledgeDraft[]>([]);
+  const [testPhone, setTestPhone] = useState("+923142222318");
+  const [testListId, setTestListId] = useState("101");
+  const [testOutboundCid, setTestOutboundCid] = useState("+19482194316");
+  const [testDialing, setTestDialing] = useState(false);
+  const [testDialResult, setTestDialResult] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -73,7 +82,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
         setTransferPreset(script.transfer_preset ?? "closers-01");
         setTransferCloserUser(script.transfer_closer_user ?? "");
         setTransferCloserName(script.transfer_closer_name ?? "");
-        setVicidialId(row.vicidial_campaign_id ?? "—");
+        setVicidialCampaignId(row.vicidial_campaign_id ?? "");
         setKnowledge(
           (script.knowledge_base?.length ? script.knowledge_base : DEFAULT_KNOWLEDGE_BASE).map(
             toKnowledgeDraft,
@@ -95,7 +104,29 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
     load();
     void loadClosers();
+    void loadVicidialCampaigns();
   }, [id]);
+
+  async function loadVicidialCampaigns() {
+    setVicidialCampaignsLoading(true);
+    setVicidialCampaignsError("");
+    try {
+      const res = await fetch("/api/vicidial/campaigns");
+      const data = await readJsonResponse<{
+        campaigns?: VicidialCampaignOption[];
+        error?: string;
+      }>(res);
+      if (!res.ok) {
+        setVicidialCampaignsError(data.error ?? "Could not load ViciDial campaigns.");
+        return;
+      }
+      setVicidialCampaigns(data.campaigns ?? []);
+    } catch {
+      setVicidialCampaignsError("Could not reach ViciDial.");
+    } finally {
+      setVicidialCampaignsLoading(false);
+    }
+  }
 
   async function loadClosers() {
     setClosersLoading(true);
@@ -103,10 +134,10 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
     try {
       const res = await fetch(`/api/vicidial/closers?campaignId=${encodeURIComponent(id)}`);
-      const data = (await res.json()) as {
+      const data = await readJsonResponse<{
         closers?: VicidialCloser[];
         error?: string;
-      };
+      }>(res);
 
       if (!res.ok) {
         setClosers(data.closers ?? []);
@@ -125,7 +156,8 @@ export function CampaignEditorForm({ id }: { id: string }) {
   function handleCloserChange(userId: string) {
     setTransferCloserUser(userId);
     const closer = closers.find((c) => c.user === userId);
-    setTransferCloserName(closer?.fullName ?? "");
+    const name = closer?.fullName?.replace(/<[^>]+>/g, "").trim();
+    setTransferCloserName(name ?? "");
     setSaved(false);
   }
 
@@ -159,39 +191,90 @@ export function CampaignEditorForm({ id }: { id: string }) {
     setSaved(false);
   }
 
+  async function runTestDial() {
+    setTestDialing(true);
+    setError("");
+    setTestDialResult("");
+
+    try {
+      const res = await fetch(`/api/campaigns/${id}/test-dial`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          phone: testPhone.trim(),
+          list_id: testListId.trim() || undefined,
+          outbound_cid: testOutboundCid.trim() || undefined,
+          start_campaign: true,
+        }),
+      });
+      const data = await readJsonResponse<{
+        error?: string;
+        message?: string;
+        gpuMessage?: string;
+        workerHealth?: string;
+        workerReady?: boolean;
+        workerWaitMs?: number;
+        steps?: { step: string; ok: boolean; detail: string }[];
+        hopperPreview?: string;
+        campaignStarted?: boolean;
+      }>(res);
+
+      if (!res.ok) {
+        throw new Error(data.error ?? data.message ?? "Test dial failed.");
+      }
+
+      const parts: string[] = [];
+      if (data.message) parts.push(data.message);
+      if (data.gpuMessage) parts.push(`GPU: ${data.gpuMessage}`);
+      if (data.workerHealth) parts.push(`Worker: ${data.workerHealth}`);
+      if (typeof data.workerWaitMs === "number" && data.workerWaitMs > 500) {
+        parts.push(`Waited ${Math.round(data.workerWaitMs / 1000)}s for GPU call slot.`);
+      }
+      if (data.steps?.length) {
+        const stepLines = data.steps.map(
+          (s) => `${s.ok ? "✓" : "○"} ${s.step}: ${s.detail}`,
+        );
+        parts.push(stepLines.join("\n"));
+      }
+      if (data.hopperPreview) parts.push(`Hopper:\n${data.hopperPreview}`);
+      setTestDialResult(parts.filter(Boolean).join("\n\n"));
+
+      if (data.campaignStarted) {
+        setCampaignStatus("running");
+        router.refresh();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Test dial failed.");
+    } finally {
+      setTestDialing(false);
+    }
+  }
+
   async function toggleCampaignStatus() {
     setTogglingStatus(true);
     setError("");
-    setGpuMessage("");
+    setReadinessHint("");
 
     try {
-      const supabase = createClient();
-      const nextStatus: CampaignStatus = campaignStatus === "running" ? "paused" : "running";
-      await setCampaignRunningStatus(supabase, id, nextStatus);
-
-      const orchestrate = await fetch(`/api/campaigns/${id}/orchestrate`, {
+      const action = campaignStatus === "running" ? "stop" : "start";
+      const res = await fetch(`/api/campaigns/${id}/run`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: nextStatus === "running" ? "start" : "stop" }),
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action }),
       });
-      const gpuResult = (await orchestrate.json()) as {
-        ok?: boolean;
-        configured?: boolean;
-        message?: string;
+      const data = await readJsonResponse<{
         error?: string;
-      };
+        message?: string;
+        status?: CampaignStatus;
+        readiness?: { issues?: { level: string; message: string }[] };
+      }>(res);
 
-      if (!orchestrate.ok) {
-        if (nextStatus === "running") {
-          await setCampaignRunningStatus(supabase, id, "paused");
-        }
-        throw new Error(gpuResult.error ?? "Could not start GPU fleet.");
+      if (!res.ok) {
+        throw new Error(data.error ?? "Could not update campaign status.");
       }
 
-      setCampaignStatus(nextStatus);
-      if (gpuResult.message) {
-        setGpuMessage(gpuResult.message);
-      }
+      if (data.message) setReadinessHint(data.message);
+      setCampaignStatus(data.status ?? (action === "start" ? "running" : "paused"));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update campaign status.");
@@ -227,7 +310,11 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
       const { error: updateError } = await supabase
         .from("campaigns")
-        .update({ name: trimmedName, script_json })
+        .update({
+          name: trimmedName,
+          script_json,
+          vicidial_campaign_id: vicidialCampaignId.trim() || null,
+        })
         .eq("id", id);
 
       if (updateError) throw updateError;
@@ -284,14 +371,14 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
       {campaignStatus === "paused" && botCount > 0 && (
         <p className="mb-6 rounded-lg border border-border bg-surface-raised px-4 py-3 text-sm text-foreground-muted">
-          Campaign is paused. Click <strong className="text-foreground">Run campaign</strong> to start all{" "}
-          {botCount} assigned agent{botCount === 1 ? "" : "s"} and wake the GPU fleet.
+          Campaign is paused. Click <strong className="text-foreground">Run campaign</strong> when ViciDial
+          campaign ID and agent logins are set — GPU supervisor will start workers and map agents to ViciDial.
         </p>
       )}
 
-      {gpuMessage && (
-        <p className="mb-6 rounded-lg border border-status-success/30 bg-status-success-muted px-4 py-3 text-sm text-status-success">
-          {gpuMessage}
+      {readinessHint && (
+        <p className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200/90">
+          {readinessHint}
         </p>
       )}
 
@@ -329,6 +416,41 @@ export function CampaignEditorForm({ id }: { id: string }) {
                   }}
                   placeholder="e.g. Medicare AEP v2"
                 />
+              </Field>
+              <Field
+                label="ViciDial campaign ID"
+                description="Must match the campaign ID in the BPO dialer (hopper / lists)."
+                className="sm:col-span-2"
+              >
+                <div className="flex gap-2">
+                  <Input
+                    list="vicidial-campaign-options"
+                    value={vicidialCampaignId}
+                    onChange={(e) => {
+                      setVicidialCampaignId(e.target.value);
+                      setSaved(false);
+                    }}
+                    placeholder="e.g. MEDICARE01"
+                    className="font-mono text-sm"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={vicidialCampaignsLoading}
+                    onClick={() => void loadVicidialCampaigns()}
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${vicidialCampaignsLoading ? "animate-spin" : ""}`} />
+                  </Button>
+                </div>
+                {vicidialCampaignsError && (
+                  <p className="mt-1.5 text-xs text-status-danger">{vicidialCampaignsError}</p>
+                )}
+                <datalist id="vicidial-campaign-options">
+                  {vicidialCampaigns.map((c) => (
+                    <option key={c.id} value={c.id} />
+                  ))}
+                </datalist>
               </Field>
             </CardBody>
           </Card>
@@ -377,7 +499,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
                   <button
                     type="button"
                     onClick={addQuestion}
-                    className="text-foreground-secondary underline hover:text-foreground"
+                    className="text-foreground-secondary underline hover:text-white"
                   >
                     Add your first question
                   </button>
@@ -431,7 +553,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
                   <button
                     type="button"
                     onClick={addKnowledgeEntry}
-                    className="text-foreground-secondary underline hover:text-foreground"
+                    className="text-foreground-secondary underline hover:text-white"
                   >
                     Add your first topic
                   </button>
@@ -569,12 +691,64 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
         <div className="space-y-6">
           <Card>
+            <CardHeader
+              title="Test dial"
+              description="Waits until the GPU worker is ready (free call slot), then activates ViciDial and dials."
+            />
+            <CardBody className="space-y-4">
+              <Field label="Phone number" description="Include country code (E.164).">
+                <Input
+                  value={testPhone}
+                  onChange={(e) => setTestPhone(e.target.value)}
+                  placeholder="+923142222318"
+                  className="font-mono text-sm"
+                />
+              </Field>
+              <Field
+                label="ViciDial list ID"
+                description="Active lead list tied to this campaign (e.g. 101)."
+              >
+                <Input
+                  value={testListId}
+                  onChange={(e) => setTestListId(e.target.value)}
+                  placeholder="101"
+                  className="font-mono text-sm"
+                />
+              </Field>
+              <Field
+                label="Outbound caller ID"
+                description="Set once in ViciDial Admin/SQL as +19482194316 (Test dial does not update this — API strips +)."
+              >
+                <Input
+                  value={testOutboundCid}
+                  onChange={(e) => setTestOutboundCid(e.target.value)}
+                  placeholder="+19482194316"
+                  className="font-mono text-sm"
+                />
+              </Field>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => void runTestDial()}
+                disabled={testDialing || botCount === 0 || !vicidialCampaignId.trim()}
+              >
+                <PhoneCall className="h-4 w-4" />
+                {testDialing ? "Waiting for GPU & dialing…" : "Test dial this number"}
+              </Button>
+              {testDialResult && (
+                <p className="whitespace-pre-wrap rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100/90">
+                  {testDialResult}
+                </p>
+              )}
+            </CardBody>
+          </Card>
+
+          <Card>
             <CardHeader title="Settings" />
             <CardBody className="space-y-5">
               <SettingRow label="Campaign" value={campaignName || "—"} />
               <SettingRow label="Script" value={scriptLabel || "—"} />
-              <SettingRow label="Voice" value="Sarah · US English" icon={Mic} />
-              <SettingRow label="ViciDial ID" value={vicidialId} mono />
+              <SettingRow label="ViciDial ID" value={vicidialCampaignId || "—"} mono />
               <SettingRow
                 label="Status"
                 value={campaignStatus === "running" ? "Running — agents can go live" : "Paused"}
@@ -639,7 +813,7 @@ function SettingRow({
   return (
     <div>
       <p className="text-xs text-foreground-faint">{label}</p>
-      <p className={`mt-1.5 flex items-center gap-2 text-sm text-foreground-secondary ${mono ? "font-mono" : ""}`}>
+      <p className={`mt-1.5 flex items-center gap-2 text-sm text-zinc-200 ${mono ? "font-mono" : ""}`}>
         {Icon && <Icon className="h-3.5 w-3.5 text-foreground-faint" />}
         {value}
       </p>

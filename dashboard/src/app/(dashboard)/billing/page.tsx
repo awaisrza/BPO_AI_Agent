@@ -13,9 +13,9 @@ export default function BillingPage() {
         description="Usage tracking and invoices during pilot."
       />
 
-      <div className="mb-8 rounded-lg border border-status-warning/20 bg-status-warning-muted px-5 py-4">
-        <p className="text-sm font-medium text-status-warning">Free pilot active</p>
-        <p className="mt-1 text-sm text-foreground-muted">
+      <div className="mb-8 rounded-xl border border-amber-500/15 bg-amber-500/[0.04] px-5 py-4">
+        <p className="text-sm font-medium text-amber-400/90">Free pilot active</p>
+        <p className="mt-1 text-sm text-zinc-500">
           {org.botsActive} bots running at $0/month. Billing activates when pilot converts.
         </p>
       </div>
@@ -42,7 +42,7 @@ export default function BillingPage() {
           <CardHeader
             title="Invoice preview"
             action={
-              <span className="inline-flex items-center gap-1.5 rounded-md bg-surface-overlay px-2 py-0.5 text-xs text-foreground-muted">
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-white/[0.06] px-2 py-0.5 text-xs text-zinc-400">
                 <FileText className="h-3 w-3" />
                 Draft
               </span>
@@ -54,8 +54,8 @@ export default function BillingPage() {
               <InvoiceRow label="Overage minutes (0 × $13)" amount="$0.00" />
             </div>
             <div className="mt-4 flex items-center justify-between border-t border-surface-border px-6 py-4">
-              <span className="font-medium text-foreground-secondary">Total</span>
-              <span className="text-xl font-semibold tabular-nums text-foreground">$0.00</span>
+              <span className="font-medium text-zinc-200">Total</span>
+              <span className="text-xl font-semibold tabular-nums text-zinc-100">$0.00</span>
             </div>
           </CardBody>
           <CardFooter className="flex gap-2">
@@ -76,7 +76,7 @@ export default function BillingPage() {
             <PaymentMethod title="Wise" desc="USD · International BPOs" />
             <PaymentMethod title="Safepay" desc="Coming soon · automated PKR" />
           </div>
-          <p className="mt-6 text-xs text-foreground-faint">
+          <p className="mt-6 text-xs text-zinc-600">
             Paid plan after pilot: ~$18–25/bot/month + overage ~$0.05/min
           </p>
         </CardBody>
@@ -88,8 +88,8 @@ export default function BillingPage() {
 function InvoiceRow({ label, amount }: { label: string; amount: string }) {
   return (
     <div className="flex items-center justify-between border-b border-surface-border/60 py-3 text-sm last:border-0">
-      <span className="text-foreground-muted">{label}</span>
-      <span className="tabular-nums text-foreground-secondary">{amount}</span>
+      <span className="text-zinc-500">{label}</span>
+      <span className="tabular-nums text-zinc-400">{amount}</span>
     </div>
   );
 }
@@ -105,14 +105,14 @@ function PaymentMethod({
 }) {
   return (
     <div
-      className={`rounded-lg border p-4 transition-colors ${
+      className={`rounded-xl border p-4 transition-colors ${
         active
-          ? "border-brand/30 bg-brand-muted"
+          ? "border-white/15 bg-white/[0.04]"
           : "border-surface-border bg-transparent"
       }`}
     >
-      <p className="text-sm font-medium text-foreground-secondary">{title}</p>
-      <p className="mt-1 text-xs text-foreground-faint">{desc}</p>
+      <p className="text-sm font-medium text-zinc-200">{title}</p>
+      <p className="mt-1 text-xs text-zinc-600">{desc}</p>
     </div>
   );
 }

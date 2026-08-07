@@ -107,10 +107,33 @@ export async function fetchVicidialApi(
     ...params,
   });
   const url = `${creds.baseUrl.replace(/\/$/, "")}/vicidial/non_agent_api.php?${query}`;
-  const res = await fetch(url, { cache: "no-store" });
+
+  let res: Response;
+  try {
+    res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(25_000) });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "network error";
+    const host = creds.baseUrl.replace(/^https?:\/\//i, "").split("/")[0];
+    const timedOut = /timeout|aborted/i.test(reason);
+    throw new Error(
+      timedOut
+        ? `ViciDial API timed out reaching ${host}. The dashboard server must reach port 80 on the dialer ` +
+            `(use http://169.58.105.180 — not https). From the ViciDial box, curl http://127.0.0.1/vicidial/non_agent_api.php should work; ` +
+            "if that works but this fails, open firewall + cloud security group for port 80 from your dashboard host."
+        : `ViciDial API unreachable at ${host} (${reason}). Use http:// with the dialer's public IP.`,
+    );
+  }
+
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`ViciDial returned ${res.status}`);
+    const host = creds.baseUrl.replace(/^https?:\/\//i, "").split("/")[0];
+    if (res.status === 504 || res.status === 502) {
+      throw new Error(
+        `ViciDial gateway timed out (${res.status}) for ${host}. ` +
+          "Update Integrations → Server URL to http://169.58.105.180 (or test with curl from your PC).",
+      );
+    }
+    throw new Error(`ViciDial returned ${res.status} for ${host}`);
   }
   return text;
 }

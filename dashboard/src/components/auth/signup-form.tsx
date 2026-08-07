@@ -61,7 +61,7 @@ export function SignupForm() {
   return (
     <div className="rounded-lg border border-surface-border bg-surface-raised p-6 sm:p-8">
       <div className="mb-6 border-b border-surface-border-subtle pb-6">
-        <p className="data-label">Parasite</p>
+        <p className="data-label">AI Fronter</p>
         <h1 className="mt-2 text-xl font-semibold text-foreground">Create account</h1>
         <p className="mt-1.5 text-body text-foreground-muted">Set up your call center workspace.</p>
       </div>

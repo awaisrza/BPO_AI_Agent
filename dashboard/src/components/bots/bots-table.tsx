@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
+import { Select, Input } from "@/components/ui/input";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -35,6 +35,7 @@ type BotListItem = {
   campaignId: string | null;
   campaignName: string;
   campaignStatus: CampaignStatus | null;
+  vicidialAgentUser: string;
 };
 
 function botStatus(status: string) {
@@ -72,7 +73,7 @@ export function BotsTable() {
 
       const [{ data: botRows, error: botsError }, { data: campaignRows, error: campaignsError }] =
         await Promise.all([
-          supabase.from("bots").select("id, name, status, campaign_id").order("name", { ascending: true }),
+          supabase.from("bots").select("id, name, status, campaign_id, vicidial_agent_user").order("name", { ascending: true }),
           supabase.from("campaigns").select("id, name, status").order("name"),
         ]);
 
@@ -101,6 +102,7 @@ export function BotsTable() {
             campaignId: bot.campaign_id,
             campaignName: campaign?.name ?? "—",
             campaignStatus: campaign?.status ?? null,
+            vicidialAgentUser: bot.vicidial_agent_user ?? "",
           };
         }),
       );
@@ -114,6 +116,31 @@ export function BotsTable() {
   useEffect(() => {
     loadBots();
   }, [loadBots]);
+
+  async function updateVicidialUser(botId: string, vicidialAgentUser: string) {
+    setActionError("");
+    setBusyBotId(botId);
+
+    try {
+      const supabase = createClient();
+      const { error: updateError } = await supabase
+        .from("bots")
+        .update({ vicidial_agent_user: vicidialAgentUser.trim() || null })
+        .eq("id", botId);
+
+      if (updateError) throw updateError;
+
+      setBots((prev) =>
+        prev.map((bot) =>
+          bot.id === botId ? { ...bot, vicidialAgentUser: vicidialAgentUser.trim() } : bot,
+        ),
+      );
+    } catch (err) {
+      setActionError(formatSupabaseError(err, "Could not update ViciDial login."));
+    } finally {
+      setBusyBotId(null);
+    }
+  }
 
   async function reassignCampaign(botId: string, campaignId: string) {
     setActionError("");
@@ -166,7 +193,7 @@ export function BotsTable() {
           description={`${bots.length} agent${bots.length === 1 ? "" : "s"} · real-time status`}
         />
         <CardBody className="px-0 pb-0 pt-0">
-          {loading && <TableSkeleton rows={5} cols={5} />}
+          {loading && <TableSkeleton rows={5} cols={6} />}
 
           {error && (
             <div className="p-5">
@@ -197,6 +224,7 @@ export function BotsTable() {
             <Table>
               <TableHead>
                 <TableHeaderCell>Agent ID</TableHeaderCell>
+                <TableHeaderCell>ViciDial login</TableHeaderCell>
                 <TableHeaderCell>Campaign</TableHeaderCell>
                 <TableHeaderCell>Status</TableHeaderCell>
                 <TableHeaderCell className="text-right">Calls/hr</TableHeaderCell>
@@ -209,6 +237,20 @@ export function BotsTable() {
                   return (
                     <TableRow key={bot.id}>
                       <TableCell className="font-medium text-foreground">{bot.name}</TableCell>
+                      <TableCell>
+                        <Input
+                          className="w-28 py-1.5 font-mono text-xs"
+                          defaultValue={bot.vicidialAgentUser}
+                          disabled={isBusy}
+                          placeholder="6666"
+                          onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+                            const next = e.target.value.trim();
+                            if (next !== bot.vicidialAgentUser) {
+                              void updateVicidialUser(bot.id, next);
+                            }
+                          }}
+                        />
+                      </TableCell>
                       <TableCell>
                         {campaigns.length === 0 ? (
                           <span className="text-foreground-muted">No campaigns</span>

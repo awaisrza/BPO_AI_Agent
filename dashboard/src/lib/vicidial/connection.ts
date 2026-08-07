@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { VicidialCredentials } from "./closers";
 import { fetchVicidialClosers, fetchVicidialVersion } from "./closers";
 
@@ -6,11 +7,18 @@ export type VicidialConnectionResult = {
   agentCount: number;
 };
 
+function defaultSchemeForHost(host: string): "http" | "https" {
+  // ViciDial installs almost always serve plain HTTP; bare IPs must not default to HTTPS.
+  if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(host)) return "http";
+  if (/^localhost(:\d+)?$/i.test(host) || host.startsWith("127.")) return "http";
+  return "https";
+}
+
 export function normalizeVicidialUrl(url: string): string {
   let trimmed = url.trim().replace(/\/$/, "");
   if (!trimmed) return "";
   if (!/^https?:\/\//i.test(trimmed)) {
-    trimmed = `https://${trimmed}`;
+    trimmed = `${defaultSchemeForHost(trimmed)}://${trimmed}`;
   }
 
   // Users often paste the admin login page — keep only the server root.
@@ -67,6 +75,30 @@ export async function testVicidialConnection(
     }
     throw err;
   }
+}
+
+type OrgVicidialFields = {
+  vicidial_url: string | null;
+  vicidial_user: string | null;
+  vicidial_pass: string | null;
+};
+
+/** Same org join as campaign readiness — works without service role key. */
+export async function getVicidialCredsForCampaign(
+  supabase: SupabaseClient,
+  campaignId: string,
+): Promise<VicidialCredentials & { configured: boolean }> {
+  const { data: campaign } = await supabase
+    .from("campaigns")
+    .select("organizations(vicidial_url, vicidial_user, vicidial_pass)")
+    .eq("id", campaignId)
+    .maybeSingle();
+
+  const org = campaign?.organizations as OrgVicidialFields | OrgVicidialFields[] | null;
+  const orgRow = Array.isArray(org) ? (org[0] ?? null) : org;
+  return resolveVicidialCreds(
+    orgRow ?? { vicidial_url: null, vicidial_user: null, vicidial_pass: null },
+  );
 }
 
 export function resolveVicidialCreds(

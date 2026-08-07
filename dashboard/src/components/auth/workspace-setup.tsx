@@ -42,7 +42,7 @@ export function WorkspaceSetup({ email }: { email: string }) {
     <div className="flex min-h-screen items-center justify-center bg-surface px-4 py-10">
       <div className="w-full max-w-2xl space-y-6">
         <div className="text-center">
-          <p className="data-label">Parasite</p>
+          <p className="data-label">AI Fronter</p>
           <h1 className="mt-2 text-2xl font-semibold text-foreground">Finish workspace setup</h1>
           <p className="mt-2 text-body text-foreground-muted">
             Signed in as <span className="text-foreground">{email}</span>. One SQL script in Supabase
