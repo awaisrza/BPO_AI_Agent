@@ -66,6 +66,71 @@ class ViciDialClient:
             }
         )
 
+    async def ra_call_control(
+        self,
+        agent_user: str,
+        call_id: str,
+        *,
+        stage: str,
+        ingroup_choices: str | None = None,
+        phone_number: str | None = None,
+        status: str | None = None,
+    ) -> str:
+        """Remote-agent call control (hangup / blind transfer). Requires ViciDial call ID."""
+        params: dict[str, str] = {
+            "function": "ra_call_control",
+            "agent_user": agent_user,
+            "value": call_id,
+            "stage": stage,
+        }
+        if ingroup_choices:
+            params["ingroup_choices"] = ingroup_choices
+        if phone_number:
+            params["phone_number"] = phone_number
+        if status:
+            params["status"] = status
+        result = await self._agent_api(params)
+        logger.info(f"ViciDial ra_call_control {stage}: {result[:200]}")
+        return result
+
+    async def remote_agent_transfer(
+        self,
+        agent_user: str,
+        call_id: str,
+        *,
+        ingroup: str | None = None,
+        extension: str | None = None,
+        status: str = "XFER",
+    ) -> str:
+        """Blind transfer for a remote agent seat (e.g. AI bot on AudioSocket)."""
+        if extension:
+            return await self.ra_call_control(
+                agent_user,
+                call_id,
+                stage="EXTENSIONTRANSFER",
+                phone_number=extension,
+                status=status,
+            )
+        ingroup = (ingroup or "DEFAULTINGROUP").strip() or "DEFAULTINGROUP"
+        return await self.ra_call_control(
+            agent_user,
+            call_id,
+            stage="INGROUPTRANSFER",
+            ingroup_choices=ingroup,
+            status=status,
+        )
+
+    async def remote_agent_hangup(
+        self, agent_user: str, call_id: str, *, status: str = "NI"
+    ) -> str:
+        return await self.ra_call_control(
+            agent_user, call_id, stage="HANGUP", status=status
+        )
+
+    @staticmethod
+    def api_succeeded(result: str) -> bool:
+        return result.strip().upper().startswith("SUCCESS:")
+
     async def set_disposition(self, agent_user: str, status: str) -> str:
         """Set the call status (e.g. 'XFER', 'NI' for not interested, 'AM' for answering machine)."""
         return await self._agent_api(
@@ -75,6 +140,33 @@ class ViciDialClient:
                 "value": status,
             }
         )
+
+    async def change_campaign(self, agent_user: str, campaign_id: str) -> str:
+        """Point a ViciDial agent seat at the outbound campaign hopper."""
+        return await self._agent_api(
+            {
+                "function": "change_campaign",
+                "agent_user": agent_user,
+                "value": campaign_id,
+            }
+        )
+
+    async def resume_agent(self, agent_user: str) -> str:
+        """Unpause agent so ViciDial auto-dialer can feed calls."""
+        return await self._agent_api(
+            {
+                "function": "external_pause",
+                "agent_user": agent_user,
+                "value": "RESUME",
+            }
+        )
+
+    async def prepare_for_dialing(self, agent_user: str, campaign_id: str) -> None:
+        """Map agent to campaign and resume — BPO must have campaign active + leads in hopper."""
+        result = await self.change_campaign(agent_user, campaign_id)
+        logger.info(f"ViciDial change_campaign({agent_user} -> {campaign_id}): {result[:120]}")
+        result = await self.resume_agent(agent_user)
+        logger.info(f"ViciDial resume_agent({agent_user}): {result[:120]}")
 
     async def hangup(self, agent_user: str) -> str:
         return await self._agent_api(

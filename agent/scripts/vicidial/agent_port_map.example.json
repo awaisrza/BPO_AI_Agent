@@ -1,0 +1,7 @@
+{
+  "gpu_host": "79.116.54.219",
+  "agents": {
+    "6666": 53512
+  },
+  "comment": "Copy to /etc/ai-fronter/agent_port_map.json on ViciDial server. Keys are vicidial_agent_user; values are FLEET_WORKER_MEDIA_PORT on GPU."
+}

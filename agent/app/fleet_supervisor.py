@@ -16,19 +16,23 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from loguru import logger
 
 from .config import settings
+from .supabase_client import supabase_config, supabase_headers
 
 _AGENT_ROOT = Path(__file__).resolve().parent.parent
 _PYTHON = sys.executable
 _SUPERVISOR_SECRET = os.getenv("GPU_SUPERVISOR_SECRET", "").strip()
 _POLL_SEC = float(os.getenv("FLEET_POLL_SEC", "20") or "20")
 _MAX_WORKERS = int(os.getenv("FLEET_MAX_WORKERS", "3") or "3")
-_AGENT_MODE = os.getenv("FLEET_AGENT_MODE", "fleet").strip().lower()
+_MEDIA_BASE_PORT = int(os.getenv("FLEET_MEDIA_BASE_PORT", "8800") or "8800")
 
 
 @dataclass
 class WorkerRecord:
     bot_id: str
     campaign_id: str
+    vicidial_agent_user: str
+    vicidial_campaign_id: str | None
+    media_port: int
     process: subprocess.Popen[Any]
     started_at: float = field(default_factory=time.time)
 
@@ -39,39 +43,35 @@ class FleetSupervisor:
         self._last_sync: float = 0.0
         self._last_error: str | None = None
 
-    def _headers(self) -> dict[str, str]:
-        return {
-            "apikey": settings.supabase_service_role_key,
-            "Authorization": f"Bearer {settings.supabase_service_role_key}",
-        }
-
     def _fetch_running_bots(self, campaign_id: str | None = None) -> list[dict[str, str]]:
-        if not settings.supabase_url or not settings.supabase_service_role_key:
-            raise RuntimeError("Supabase is not configured on the GPU host.")
-
-        base = settings.supabase_url.rstrip("/")
+        base, key = supabase_config()
         with httpx.Client(timeout=20.0) as client:
-            campaign_params: dict[str, str] = {"select": "id", "status": "eq.running"}
+            campaign_params: dict[str, str] = {"select": "id,vicidial_campaign_id", "status": "eq.running"}
             if campaign_id:
                 campaign_params["id"] = f"eq.{campaign_id}"
             camp_resp = client.get(
                 f"{base}/rest/v1/campaigns",
                 params=campaign_params,
-                headers=self._headers(),
+                headers=supabase_headers(key),
             )
             camp_resp.raise_for_status()
-            running_ids = [row["id"] for row in camp_resp.json() if row.get("id")]
-            if not running_ids:
+            campaigns = camp_resp.json()
+            if not campaigns:
                 return []
+
+            running_ids = [row["id"] for row in campaigns if row.get("id")]
+            campaign_vd = {
+                row["id"]: (row.get("vicidial_campaign_id") or "").strip() or None for row in campaigns
+            }
 
             in_list = ",".join(running_ids)
             bot_resp = client.get(
                 f"{base}/rest/v1/bots",
                 params={
-                    "select": "id,name,campaign_id",
+                    "select": "id,name,campaign_id,vicidial_agent_user",
                     "campaign_id": f"in.({in_list})",
                 },
-                headers=self._headers(),
+                headers=supabase_headers(key),
             )
             bot_resp.raise_for_status()
             rows = bot_resp.json()
@@ -81,28 +81,55 @@ class FleetSupervisor:
             bot_id = row.get("id")
             cid = row.get("campaign_id")
             if bot_id and cid:
-                bots.append({"id": bot_id, "name": row.get("name") or bot_id, "campaign_id": cid})
+                bots.append(
+                    {
+                        "id": bot_id,
+                        "name": row.get("name") or bot_id,
+                        "campaign_id": cid,
+                        "vicidial_agent_user": (row.get("vicidial_agent_user") or "").strip(),
+                        "vicidial_campaign_id": campaign_vd.get(cid) or "",
+                    }
+                )
         return bots[:_MAX_WORKERS]
 
-    def _spawn_worker(self, bot_id: str, campaign_id: str) -> WorkerRecord:
-        env = os.environ.copy()
-        if _AGENT_MODE == "telnyx":
-            port = 8765 + len(self._workers)
-            env["AGENT_PORT"] = str(port)
-            cmd = [_PYTHON, "-m", "app.main", "--telnyx", "--bot-id", bot_id]
-        else:
-            cmd = [_PYTHON, "-m", "app.fleet_worker", bot_id]
+    def _next_media_port(self) -> int:
+        used = {rec.media_port for rec in self._workers.values()}
+        for offset in range(_MAX_WORKERS):
+            port = _MEDIA_BASE_PORT + offset
+            if port not in used:
+                return port
+        return _MEDIA_BASE_PORT + len(self._workers)
 
-        logger.info(f"Starting worker: {' '.join(cmd)}")
+    def _spawn_worker(self, bot: dict[str, str]) -> WorkerRecord:
+        bot_id = bot["id"]
+        media_port = self._next_media_port()
+        cmd = [_PYTHON, "-m", "app.fleet_worker", bot_id]
+        env = os.environ.copy()
+        env["FLEET_WORKER_MEDIA_PORT"] = str(media_port)
+        logger.info(
+            f"Starting worker: {' '.join(cmd)} "
+            f"(ViciDial user={bot.get('vicidial_agent_user')}, media port={media_port})"
+        )
+        # Log to a file — PIPE without a reader fills and can hang/kill the worker.
+        log_path = Path(f"/tmp/fleet_worker_{bot_id[:8]}.log")
+        log_fh = open(log_path, "a", encoding="utf-8")
+        logger.info(f"Worker log: {log_path}")
         proc = subprocess.Popen(
             cmd,
             cwd=str(_AGENT_ROOT),
             env=env,
-            stdout=subprocess.PIPE,
+            stdout=log_fh,
             stderr=subprocess.STDOUT,
             text=True,
         )
-        return WorkerRecord(bot_id=bot_id, campaign_id=campaign_id, process=proc)
+        return WorkerRecord(
+            bot_id=bot_id,
+            campaign_id=bot["campaign_id"],
+            vicidial_agent_user=bot.get("vicidial_agent_user") or "",
+            vicidial_campaign_id=bot.get("vicidial_campaign_id") or None,
+            media_port=media_port,
+            process=proc,
+        )
 
     def _stop_worker(self, bot_id: str) -> None:
         record = self._workers.pop(bot_id, None)
@@ -146,14 +173,11 @@ class FleetSupervisor:
             if len(self._workers) >= _MAX_WORKERS:
                 logger.warning(f"Max workers ({_MAX_WORKERS}) reached — skipping bot {bot_id}")
                 continue
-            self._workers[bot_id] = self._spawn_worker(bot_id, bot["campaign_id"])
+            if not bot.get("vicidial_agent_user"):
+                logger.warning(f"Bot {bot_id} missing vicidial_agent_user — skipping")
+                continue
+            self._workers[bot_id] = self._spawn_worker(bot)
 
-        self._last_sync = time.time()
-        return self.status()
-
-    def stop_all(self) -> dict[str, Any]:
-        for bot_id in list(self._workers):
-            self._stop_worker(bot_id)
         self._last_sync = time.time()
         return self.status()
 
@@ -172,6 +196,9 @@ class FleetSupervisor:
                 {
                     "bot_id": bot_id,
                     "campaign_id": rec.campaign_id,
+                    "vicidial_agent_user": rec.vicidial_agent_user,
+                    "vicidial_campaign_id": rec.vicidial_campaign_id,
+                    "media_port": rec.media_port,
                     "pid": rec.process.pid,
                     "running": rec.process.poll() is None,
                     "uptime_sec": int(time.time() - rec.started_at),
@@ -183,7 +210,6 @@ class FleetSupervisor:
             "workers": workers,
             "worker_count": len(workers),
             "max_workers": _MAX_WORKERS,
-            "agent_mode": _AGENT_MODE,
             "last_sync_at": self._last_sync or None,
         }
 
@@ -232,7 +258,9 @@ def build_app() -> FastAPI:
         _check_auth(authorization, x_supervisor_secret)
         if campaign_id:
             return supervisor.stop_campaign(campaign_id)
-        return supervisor.stop_all()
+        for bot_id in list(supervisor._workers):
+            supervisor._stop_worker(bot_id)
+        return supervisor.status()
 
     return app
 
@@ -249,14 +277,13 @@ async def poll_loop() -> None:
 def run_supervisor(host: str | None = None, port: int | None = None) -> None:
     import uvicorn
 
-    bind_host = host or os.getenv("SUPERVISOR_HOST", "0.0.0.0")
-    bind_port = port or int(os.getenv("SUPERVISOR_PORT", "8770") or "8770")
-
     if not settings.supabase_url or not settings.supabase_service_role_key:
         raise SystemExit(
             "Fleet supervisor needs NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local"
         )
 
+    bind_host = host or os.getenv("SUPERVISOR_HOST", "0.0.0.0")
+    bind_port = port or int(os.getenv("SUPERVISOR_PORT", "8770") or "8770")
     app = build_app()
 
     @app.on_event("startup")

@@ -1,4 +1,4 @@
-"""Fleet worker — loads a bot's script, pre-warms GPU models, sends heartbeats to Supabase."""
+"""Fleet worker — ViciDial agent prep, media server, voice pre-warm, Supabase heartbeat."""
 
 from __future__ import annotations
 
@@ -11,50 +11,74 @@ import sys
 import httpx
 from loguru import logger
 
-from .config import settings
-from .supabase_scripts import ScriptLoadError, load_script_for_bot
+from .supabase_client import ScriptLoadError, supabase_config, supabase_headers
+from .supabase_scripts import load_bot_context
+from .vicidial_worker_server import start_worker_server
 
 
-def _supabase_headers() -> dict[str, str]:
-    return {
-        "apikey": settings.supabase_service_role_key,
-        "Authorization": f"Bearer {settings.supabase_service_role_key}",
-        "Content-Type": "application/json",
-    }
-
-
-def _patch_bot_status(bot_id: str, status: str) -> None:
-    base = settings.supabase_url.rstrip("/")
+def patch_bot_status(bot_id: str, status: str) -> None:
+    base, key = supabase_config()
     url = f"{base}/rest/v1/bots"
     params = {"id": f"eq.{bot_id}"}
     with httpx.Client(timeout=15.0) as client:
         resp = client.patch(
             url,
             params=params,
-            headers={**_supabase_headers(), "Prefer": "return=minimal"},
+            headers={
+                **supabase_headers(key),
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
             json={"status": status},
         )
         resp.raise_for_status()
 
 
-async def run_fleet_worker(bot_id: str) -> None:
-    if not settings.supabase_url or not settings.supabase_service_role_key:
-        raise SystemExit("Fleet worker needs NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
-
+async def _prepare_vicidial(ctx) -> None:
+    vici = ctx.vicidial_client()
+    if not vici:
+        logger.warning("No ViciDial client — skipping agent prep (set Integrations or .env)")
+        return
+    if not ctx.vicidial_campaign_id:
+        logger.warning("No vicidial_campaign_id on campaign — agent may not receive hopper dials")
+        return
     try:
-        script, agent_user = load_script_for_bot(bot_id)
+        await vici.prepare_for_dialing(ctx.agent_user, ctx.vicidial_campaign_id)
+        logger.info(
+            f"ViciDial agent {ctx.agent_user} mapped to campaign {ctx.vicidial_campaign_id} — "
+            "ensure BPO has campaign ACTIVE and leads in hopper"
+        )
+    except Exception as exc:
+        logger.error(f"ViciDial prepare_for_dialing failed: {exc}")
+
+
+async def run_fleet_worker(bot_id: str) -> None:
+    try:
+        ctx = load_bot_context(bot_id)
     except ScriptLoadError as exc:
         raise SystemExit(str(exc)) from exc
 
-    logger.info(f"Fleet worker starting for bot {agent_user} ({bot_id})")
+    logger.info(
+        f"Fleet worker for {ctx.bot_name} "
+        f"(ViciDial user={ctx.agent_user}, campaign={ctx.vicidial_campaign_id or 'unset'})"
+    )
 
     from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
     from .pipeline import prewarm_voice_stack
 
-    prewarm_voice_stack(script, sample_rate=TELEPHONY_PIPELINE_RATE, telephony=True)
-    logger.info("Voice stack pre-warmed — agent ready for calls")
+    prewarm_voice_stack(ctx.script, sample_rate=TELEPHONY_PIPELINE_RATE, telephony=True)
+    logger.info("Voice stack pre-warmed")
 
-    _patch_bot_status(bot_id, "idle")
+    await _prepare_vicidial(ctx)
+
+    _media_thread, media_port = start_worker_server(ctx)
+    logger.info(
+        f"Ready for ViciDial audio at ws://0.0.0.0:{media_port}/ws "
+        f"(point AGI bridge at GPU_IP:{media_port})"
+    )
+
+    if ctx.bot_id:
+        patch_bot_status(ctx.bot_id, "idle")
 
     stop = asyncio.Event()
 
@@ -69,20 +93,20 @@ async def run_fleet_worker(bot_id: str) -> None:
 
     try:
         while not stop.is_set():
-            try:
-                _patch_bot_status(bot_id, "idle")
-            except Exception as exc:
-                logger.warning(f"Heartbeat failed: {exc}")
+            if ctx.bot_id:
+                try:
+                    await asyncio.to_thread(patch_bot_status, ctx.bot_id, "idle")
+                except Exception as exc:
+                    logger.warning(f"Heartbeat failed: {exc}")
             try:
                 await asyncio.wait_for(stop.wait(), timeout=heartbeat_sec)
             except asyncio.TimeoutError:
                 continue
     finally:
-        try:
-            _patch_bot_status(bot_id, "offline")
-        except Exception:
-            pass
-        logger.info(f"Fleet worker stopped for {agent_user}")
+        if ctx.bot_id:
+            with contextlib.suppress(Exception):
+                patch_bot_status(ctx.bot_id, "offline")
+        logger.info(f"Fleet worker stopped for {ctx.bot_name}")
 
 
 if __name__ == "__main__":

@@ -45,9 +45,10 @@ function vicidialError(text: string, fallback: string): string {
 async function vd(
   creds: VicidialCredentials,
   params: Record<string, string>,
+  options?: { timeoutMs?: number },
 ): Promise<string> {
   try {
-    return await fetchVicidialApi(creds, params);
+    return await fetchVicidialApi(creds, params, options);
   } catch (err) {
     const reason = err instanceof Error ? err.message : "network error";
     return `ERROR: ${reason}`;
@@ -101,19 +102,23 @@ export async function runVicidialTestDial(
     detail: firstLine(remoteText),
   });
 
-  const addLeadText = await vd(creds, {
-    function: "add_lead",
-    phone_number: input.phone_number,
-    phone_code: input.phone_code,
-    list_id: input.list_id,
-    first_name: "Test",
-    last_name: "Dial",
-    add_to_hopper: "Y",
-    hopper_local_call_time_check: "N",
-    dnc_check: "N",
-    campaign_dnc_check: "N",
-    campaign_id: input.vicidialCampaignId,
-  });
+  const addLeadText = await vd(
+    creds,
+    {
+      function: "add_lead",
+      phone_number: input.phone_number,
+      phone_code: input.phone_code,
+      list_id: input.list_id,
+      first_name: "Test",
+      last_name: "Dial",
+      add_to_hopper: "Y",
+      hopper_local_call_time_check: "N",
+      dnc_check: "N",
+      campaign_dnc_check: "N",
+      campaign_id: input.vicidialCampaignId,
+    },
+    { timeoutMs: 60_000 },
+  );
   const leadOk = vicidialStepOk(addLeadText);
   steps.push({
     step: "add_lead",
@@ -170,10 +175,23 @@ export async function runVicidialTestDial(
     }
   } else {
     const failed = steps.filter((s) => !s.ok).map((s) => s.step);
-    message = `Test dial setup failed at: ${failed.join(", ")}. ${vicidialError(
-      addLeadText,
-      vicidialError(campaignText, "Check ViciDial API user level 8+ with modify campaigns and modify leads."),
-    )}`;
+    const allFailed = failed.length === steps.length;
+    const versionFailed = steps.some((s) => s.step === "api_version" && !s.ok);
+    let detail: string;
+    if (allFailed && versionFailed) {
+      detail =
+        "ViciDial API is not responding (version check failed). Apache or MySQL on the dialer is down, hung, or port 80 is blocked. " +
+        "SSH to the ViciDial server and run: bash agent/scripts/vicidial/repair_vicidial_api.sh — or manually: df -h; systemctl restart httpd; curl -m 5 http://127.0.0.1/vicidial/non_agent_api.php?function=version";
+    } else {
+      detail = vicidialError(
+        addLeadText,
+        vicidialError(
+          campaignText,
+          "Check ViciDial API user level 8+ with modify campaigns and modify leads.",
+        ),
+      );
+    }
+    message = `Test dial setup failed at: ${failed.join(", ")}. ${detail}`;
   }
 
   return {
