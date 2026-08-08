@@ -192,6 +192,9 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
     idle_watchdog_task: asyncio.Task | None = None
     greeting_watchdog_task: asyncio.Task | None = None
     greeting_kick_task: asyncio.Task | None = None
+    active_call = None
+    end_reason: str | None = None
+    fronter = None
 
     try:
         await _ensure_websocket_accepted(websocket)
@@ -224,6 +227,16 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 return
             _active_sessions.add(session_key)
 
+        from .call_lifecycle import begin_call
+
+        phone = (cd.get("call_id") or cd.get("from") or cd.get("caller") or "").strip() or None
+        active_call = begin_call(
+            ctx,
+            session_id=session_key,
+            phone=phone,
+            vicidial_call_id=vicidial_call_id,
+        )
+
         shutdown = _CallShutdown(session_key=session_key, websocket=websocket)
 
         encoding = cd.get("outbound_encoding") or "PCMU"
@@ -252,6 +265,8 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
         )
 
         async def _on_call_should_end(reason: str) -> None:
+            nonlocal end_reason
+            end_reason = reason
             await shutdown.end_call(reason)
 
         vici = ctx.vicidial_client()
@@ -417,10 +432,12 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
         finally:
             _event("=== pipeline worker finished ===")
             if not shutdown.done:
+                end_reason = "runner_finished"
                 await shutdown.end_call("runner_finished")
     except Exception:
         _event("=== VICIDIAL CRASH ===\n" + traceback.format_exc())
         if shutdown is not None:
+            end_reason = "exception"
             await shutdown.end_call("exception")
         raise
     finally:
@@ -433,6 +450,21 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
         if session_key:
             async with _session_lock:
                 _active_sessions.discard(session_key)
+        if active_call is not None:
+            from .call_lifecycle import complete_call
+
+            transferred = False
+            if fronter is not None:
+                from .conversation import State
+
+                transferred = fronter._engine.state == State.TRANSFER
+            await asyncio.to_thread(
+                complete_call,
+                ctx,
+                active_call,
+                reason=end_reason or "runner_finished",
+                transferred=transferred,
+            )
         if ctx.bot_id:
             from .fleet_worker import patch_bot_status
 

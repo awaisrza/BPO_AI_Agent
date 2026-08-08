@@ -1,0 +1,25 @@
+<!--
+  AI Fronter — inbound remote-agent calls (production SIP edge)
+
+  Destination: {agent_user}@{org_ref}.bots.yourplatform.com
+  Example:     6666@acme-corp.bots.yourplatform.com
+
+  Requires: mod_audio_stream, ai_fronter_stream.lua, run_sip_edge.py on :8790
+-->
+<include>
+  <extension name="ai_fronter_inbound">
+    <condition field="destination_number" expression="^(\d{3,6})$">
+      <action application="set" data="hangup_after_bridge=true"/>
+      <action application="set" data="agent_user=$1"/>
+      <!-- First label of To-host: acme-corp.bots.example.com -> acme-corp -->
+      <action application="set" data="org_slug=${regex(${sip_to_host}|^([^.]+)\.)}"/>
+      <action application="set" data="caller=${caller_id_number}"/>
+      <action application="set" data="callee=${destination_number}"/>
+      <!-- mod_audio_stream v1.0.3+ bidirectional playback -->
+      <action application="set" data="STREAM_PLAYBACK=true"/>
+      <action application="set" data="STREAM_SUPPRESS_LOG=false"/>
+      <action application="answer"/>
+      <action application="lua" data="ai_fronter_stream.lua"/>
+    </condition>
+  </extension>
+</include>

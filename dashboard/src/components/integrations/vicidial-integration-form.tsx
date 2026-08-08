@@ -243,7 +243,8 @@ export function VicidialIntegrationForm() {
         </Field>
 
         <p className="text-caption text-foreground-faint">
-          AGI script and campaign mapping are configured on your dialer server during onboarding.
+          Production: use SIP remote agent URIs below (no AGI script). Lab pilots may still use an
+          on-dialer AGI bridge — see agent/docs/bpo-sip-onboarding.md.
         </p>
 
         {error && <Alert variant="error">{error}</Alert>}

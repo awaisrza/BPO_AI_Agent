@@ -1,0 +1,21 @@
+[Unit]
+Description=AI Fronter SIP edge (HTTP/WS → GPU fleet workers)
+After=network-online.target redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ai-fronter
+Group=ai-fronter
+WorkingDirectory=/opt/ai-fronter/agent
+EnvironmentFile=-/etc/ai-fronter/sip-edge.env
+ExecStart=/opt/ai-fronter/agent/.venv/bin/python run_sip_edge.py
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65535
+
+# Hardening (adjust if needed)
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

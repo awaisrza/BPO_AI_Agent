@@ -64,7 +64,11 @@ async def run_fleet_worker(bot_id: str) -> None:
     )
 
     from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
+    from .inference_client import inference_pool_enabled
     from .pipeline import prewarm_voice_stack
+
+    if inference_pool_enabled():
+        logger.info("Inference pool mode — workers will not load local GPU models")
 
     prewarm_voice_stack(ctx.script, sample_rate=TELEPHONY_PIPELINE_RATE, telephony=True)
     logger.info("Voice stack pre-warmed")
@@ -76,6 +80,27 @@ async def run_fleet_worker(bot_id: str) -> None:
         f"Ready for ViciDial audio at ws://0.0.0.0:{media_port}/ws "
         f"(point AGI bridge at GPU_IP:{media_port})"
     )
+
+    gpu_host = (
+        os.getenv("GPU_PUBLIC_HOST")
+        or os.getenv("FLEET_GPU_PUBLIC_HOST")
+        or os.getenv("VAST_PUBLIC_IP")
+        or "127.0.0.1"
+    )
+    try:
+        from .call_router import register_worker
+
+        register_worker(
+            bot_id=ctx.bot_id or bot_id,
+            agent_user=ctx.agent_user,
+            media_port=media_port,
+            gpu_host=gpu_host,
+            org_id=ctx.org_id,
+            campaign_id=ctx.campaign_id,
+            ready=True,
+        )
+    except Exception as exc:
+        logger.warning(f"Call router registration skipped: {exc}")
 
     if ctx.bot_id:
         patch_bot_status(ctx.bot_id, "idle")
@@ -96,6 +121,9 @@ async def run_fleet_worker(bot_id: str) -> None:
             if ctx.bot_id:
                 try:
                     await asyncio.to_thread(patch_bot_status, ctx.bot_id, "idle")
+                    from .call_lifecycle import mark_worker_ready
+
+                    await asyncio.to_thread(mark_worker_ready, ctx, ready=True)
                 except Exception as exc:
                     logger.warning(f"Heartbeat failed: {exc}")
             try:
@@ -103,6 +131,12 @@ async def run_fleet_worker(bot_id: str) -> None:
             except asyncio.TimeoutError:
                 continue
     finally:
+        try:
+            from .call_router import unregister_worker
+
+            unregister_worker(ctx.bot_id or bot_id, agent_user=ctx.agent_user)
+        except Exception:
+            pass
         if ctx.bot_id:
             with contextlib.suppress(Exception):
                 patch_bot_status(ctx.bot_id, "offline")

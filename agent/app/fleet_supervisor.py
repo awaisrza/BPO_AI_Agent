@@ -24,12 +24,30 @@ _SUPERVISOR_SECRET = os.getenv("GPU_SUPERVISOR_SECRET", "").strip()
 _POLL_SEC = float(os.getenv("FLEET_POLL_SEC", "20") or "20")
 _MAX_WORKERS = int(os.getenv("FLEET_MAX_WORKERS", "3") or "3")
 _MEDIA_BASE_PORT = int(os.getenv("FLEET_MEDIA_BASE_PORT", "8800") or "8800")
+_INFERENCE_POOL_PORT = int(os.getenv("INFERENCE_POOL_PORT", "8780") or "8780")
+_INFERENCE_POOL_HOST = os.getenv("INFERENCE_POOL_HOST", "127.0.0.1").strip() or "127.0.0.1"
+_INFERENCE_POOL_URL = (
+    os.getenv("INFERENCE_POOL_URL", "").strip()
+    or f"http://{_INFERENCE_POOL_HOST}:{_INFERENCE_POOL_PORT}"
+)
+_INFERENCE_POOL_ENABLED = os.getenv("INFERENCE_POOL_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
+
+@dataclass
+class PoolRecord:
+    process: subprocess.Popen[Any]
+    started_at: float = field(default_factory=time.time)
 
 
 @dataclass
 class WorkerRecord:
     bot_id: str
     campaign_id: str
+    org_id: str | None
     vicidial_agent_user: str
     vicidial_campaign_id: str | None
     media_port: int
@@ -40,8 +58,74 @@ class WorkerRecord:
 class FleetSupervisor:
     def __init__(self) -> None:
         self._workers: dict[str, WorkerRecord] = {}
+        self._pool: PoolRecord | None = None
         self._last_sync: float = 0.0
         self._last_error: str | None = None
+
+    def _pool_health(self) -> dict[str, Any] | None:
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                resp = client.get(f"{_INFERENCE_POOL_URL.rstrip('/')}/health")
+                resp.raise_for_status()
+                return resp.json()
+        except Exception:
+            return None
+
+    def _ensure_inference_pool(self) -> None:
+        if not _INFERENCE_POOL_ENABLED:
+            return
+        health = self._pool_health()
+        if health and health.get("ok"):
+            return
+        if self._pool and self._pool.process.poll() is None:
+            return
+
+        cmd = [_PYTHON, "-m", "app.inference_pool"]
+        env = os.environ.copy()
+        env.setdefault("INFERENCE_POOL_HOST", _INFERENCE_POOL_HOST)
+        env.setdefault("INFERENCE_POOL_PORT", str(_INFERENCE_POOL_PORT))
+        env.setdefault("INFERENCE_POOL_URL", _INFERENCE_POOL_URL)
+        log_path = Path("/tmp/inference_pool.log")
+        log_fh = open(log_path, "a", encoding="utf-8")
+        logger.info(f"Starting inference pool: {' '.join(cmd)} (log={log_path})")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(_AGENT_ROOT),
+            env=env,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        self._pool = PoolRecord(process=proc)
+
+        deadline = time.monotonic() + 180.0
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                raise RuntimeError("Inference pool process exited during startup")
+            health = self._pool_health()
+            if health and health.get("ok"):
+                logger.info(
+                    f"Inference pool ready at {_INFERENCE_POOL_URL} "
+                    f"(cache={health.get('cache_size', 0)})"
+                )
+                return
+            time.sleep(2.0)
+        raise RuntimeError(f"Inference pool at {_INFERENCE_POOL_URL} did not become ready")
+
+    def _stop_inference_pool(self) -> None:
+        record = self._pool
+        self._pool = None
+        if not record:
+            return
+        proc = record.process
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+        logger.info("Stopped inference pool")
 
     def _fetch_running_bots(self, campaign_id: str | None = None) -> list[dict[str, str]]:
         base, key = supabase_config()
@@ -68,7 +152,7 @@ class FleetSupervisor:
             bot_resp = client.get(
                 f"{base}/rest/v1/bots",
                 params={
-                    "select": "id,name,campaign_id,vicidial_agent_user",
+                    "select": "id,name,campaign_id,vicidial_agent_user,org_id",
                     "campaign_id": f"in.({in_list})",
                 },
                 headers=supabase_headers(key),
@@ -88,6 +172,7 @@ class FleetSupervisor:
                         "campaign_id": cid,
                         "vicidial_agent_user": (row.get("vicidial_agent_user") or "").strip(),
                         "vicidial_campaign_id": campaign_vd.get(cid) or "",
+                        "org_id": (row.get("org_id") or "").strip() or "",
                     }
                 )
         return bots[:_MAX_WORKERS]
@@ -106,6 +191,8 @@ class FleetSupervisor:
         cmd = [_PYTHON, "-m", "app.fleet_worker", bot_id]
         env = os.environ.copy()
         env["FLEET_WORKER_MEDIA_PORT"] = str(media_port)
+        if _INFERENCE_POOL_ENABLED:
+            env.setdefault("INFERENCE_POOL_URL", _INFERENCE_POOL_URL)
         logger.info(
             f"Starting worker: {' '.join(cmd)} "
             f"(ViciDial user={bot.get('vicidial_agent_user')}, media port={media_port})"
@@ -125,6 +212,7 @@ class FleetSupervisor:
         return WorkerRecord(
             bot_id=bot_id,
             campaign_id=bot["campaign_id"],
+            org_id=(bot.get("org_id") or "").strip() or None,
             vicidial_agent_user=bot.get("vicidial_agent_user") or "",
             vicidial_campaign_id=bot.get("vicidial_campaign_id") or None,
             media_port=media_port,
@@ -154,6 +242,8 @@ class FleetSupervisor:
     def sync(self, campaign_id: str | None = None) -> dict[str, Any]:
         self._reap_dead_workers()
         try:
+            if _INFERENCE_POOL_ENABLED:
+                self._ensure_inference_pool()
             desired = self._fetch_running_bots(campaign_id)
             desired_ids = {b["id"] for b in desired}
             self._last_error = None
@@ -185,6 +275,8 @@ class FleetSupervisor:
         for bot_id, rec in list(self._workers.items()):
             if rec.campaign_id == campaign_id:
                 self._stop_worker(bot_id)
+        if not self._workers:
+            self._stop_inference_pool()
         self._last_sync = time.time()
         return self.status()
 
@@ -198,6 +290,7 @@ class FleetSupervisor:
                     "campaign_id": rec.campaign_id,
                     "vicidial_agent_user": rec.vicidial_agent_user,
                     "vicidial_campaign_id": rec.vicidial_campaign_id,
+                    "org_id": rec.org_id,
                     "media_port": rec.media_port,
                     "pid": rec.process.pid,
                     "running": rec.process.poll() is None,
@@ -207,6 +300,12 @@ class FleetSupervisor:
         return {
             "ok": self._last_error is None,
             "error": self._last_error,
+            "inference_pool": {
+                "enabled": _INFERENCE_POOL_ENABLED,
+                "url": _INFERENCE_POOL_URL if _INFERENCE_POOL_ENABLED else None,
+                "running": self._pool.process.poll() is None if self._pool else False,
+                "health": self._pool_health() if _INFERENCE_POOL_ENABLED else None,
+            },
             "workers": workers,
             "worker_count": len(workers),
             "max_workers": _MAX_WORKERS,
@@ -260,7 +359,63 @@ def build_app() -> FastAPI:
             return supervisor.stop_campaign(campaign_id)
         for bot_id in list(supervisor._workers):
             supervisor._stop_worker(bot_id)
+        supervisor._stop_inference_pool()
         return supervisor.status()
+
+    @app.get("/route")
+    def route_call(
+        authorization: str | None = Header(default=None),
+        x_supervisor_secret: str | None = Header(default=None),
+        agent_user: str = Query(..., min_length=1),
+        org_id: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        """Resolve ViciDial agent user → GPU worker media endpoint (Redis or live supervisor)."""
+        _check_auth(authorization, x_supervisor_secret)
+        from .call_router import resolve_agent, router_status
+
+        route = resolve_agent(agent_user, org_id=org_id)
+        if route is not None:
+            return {"ok": True, "source": "redis", **route.as_dict()}
+
+        for worker in supervisor.status().get("workers", []):
+            if worker.get("vicidial_agent_user") != agent_user.strip():
+                continue
+            if org_id and worker.get("org_id") and worker.get("org_id") != org_id.strip():
+                continue
+            gpu_host = (
+                os.getenv("GPU_PUBLIC_HOST")
+                or os.getenv("FLEET_GPU_PUBLIC_HOST")
+                or "127.0.0.1"
+            )
+            return {
+                "ok": True,
+                "source": "supervisor",
+                "bot_id": worker.get("bot_id"),
+                "agent_user": agent_user.strip(),
+                "org_id": worker.get("org_id") or org_id,
+                "media_port": worker.get("media_port"),
+                "gpu_host": gpu_host,
+                "ready": worker.get("running", False),
+            }
+
+        scope = f"{org_id}:{agent_user}" if org_id else agent_user
+        return {
+            "ok": False,
+            "error": f"No worker registered for ViciDial agent {scope}",
+            "router": router_status(),
+        }
+
+    @app.get("/router/status")
+    def router_status_endpoint(
+        authorization: str | None = Header(default=None),
+        x_supervisor_secret: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _check_auth(authorization, x_supervisor_secret)
+        from .call_router import router_status
+
+        body = router_status()
+        body["supervisor_workers"] = supervisor.status().get("workers", [])
+        return body
 
     return app
 

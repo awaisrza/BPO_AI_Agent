@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { setCampaignRunningStatus } from "@/lib/campaigns";
 import { getCampaignReadiness } from "@/lib/campaign-readiness";
-import { syncGpuSupervisor } from "@/lib/gpu/supervisor";
+import {
+  startGpuForCampaign,
+  stopGpuForCampaign,
+} from "@/lib/gpu/orchestrator";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import type { CampaignStatus } from "@/lib/types/database";
@@ -59,11 +62,14 @@ export async function POST(request: Request, { params }: RouteParams) {
 
     let supervisorMessage = "";
     try {
-      const gpu = await syncGpuSupervisor(id, action);
+      const gpu =
+        action === "start"
+          ? await startGpuForCampaign(id)
+          : await stopGpuForCampaign(id);
       supervisorMessage = gpu.message;
     } catch (err) {
       supervisorMessage =
-        err instanceof Error ? err.message : "Campaign updated but GPU supervisor sync failed.";
+        err instanceof Error ? err.message : "Campaign updated but GPU orchestration failed.";
     }
 
     return NextResponse.json({

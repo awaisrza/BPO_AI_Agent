@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
+from typing import Awaitable, Callable
 
 from loguru import logger
 
@@ -132,14 +134,20 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         call_controller: CallController | None = None,
         telephony: bool = False,
         telephony_phone_test: bool = False,
+        vicidial_call_id: str | None = None,
+        on_call_should_end: Callable[[str], Awaitable[None]] | None = None,
+        is_call_active: Callable[[], bool] | None = None,
     ):
         super().__init__()
         self._engine = engine
         self._vici = vicidial
         self._agent_user = agent_user
+        self._vicidial_call_id = (vicidial_call_id or "").strip() or None
         self._mic_test = mic_test
         self._telephony = telephony
         self._telephony_phone_test = telephony_phone_test
+        self._on_call_should_end = on_call_should_end
+        self._is_call_active = is_call_active
         self._opened = False
         self._call = call_controller or CallController()
         self._pending_caller_texts: list[str] = []
@@ -147,6 +155,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._caller_buffer: str = ""
         self._flush_task: asyncio.Task | None = None
         self._caller_flush_delay_s = 0.4 if (telephony or telephony_phone_test) else 0.75
+        self.last_activity_monotonic: float = time.monotonic()
+
+    def _touch_activity(self) -> None:
+        self.last_activity_monotonic = time.monotonic()
+
+    def _call_live(self) -> bool:
+        return self._is_call_active is None or self._is_call_active()
 
     async def _start_telephony_keepalive(self) -> None:
         if self._telephony and PIPECAT_AVAILABLE:
@@ -294,30 +309,90 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             if self._mic_test:
                 logger.info("MIC TEST -> qualified lead (warm transfer simulated)")
             else:
-                closer = self._engine.script.transfer_closer_user
-                if closer:
-                    logger.info(f"FSM -> warm transfer to closer {closer}")
-                    await self._vici.warm_transfer(self._agent_user, closer_user=closer)
-                else:
-                    preset = (
-                        self._engine.script.transfer_preset or settings.vicidial_transfer_preset
-                    )
-                    logger.info(f"FSM -> warm transfer (preset={preset})")
-                    await self._vici.warm_transfer(self._agent_user, preset=preset)
-                await self._vici.set_disposition(self._agent_user, "XFER")
+                await self._execute_transfer()
             if not self._telephony_phone_test:
                 await self.push_frame(EndFrame())
         elif turn.action == Action.HANGUP:
             if self._mic_test:
                 logger.info("MIC TEST -> call ended (hangup simulated)")
             else:
-                logger.info("FSM -> disposition + hangup")
-                await self._vici.set_disposition(self._agent_user, "NI")
-                await self._vici.hangup(self._agent_user)
+                await self._execute_hangup()
             # Keep Telnyx media alive during phone tests so a disposition line
             # does not tear down the stream before the caller hears it.
             if not self._telephony_phone_test:
                 await self.push_frame(EndFrame())
+
+    @staticmethod
+    def _transfer_extension(closer: str | None) -> str | None:
+        token = (closer or "").strip()
+        if not token:
+            return None
+        if token.startswith("+") or token.isdigit():
+            return token
+        digits = "".join(ch for ch in token if ch.isdigit())
+        return digits if len(digits) >= 3 else None
+
+    async def _execute_transfer(self) -> None:
+        if self._vici is None:
+            logger.warning("Transfer skipped — no ViciDial client (check Integrations / .env)")
+            return
+        closer = (self._engine.script.transfer_closer_user or "").strip()
+        preset = self._engine.script.transfer_preset or settings.vicidial_transfer_preset
+
+        if self._vicidial_call_id:
+            extension = self._transfer_extension(closer)
+            if extension:
+                logger.info(
+                    f"FSM -> remote-agent EXTENSIONTRANSFER ext={extension} "
+                    f"call_id={self._vicidial_call_id}"
+                )
+                result = await self._vici.remote_agent_transfer(
+                    self._agent_user,
+                    self._vicidial_call_id,
+                    extension=extension,
+                    status="XFER",
+                )
+            else:
+                ingroup = preset or "DEFAULTINGROUP"
+                logger.info(
+                    f"FSM -> remote-agent INGROUPTRANSFER ingroup={ingroup} "
+                    f"call_id={self._vicidial_call_id}"
+                )
+                result = await self._vici.remote_agent_transfer(
+                    self._agent_user,
+                    self._vicidial_call_id,
+                    ingroup=ingroup,
+                    status="XFER",
+                )
+            if not ViciDialClient.api_succeeded(result):
+                logger.error(f"Remote-agent transfer failed: {result[:200]}")
+            return
+
+        if closer:
+            logger.info(f"FSM -> warm transfer to closer {closer}")
+            result = await self._vici.warm_transfer(self._agent_user, closer_user=closer)
+        else:
+            logger.info(f"FSM -> warm transfer (preset={preset})")
+            result = await self._vici.warm_transfer(self._agent_user, preset=preset)
+        await self._vici.set_disposition(self._agent_user, "XFER")
+        if not ViciDialClient.api_succeeded(result):
+            logger.error(f"Warm transfer failed: {result[:200]}")
+
+    async def _execute_hangup(self) -> None:
+        if self._vici is None:
+            logger.warning("Hangup skipped — no ViciDial client")
+            return
+        if self._vicidial_call_id:
+            logger.info(f"FSM -> remote-agent HANGUP call_id={self._vicidial_call_id}")
+            result = await self._vici.remote_agent_hangup(
+                self._agent_user, self._vicidial_call_id, status="NI"
+            )
+            if not ViciDialClient.api_succeeded(result):
+                logger.error(f"Remote-agent hangup failed: {result[:200]}")
+            return
+        logger.info("FSM -> disposition + hangup")
+        await self._vici.set_disposition(self._agent_user, "NI")
+        await self._vici.hangup(self._agent_user)
 
     async def process_frame(self, frame, direction):  # type: ignore[override]
         await super().process_frame(frame, direction)
@@ -483,6 +558,12 @@ def _is_piper_backend() -> bool:
     return settings.voice_backend == "gpu"
 
 
+def _inference_pool_enabled() -> bool:
+    from .inference_client import inference_pool_enabled
+
+    return inference_pool_enabled()
+
+
 def _is_local_gpu_backend() -> bool:
     return _is_chatterbox_backend() or _is_piper_backend()
 
@@ -540,10 +621,15 @@ def _build_vad(*, telephony: bool = False) -> VADProcessor:
 
 def _build_stt(*, telephony: bool = False):
     if _is_local_gpu_backend():
+        no_speech_prob = 0.65 if telephony else 0.4
+        if _inference_pool_enabled():
+            from .pooled_stt import PooledWhisperSTTService
+
+            return PooledWhisperSTTService(no_speech_prob=no_speech_prob)
+
         from pipecat.services.whisper.stt import WhisperSTTService
         from pipecat.transcriptions.language import Language
 
-        no_speech_prob = 0.65 if telephony else 0.4
         logger.info(
             f"STT: faster-whisper ({settings.whisper_model}, "
             f"device={settings.whisper_device}, compute={settings.whisper_compute_type}, "
@@ -571,11 +657,30 @@ def _build_tts(*, script: ScriptConfig, sample_rate: int, telephony: bool = Fals
         from .chatterbox_paths import resolve_chatterbox_device, resolve_chatterbox_reference
         from .chatterbox_tts import ChatterboxTTSService, TELEPHONY_PIPELINE_RATE, warm_chatterbox_cache_sync
 
+        telephony = telephony or sample_rate == TELEPHONY_PIPELINE_RATE
+        if _inference_pool_enabled():
+            from .inference_client import get_inference_client
+            from .pooled_tts import PooledChatterboxTTSService
+
+            client = get_inference_client()
+            try:
+                warm = client.warm_cache_sync(
+                    texts=_script_cache_lines(script, telephony=telephony),
+                    sample_rate=sample_rate,
+                    telephony=telephony,
+                )
+                logger.info(
+                    f"Pooled TTS cache warmed: {warm.get('cache_size', 0)} line(s) "
+                    f"via {client._base}"
+                )
+            except Exception as exc:
+                logger.warning(f"Pooled cache warm failed (live synthesis only): {exc}")
+            return PooledChatterboxTTSService(sample_rate=sample_rate)
+
         reference = resolve_chatterbox_reference(settings.chatterbox_reference_audio or None)
         device = resolve_chatterbox_device(
             settings.chatterbox_device or settings.whisper_device or None
         )
-        telephony = telephony or sample_rate == TELEPHONY_PIPELINE_RATE
         logger.info(
             f"TTS: Chatterbox Turbo (device={device}, ref={reference.name}, telephony={telephony})"
         )
@@ -652,6 +757,20 @@ def prewarm_voice_stack(
     logger.info(
         f"Pre-warming voice stack (sample_rate={sample_rate}, telephony={telephony})..."
     )
+    if _inference_pool_enabled():
+        from .inference_client import get_inference_client
+
+        client = get_inference_client()
+        client.wait_until_ready()
+        if _is_local_gpu_backend():
+            _cached_stt = _build_stt(telephony=telephony)
+        if _is_chatterbox_backend():
+            _cached_tts[(sample_rate, telephony)] = _build_tts(
+                script=script, sample_rate=sample_rate, telephony=telephony
+            )
+        logger.info("Voice stack pre-warm complete (inference pool mode).")
+        return
+
     _cached_stt = _build_stt(telephony=telephony)
     _cached_tts[(sample_rate, telephony)] = _build_tts(
         script=script, sample_rate=sample_rate, telephony=telephony
@@ -664,9 +783,10 @@ def prewarm_voice_stack(
 def tts_processor_for_cleanup(pipeline) -> object | None:
     """Chatterbox TTS for cancel_background_work (not bulk-media/output processors)."""
     from .chatterbox_tts import ChatterboxTTSService
+    from .pooled_tts import PooledChatterboxTTSService
 
     for proc in pipeline.processors:
-        if isinstance(proc, ChatterboxTTSService):
+        if isinstance(proc, (ChatterboxTTSService, PooledChatterboxTTSService)):
             return proc
     return None
 
@@ -679,6 +799,10 @@ def build_pipeline(
     mic_test: bool = False,
     sample_rate: int = 16000,
     telephony: bool = False,
+    vicidial_client: ViciDialClient | None = None,
+    vicidial_call_id: str | None = None,
+    on_call_should_end: Callable[[str], Awaitable[None]] | None = None,
+    is_call_active: Callable[[], bool] | None = None,
 ) -> Pipeline:
     """Assemble the live pipeline. `transport` provides audio in/out frames."""
     global _cached_stt
@@ -734,7 +858,7 @@ def build_pipeline(
         ),
     )
     call_controller = CallController()
-    vici = None if mic_test else ViciDialClient()
+    vici = None if mic_test else (vicidial_client or ViciDialClient())
     fronter = FronterProcessor(
         engine,
         vici,
@@ -743,6 +867,9 @@ def build_pipeline(
         call_controller=call_controller,
         telephony=telephony,
         telephony_phone_test=telephony and mic_test,
+        vicidial_call_id=vicidial_call_id,
+        on_call_should_end=on_call_should_end,
+        is_call_active=is_call_active,
     )
     barge_in = BargeInProcessor(call_controller, telephony=telephony)
     max_words, pause_min, pause_max = _speech_settings(telephony=telephony)

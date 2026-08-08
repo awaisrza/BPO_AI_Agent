@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """ViciDial EAGI audio bridge — forwards call audio to AI Fronter GPU workers.
 
+.. deprecated:: lab-only
+   **LAB / single-BPO pilot only.** Production BPO onboarding uses the SIP edge
+   (``python run_sip_edge.py``) — zero install on the BPO ViciDial server.
+   See ``agent/docs/bpo-sip-onboarding.md``.
+
 Runs on the BPO Asterisk/ViciDial server. Invoked from dialplan as EAGI:
 
     EAGI(/usr/local/bin/ai-fronter-bridge.py,6666)
@@ -199,6 +204,24 @@ def _load_config() -> dict[str, Any]:
     return {}
 
 
+def _fetch_router_route(gpu_host: str, supervisor_port: int, agent_user: str) -> tuple[str, int] | None:
+    url = f"http://{gpu_host}:{supervisor_port}/route?agent_user={agent_user}"
+    try:
+        req = Request(url, headers={"Accept": "application/json"})
+        with urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
+        _log(f"Router lookup failed ({url}): {exc}")
+        return None
+    if not payload.get("ok"):
+        return None
+    port = payload.get("media_port")
+    host = payload.get("gpu_host") or gpu_host
+    if port is None:
+        return None
+    return str(host), int(port)
+
+
 def _fetch_supervisor_port(gpu_host: str, supervisor_port: int, agent_user: str) -> int | None:
     url = f"http://{gpu_host}:{supervisor_port}/status"
     try:
@@ -230,6 +253,10 @@ def resolve_media_port(agent_user: str) -> tuple[str, int]:
     agents = cfg.get("agents") or {}
     if agent_user in agents:
         return gpu_host, int(agents[agent_user])
+
+    routed = _fetch_router_route(gpu_host, supervisor_port, agent_user)
+    if routed is not None:
+        return routed
 
     live_port = _fetch_supervisor_port(gpu_host, supervisor_port, agent_user)
     if live_port is not None:

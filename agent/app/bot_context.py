@@ -22,6 +22,7 @@ class BotRunContext:
     bot_id: str | None
     bot_name: str
     agent_user: str
+    campaign_id: str | None
     vicidial_campaign_id: str | None
     org_id: str | None
     vicidial: VicidialOrgConfig | None
