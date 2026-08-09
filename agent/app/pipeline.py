@@ -630,12 +630,15 @@ def _build_stt(*, telephony: bool = False):
         from pipecat.services.whisper.stt import WhisperSTTService
         from pipecat.transcriptions.language import Language
 
+        from .shared_whisper_stt import SharedModelWhisperSTTService
+
         logger.info(
             f"STT: faster-whisper ({settings.whisper_model}, "
             f"device={settings.whisper_device}, compute={settings.whisper_compute_type}, "
             f"telephony={telephony}, no_speech_prob={no_speech_prob})"
         )
-        return WhisperSTTService(
+        stt_cls = SharedModelWhisperSTTService if telephony else WhisperSTTService
+        return stt_cls(
             device=settings.whisper_device,
             compute_type=settings.whisper_compute_type,
             settings=WhisperSTTService.Settings(
@@ -830,14 +833,12 @@ def build_pipeline(
     mode = "telephony" if telephony else "local"
     logger.info(f"Voice backend: {backend} ({mode}, {sample_rate} Hz)")
 
-    # Telephony: reuse pre-warmed Whisper when available (fresh load costs ~7s silence).
+    # Telephony: fresh STT processor each call (shared model weights). Reusing one
+    # WhisperSTTService blocks StartFrame on call #2 when the prior call ended
+    # during transcription.
     if telephony:
-        if _cached_stt is not None:
-            stt = _cached_stt
-            logger.info("STT: reusing pre-warmed Whisper for telephony")
-        else:
-            stt = _build_stt(telephony=True)
-            _cached_stt = stt
+        stt = _build_stt(telephony=True)
+        logger.info("STT: fresh Whisper processor for telephony (shared model weights)")
     else:
         stt = _cached_stt or _build_stt(telephony=False)
     tts_base = _cached_tts.get((sample_rate, telephony)) or _build_tts(

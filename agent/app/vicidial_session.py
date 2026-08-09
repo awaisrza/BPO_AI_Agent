@@ -394,9 +394,15 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             (p for p in pipeline.processors if isinstance(p, TelnyxBulkMediaProcessor)),
             None,
         )
+        bulk_encoding = (
+            bulk_media._encoding if bulk_media is not None else os.getenv("TELNYX_STREAM_CODEC", "PCMU")
+        )
+
+        async def _ws_send_json(payload: str) -> None:
+            await websocket.send_text(payload)
 
         async def _kick_greeting_if_stuck() -> None:
-            """Whisper STT can delay StartFrame >15s; play greeting without waiting for it."""
+            """If StartFrame is slow, play cached greeting PCM directly on the media WS."""
             try:
                 await asyncio.sleep(_GREETING_KICK_DELAY_S)
                 if shutdown.done or fronter is None or fronter._opened:
@@ -412,30 +418,30 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 fronter._touch_activity()
                 fronter._call.state = CallState.LISTENING
 
-                # FronterProcessor rejects TTSSpeakFrame until StartFrame arrives (often
-                # blocked in shared Whisper STT). Send cached greeting PCM on the media WS.
+                tts_src = tts_for_cleanup or next(
+                    (p for p in pipeline.processors if getattr(p, "_cache", None)),
+                    None,
+                )
                 pcm = None
-                if tts_for_cleanup is not None:
+                if tts_src is not None:
                     pcm = greeting_pcm_from_cache(
-                        tts_for_cleanup,
+                        tts_src,
                         opening.reply,
                         script_greeting=ctx.script.greeting,
                         telephony_max_words=settings.telephony_utterance_max_words,
                         greeting_single_chunk=settings.telephony_greeting_single_chunk,
                     )
-                if pcm and bulk_media is not None:
+                if pcm:
                     duration_ms = await send_direct_bulk_pcm(
-                        bulk_media._send_json,
+                        _ws_send_json,
                         pcm,
                         sample_rate=TELEPHONY_PIPELINE_RATE,
-                        encoding=bulk_media._encoding,
+                        encoding=bulk_encoding,
                     )
                     _event(f"=== greeting kick sent direct bulk media (~{duration_ms}ms) ===")
                     return
 
-                _event(
-                    "=== greeting kick failed: no cached PCM or bulk media processor ==="
-                )
+                _event("=== greeting kick failed: no cached greeting PCM ===")
             except asyncio.CancelledError:
                 pass
             except Exception as exc:  # noqa: BLE001
