@@ -491,7 +491,11 @@ def run_supervisor(host: str | None = None, port: int | None = None) -> None:
     @app.on_event("startup")
     async def _startup() -> None:
         asyncio.create_task(poll_loop())
+        asyncio.create_task(_post_bind_sync())
+
+    async def _post_bind_sync() -> None:
+        await asyncio.sleep(0.5)
         supervisor.sync()
-        logger.info(f"Fleet supervisor listening on {bind_host}:{bind_port}")
+        logger.info(f"Fleet supervisor ready on {bind_host}:{bind_port}")
 
     uvicorn.run(app, host=bind_host, port=bind_port, log_level="info")
