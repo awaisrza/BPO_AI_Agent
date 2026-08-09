@@ -49,6 +49,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
   const [testOutboundCid, setTestOutboundCid] = useState("+19482194316");
   const [testDialing, setTestDialing] = useState(false);
   const [testDialResult, setTestDialResult] = useState("");
+  const [testDialProgress, setTestDialProgress] = useState<string[]>([]);
 
   useEffect(() => {
     async function load() {
@@ -195,8 +196,71 @@ export function CampaignEditorForm({ id }: { id: string }) {
     setTestDialing(true);
     setError("");
     setTestDialResult("");
+    setTestDialProgress([]);
+
+    const prewarmTimeoutMs = 900_000;
+    const pollMs = 3_000;
+    const progress: string[] = [];
+
+    function pushProgress(line: string) {
+      progress.push(line);
+      setTestDialProgress([...progress]);
+    }
 
     try {
+      pushProgress("Starting GPU warmup (supervisor + prewarm)…");
+      const warmStart = await fetch(`/api/campaigns/${id}/gpu-warmup`, { method: "POST" });
+      const warmStartData = await readJsonResponse<{
+        error?: string;
+        gpuMessage?: string;
+        message?: string;
+        phase?: string;
+        logTail?: string[];
+      }>(warmStart);
+      if (!warmStart.ok) {
+        throw new Error(warmStartData.error ?? "Could not start GPU warmup.");
+      }
+      if (warmStartData.gpuMessage) pushProgress(`GPU: ${warmStartData.gpuMessage}`);
+      if (warmStartData.message) pushProgress(warmStartData.message);
+      warmStartData.logTail?.slice(-3).forEach((line) => pushProgress(`  log: ${line}`));
+
+      const warmupStarted = Date.now();
+      let gpuReady = false;
+      while (Date.now() - warmupStarted < prewarmTimeoutMs) {
+        const warmRes = await fetch(`/api/campaigns/${id}/gpu-warmup`, { cache: "no-store" });
+        const warm = await readJsonResponse<{
+          ready?: boolean;
+          phase?: string;
+          message?: string;
+          logTail?: string[];
+          error?: string;
+        }>(warmRes);
+        if (!warmRes.ok) {
+          throw new Error(warm.error ?? "GPU warmup status failed.");
+        }
+        const elapsed = Math.round((Date.now() - warmupStarted) / 1000);
+        const statusLine = `[${elapsed}s] ${warm.phase ?? "checking"} — ${warm.message ?? "…"}`;
+        if (progress[progress.length - 1] !== statusLine) {
+          pushProgress(statusLine);
+        }
+        warm.logTail?.slice(-2).forEach((line) => {
+          const logLine = `  log: ${line}`;
+          if (!progress.includes(logLine)) pushProgress(logLine);
+        });
+        if (warm.ready) {
+          gpuReady = true;
+          pushProgress("GPU worker ready — placing test call in ViciDial hopper.");
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+      }
+
+      if (!gpuReady) {
+        throw new Error(
+          "GPU worker did not become ready in time. SSH to the GPU: pgrep -af run_supervisor; tail /tmp/fleet_worker_*.log; curl -s http://127.0.0.1:10200/health",
+        );
+      }
+
       const res = await fetch(`/api/campaigns/${id}/test-dial`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -204,7 +268,8 @@ export function CampaignEditorForm({ id }: { id: string }) {
           phone: testPhone.trim(),
           list_id: testListId.trim() || undefined,
           outbound_cid: testOutboundCid.trim() || undefined,
-          start_campaign: true,
+          start_campaign: false,
+          skip_gpu_wait: true,
         }),
       });
       const data = await readJsonResponse<{
@@ -214,6 +279,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
         workerHealth?: string;
         workerReady?: boolean;
         workerWaitMs?: number;
+        warmupEvents?: string[];
         steps?: { step: string; ok: boolean; detail: string }[];
         hopperPreview?: string;
         campaignStarted?: boolean;
@@ -223,13 +289,10 @@ export function CampaignEditorForm({ id }: { id: string }) {
         throw new Error(data.error ?? data.message ?? "Test dial failed.");
       }
 
-      const parts: string[] = [];
+      const parts: string[] = [...progress];
       if (data.message) parts.push(data.message);
       if (data.gpuMessage) parts.push(`GPU: ${data.gpuMessage}`);
       if (data.workerHealth) parts.push(`Worker: ${data.workerHealth}`);
-      if (typeof data.workerWaitMs === "number" && data.workerWaitMs > 500) {
-        parts.push(`Waited ${Math.round(data.workerWaitMs / 1000)}s for GPU call slot.`);
-      }
       if (data.steps?.length) {
         const stepLines = data.steps.map(
           (s) => `${s.ok ? "✓" : "○"} ${s.step}: ${s.detail}`,
@@ -239,10 +302,8 @@ export function CampaignEditorForm({ id }: { id: string }) {
       if (data.hopperPreview) parts.push(`Hopper:\n${data.hopperPreview}`);
       setTestDialResult(parts.filter(Boolean).join("\n\n"));
 
-      if (data.campaignStarted) {
-        setCampaignStatus("running");
-        router.refresh();
-      }
+      setCampaignStatus("running");
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Test dial failed.");
     } finally {
@@ -735,6 +796,11 @@ export function CampaignEditorForm({ id }: { id: string }) {
                 <PhoneCall className="h-4 w-4" />
                 {testDialing ? "Waiting for GPU & dialing…" : "Test dial this number"}
               </Button>
+              {testDialing && testDialProgress.length > 0 && (
+                <p className="whitespace-pre-wrap rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90 max-h-48 overflow-y-auto">
+                  {testDialProgress.join("\n")}
+                </p>
+              )}
               {testDialResult && (
                 <p className="whitespace-pre-wrap rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100/90">
                   {testDialResult}

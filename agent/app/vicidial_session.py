@@ -56,6 +56,10 @@ async def _ensure_websocket_accepted(websocket) -> None:
         # Newer uvicorn accepts before the handler runs — second accept crashes.
         if "websocket.accept" not in str(exc):
             raise
+    except Exception as exc:  # noqa: BLE001
+        if _is_client_disconnected(exc):
+            raise
+        raise
 
 
 def _looks_like_vicidial_call_id(value: str) -> bool:
@@ -111,7 +115,18 @@ def _event(msg: str) -> None:
     logger.info(line.strip())
 
 
-_CALL_SHUTDOWN_CANCEL_S = 5.0
+_CALL_SHUTDOWN_CANCEL_S = 2.0
+_RUNNER_JOIN_TIMEOUT_S = 3.0
+
+
+def _is_client_disconnected(exc: BaseException) -> bool:
+    name = type(exc).__name__
+    if name == "ClientDisconnected":
+        return True
+    mod = type(exc).__module__ or ""
+    return "ClientDisconnected" in name or "ClientDisconnected" in str(exc) or (
+        "uvicorn" in mod and "disconnect" in name.lower()
+    )
 
 
 class _CallShutdown:
@@ -122,6 +137,7 @@ class _CallShutdown:
         self._tts_for_cleanup = None
         self._runner_task: asyncio.Task | None = None
         self._done = False
+        self._cleanup_task: asyncio.Task | None = None
 
     def attach(self, *, worker, tts_for_cleanup, runner_task: asyncio.Task | None = None) -> None:
         self._worker = worker
@@ -147,14 +163,24 @@ class _CallShutdown:
         if self._runner_task is not None and not self._runner_task.done():
             self._runner_task.cancel()
 
-        if self._tts_for_cleanup is not None and hasattr(self._tts_for_cleanup, "cancel_background_work"):
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(
+                self._cleanup_pipeline(reason),
+                name=f"vicidial-cleanup-{self._session_key[:12]}",
+            )
+
+    async def _cleanup_pipeline(self, reason: str) -> None:
+        """Best-effort teardown — must not block the next call's call_runner_lock."""
+        if self._tts_for_cleanup is not None and hasattr(
+            self._tts_for_cleanup, "cancel_background_work"
+        ):
             try:
                 await asyncio.wait_for(
                     self._tts_for_cleanup.cancel_background_work(),
                     timeout=_CALL_SHUTDOWN_CANCEL_S,
                 )
             except asyncio.TimeoutError:
-                _event("shutdown: TTS cleanup timed out — releasing call slot")
+                _event("shutdown: TTS cleanup timed out — continuing in background")
             except Exception as exc:  # noqa: BLE001
                 _event(f"shutdown: TTS cleanup failed: {exc}")
 
@@ -162,11 +188,21 @@ class _CallShutdown:
             try:
                 await asyncio.wait_for(self._worker.cancel(), timeout=_CALL_SHUTDOWN_CANCEL_S)
             except asyncio.TimeoutError:
-                _event("shutdown: worker cancel timed out — releasing call slot")
+                _event(
+                    "shutdown: worker cancel timed out — releasing call slot "
+                    f"(reason={reason})"
+                )
             except asyncio.CancelledError:
                 pass
             except Exception as exc:  # noqa: BLE001
                 _event(f"shutdown: worker cancel failed: {exc}")
+
+        if self._runner_task is not None and not self._runner_task.done():
+            self._runner_task.cancel()
+            try:
+                await asyncio.wait_for(self._runner_task, timeout=_CALL_SHUTDOWN_CANCEL_S)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
 
 
 async def run_vicidial_call(websocket, ctx: BotRunContext) -> None:
@@ -197,7 +233,13 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
     fronter = None
 
     try:
-        await _ensure_websocket_accepted(websocket)
+        try:
+            await _ensure_websocket_accepted(websocket)
+        except Exception as exc:  # noqa: BLE001
+            if _is_client_disconnected(exc):
+                _event("=== VICIDIAL WS client disconnected before accept ===")
+                return
+            raise
         try:
             transport_type, call_data = await parse_telephony_websocket(websocket)
         except ValueError as exc:
@@ -426,15 +468,28 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
         runner_task = asyncio.create_task(_run_runner())
         shutdown.attach(worker=worker, tts_for_cleanup=tts_for_cleanup, runner_task=runner_task)
         try:
-            await runner_task
+            await asyncio.wait_for(runner_task, timeout=_RUNNER_JOIN_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            _event(
+                f"=== runner join timed out after {_RUNNER_JOIN_TIMEOUT_S:.0f}s "
+                "— releasing call slot for next dial ==="
+            )
+            if shutdown is not None and not shutdown.done:
+                await shutdown.end_call("runner_join_timeout")
         except asyncio.CancelledError:
             pass
         finally:
             _event("=== pipeline worker finished ===")
-            if not shutdown.done:
+            if shutdown is not None and not shutdown.done:
                 end_reason = "runner_finished"
                 await shutdown.end_call("runner_finished")
-    except Exception:
+    except Exception as exc:
+        if _is_client_disconnected(exc):
+            _event("=== VICIDIAL WS client gone (bridge closed early) ===")
+            if shutdown is not None and not shutdown.done:
+                end_reason = "client_disconnected"
+                await shutdown.end_call("client_disconnected")
+            return
         _event("=== VICIDIAL CRASH ===\n" + traceback.format_exc())
         if shutdown is not None:
             end_reason = "exception"

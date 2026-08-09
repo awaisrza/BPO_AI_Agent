@@ -239,6 +239,30 @@ class FleetSupervisor:
             logger.warning(f"Worker exited for bot {bot_id}")
             self._workers.pop(bot_id, None)
 
+    def _worker_media_health(self, media_port: int) -> dict[str, Any]:
+        url = f"http://127.0.0.1:{media_port}/health"
+        try:
+            with httpx.Client(timeout=2.0) as client:
+                resp = client.get(url)
+                if resp.status_code != 200:
+                    return {"reachable": False, "ready": False, "url": url}
+                body = resp.json()
+                ready = body.get("ready") is True or str(body.get("ready", "")).lower() == "true"
+                return {"reachable": True, "ready": ready, "url": url, "body": body}
+        except Exception as exc:
+            return {"reachable": False, "ready": False, "url": url, "error": str(exc)}
+
+    def _read_worker_log_tail(self, bot_id: str, lines: int = 40) -> list[str]:
+        path = Path(f"/tmp/fleet_worker_{bot_id[:8]}.log")
+        if not path.is_file():
+            return []
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return []
+        rows = content.splitlines()
+        return rows[-lines:] if len(rows) > lines else rows
+
     def sync(self, campaign_id: str | None = None) -> dict[str, Any]:
         self._reap_dead_workers()
         try:
@@ -295,6 +319,7 @@ class FleetSupervisor:
                     "pid": rec.process.pid,
                     "running": rec.process.poll() is None,
                     "uptime_sec": int(time.time() - rec.started_at),
+                    "media_health": self._worker_media_health(rec.media_port),
                 }
             )
         return {
@@ -338,6 +363,22 @@ def build_app() -> FastAPI:
     ) -> dict[str, Any]:
         _check_auth(authorization, x_supervisor_secret)
         return supervisor.status()
+
+    @app.get("/logs/worker")
+    def worker_logs(
+        bot_id: str = Query(..., min_length=8),
+        lines: int = Query(default=40, ge=1, le=200),
+        authorization: str | None = Header(default=None),
+        x_supervisor_secret: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _check_auth(authorization, x_supervisor_secret)
+        tail = supervisor._read_worker_log_tail(bot_id.strip(), lines)
+        return {
+            "ok": True,
+            "bot_id": bot_id.strip(),
+            "lines": tail,
+            "path": f"/tmp/fleet_worker_{bot_id.strip()[:8]}.log",
+        }
 
     @app.post("/sync")
     def sync(

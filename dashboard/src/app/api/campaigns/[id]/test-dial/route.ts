@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { setCampaignRunningStatus } from "@/lib/campaigns";
 import { getCampaignReadiness } from "@/lib/campaign-readiness";
 import { syncGpuSupervisor } from "@/lib/gpu/supervisor";
-import { waitForGpuWorkerReady } from "@/lib/gpu/worker-health";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { parseDialPhone } from "@/lib/vicidial/phone";
@@ -16,6 +15,7 @@ type Body = {
   list_id?: string;
   outbound_cid?: string;
   start_campaign?: boolean;
+  skip_gpu_wait?: boolean;
 };
 
 export async function POST(request: Request, { params }: RouteParams) {
@@ -104,11 +104,13 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     const startCampaign = body.start_campaign !== false;
+    const skipGpuWait = body.skip_gpu_wait === true;
 
     let gpuMessage = "";
     let workerHealth = "";
     let workerReady: boolean | null = null;
     let workerWaitMs = 0;
+    let warmupEvents: string[] = [];
 
     if (startCampaign) {
       const statusUpdate = await setCampaignRunningStatus(supabase, id, "running");
@@ -125,13 +127,29 @@ export async function POST(request: Request, { params }: RouteParams) {
           (err instanceof Error ? err.message : "GPU supervisor sync failed.") +
           " If the supervisor poll loop is active on the GPU, the worker should still start.";
       }
+    }
 
-      const workerWait = await waitForGpuWorkerReady();
+    if (!skipGpuWait && (startCampaign || body.skip_gpu_wait === undefined)) {
+      const { data: bots } = await supabase
+        .from("bots")
+        .select("id")
+        .eq("campaign_id", id)
+        .order("name", { ascending: true })
+        .limit(1);
+      const botId = bots?.[0]?.id ?? undefined;
+
+      const { waitForGpuWarmup } = await import("@/lib/gpu/warmup");
+      const workerWait = await waitForGpuWarmup({
+        campaignId: id,
+        botId,
+        timeoutMs: parseInt(process.env.GPU_WORKER_PREWARM_TIMEOUT_MS ?? "120000", 10),
+      });
       workerHealth = workerWait.message;
       workerReady = workerWait.ready;
       workerWaitMs = workerWait.waitedMs;
+      warmupEvents = workerWait.events;
 
-      if (workerWait.configured && !workerWait.ready) {
+      if (workerWait.healthConfigured && !workerWait.ready) {
         return NextResponse.json(
           {
             error: workerWait.message,
@@ -139,10 +157,16 @@ export async function POST(request: Request, { params }: RouteParams) {
             workerHealth: workerWait.message,
             workerReady: false,
             workerWaitMs,
+            warmupEvents,
           },
           { status: 503 },
         );
       }
+    } else if (skipGpuWait) {
+      const { fetchGpuWarmupStatus } = await import("@/lib/gpu/warmup");
+      const snap = await fetchGpuWarmupStatus({ campaignId: id });
+      workerHealth = snap.message;
+      workerReady = snap.ready;
     }
 
     const result = await runVicidialTestDial(
@@ -166,6 +190,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         workerHealthy: workerReady,
         workerReady,
         workerWaitMs,
+        warmupEvents,
         steps: result.steps,
         hopperPreview: result.hopperPreview,
         dialed: `+${parsedPhone.phone_code}${parsedPhone.phone_number}`,
