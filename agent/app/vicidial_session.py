@@ -122,8 +122,6 @@ def _event(msg: str) -> None:
 
 
 _CALL_SHUTDOWN_CANCEL_S = 2.0
-_RUNNER_JOIN_TIMEOUT_S = 3.0
-
 
 def _is_client_disconnected(exc: BaseException) -> bool:
     name = type(exc).__name__
@@ -414,6 +412,12 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 return False
 
             opening = fronter._engine.open()
+            # Claim before send so StartFrame cannot race a second TTSSpeakFrame.
+            if mark_opened:
+                fronter._opened = True
+                fronter._touch_activity()
+                fronter._call.state = CallState.LISTENING
+
             tts_src = tts_for_cleanup or next(
                 (p for p in pipeline.processors if getattr(p, "_cache", None) is not None),
                 None,
@@ -428,6 +432,8 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                     greeting_single_chunk=settings.telephony_greeting_single_chunk,
                 )
             if not pcm:
+                if mark_opened:
+                    fronter._opened = False
                 _event(f"=== {label}: no greeting PCM ===")
                 return False
 
@@ -437,10 +443,6 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 sample_rate=TELEPHONY_PIPELINE_RATE,
                 encoding=bulk_encoding,
             )
-            if mark_opened:
-                fronter._opened = True
-                fronter._touch_activity()
-                fronter._call.state = CallState.LISTENING
             _event(f"=== {label} sent direct bulk media (~{duration_ms}ms) ===")
             return True
 
@@ -502,14 +504,7 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
         runner_task = asyncio.create_task(_run_runner())
         shutdown.attach(worker=worker, tts_for_cleanup=tts_for_cleanup, runner_task=runner_task)
         try:
-            await asyncio.wait_for(runner_task, timeout=_RUNNER_JOIN_TIMEOUT_S)
-        except asyncio.TimeoutError:
-            _event(
-                f"=== runner join timed out after {_RUNNER_JOIN_TIMEOUT_S:.0f}s "
-                "— releasing call slot for next dial ==="
-            )
-            if shutdown is not None and not shutdown.done:
-                await shutdown.end_call("runner_join_timeout")
+            await runner_task
         except asyncio.CancelledError:
             pass
         finally:
