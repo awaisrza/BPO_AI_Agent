@@ -19,7 +19,8 @@ for _env_path in (
     _AGENT_ROOT / ".env.local",
 ):
     if _env_path.exists():
-        load_dotenv(_env_path, override=True)
+        # Keep env vars already set by the fleet supervisor (e.g. FLEET_WORKER_MEDIA_PORT).
+        load_dotenv(_env_path, override=False)
 
 
 class ScriptConfig(BaseModel):

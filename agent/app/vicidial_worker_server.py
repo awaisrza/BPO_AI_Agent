@@ -44,5 +44,8 @@ def start_worker_server(ctx: BotRunContext) -> tuple[threading.Thread, int]:
 
     thread = threading.Thread(target=_run, name=f"media-{ctx.bot_id}", daemon=True)
     thread.start()
-    logger.info(f"Media server for {ctx.bot_name} (agent {ctx.agent_user}) on {host}:{port}/ws")
+    logger.info(
+        f"Media server for {ctx.bot_name} (agent {ctx.agent_user}) "
+        f"on {host}:{port}/ws (FLEET_WORKER_MEDIA_PORT={port})"
+    )
     return thread, port
