@@ -142,7 +142,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       const workerWait = await waitForGpuWarmup({
         campaignId: id,
         botId,
-        timeoutMs: parseInt(process.env.GPU_WORKER_PREWARM_TIMEOUT_MS ?? "120000", 10),
+        timeoutMs: parseInt(process.env.GPU_WORKER_PREWARM_TIMEOUT_MS ?? "900000", 10),
       });
       workerHealth = workerWait.message;
       workerReady = workerWait.ready;

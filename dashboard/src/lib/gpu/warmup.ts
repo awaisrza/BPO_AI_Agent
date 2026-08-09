@@ -30,6 +30,19 @@ function pollMs(): number {
   return parseInt(process.env.GPU_WORKER_READY_POLL_MS ?? "3000", 10);
 }
 
+/** Stop polling when the worker cannot come online without manual GPU action. */
+function isOfflineFailFastPhase(phase: GpuWarmupPhase): boolean {
+  return phase === "supervisor_unconfigured" || phase === "offline";
+}
+
+function offlineFailFastMs(): number {
+  return parseInt(process.env.GPU_WORKER_OFFLINE_FAIL_FAST_MS ?? "5000", 10);
+}
+
+function supervisorSpawnWaitMs(): number {
+  return parseInt(process.env.GPU_SUPERVISOR_SPAWN_WAIT_MS ?? "90000", 10);
+}
+
 function phaseMessage(input: {
   phase: GpuWarmupPhase;
   supervisorConfigured: boolean;
@@ -244,6 +257,41 @@ export async function waitForGpuWarmup(options: {
 
     if (status.ready) {
       return { ...status, events, waitedMs: Date.now() - started };
+    }
+
+    const elapsed = Date.now() - started;
+
+    // Worker unreachable and dashboard cannot start it — do not burn the full prewarm timeout.
+    if (isOfflineFailFastPhase(status.phase) && elapsed >= offlineFailFastMs()) {
+      return {
+        ...status,
+        ready: false,
+        phase: "error",
+        message:
+          `${status.message} Worker still offline after ${Math.round(elapsed / 1000)}s — ` +
+          "SSH to the GPU, verify the Vast public port for internal 10200, update GPU_WORKER_HEALTH_URL, " +
+          "then: cd /workspace/BPO_AI_Agent/agent && nohup python run_supervisor.py > /tmp/supervisor.log 2>&1 &",
+        events,
+        waitedMs: elapsed,
+      };
+    }
+
+    // Supervisor is up but no worker yet — allow time for spawn + bind before giving up.
+    if (
+      status.phase === "waiting_supervisor" &&
+      status.supervisorConfigured &&
+      elapsed >= supervisorSpawnWaitMs()
+    ) {
+      return {
+        ...status,
+        ready: false,
+        phase: "error",
+        message:
+          `${status.message} No worker after ${Math.round(elapsed / 1000)}s — ` +
+          "check GPU: pgrep -af run_supervisor; tail /tmp/supervisor.log",
+        events,
+        waitedMs: elapsed,
+      };
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollMs()));
