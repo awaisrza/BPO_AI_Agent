@@ -432,6 +432,7 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             if not pcm:
                 if mark_opened:
                     fronter._opened = False
+                    fronter._call.finish_bot_playback()
                 _event(f"=== {label}: no greeting PCM ===")
                 return False
 
@@ -442,8 +443,8 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 encoding=bulk_encoding,
             )
             if mark_opened:
-                fronter._call.finish_bot_playback()
-                await fronter._start_telephony_keepalive()
+                await fronter.on_direct_greeting_complete()
+                _event("=== greeting done — caller turn open (pending STT flushed) ===")
             _event(f"=== {label} sent direct bulk media (~{duration_ms}ms) ===")
             return True
 

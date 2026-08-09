@@ -167,6 +167,17 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if self._telephony and PIPECAT_AVAILABLE:
             await self.push_frame(RtpKeepaliveStartFrame())
 
+    async def on_direct_greeting_complete(self) -> None:
+        """Opening line played via direct bulk PCM — match normal TTS end-of-playback."""
+        if not PIPECAT_AVAILABLE:
+            self._call.finish_bot_playback()
+            return
+        from pipecat.frames.frames import BotStoppedSpeakingFrame
+        from pipecat.processors.frame_processor import FrameDirection
+
+        logger.info("Direct bulk greeting finished — releasing caller turn")
+        await self.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
     async def _interrupt_and_handle_caller(self, text: str, direction) -> None:  # type: ignore[no-untyped-def]
         """Stop current TTS and answer the caller immediately (telephony KB/questions)."""
         logger.info(f"Telephony barge-in — answering caller: {text[:64]!r}")
@@ -485,6 +496,11 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     self._queue_pending_caller_text(text)
                 elif self._pending_caller_texts:
                     self._queue_pending_caller_text(text)
+                else:
+                    logger.info(
+                        f"STT held (turn closed, state={self._call.state.value}): "
+                        f"{text[:64]!r}"
+                    )
                 return
 
             if not _is_meaningful_caller_text(text):

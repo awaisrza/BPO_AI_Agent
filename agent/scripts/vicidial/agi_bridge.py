@@ -593,6 +593,51 @@ class AudioSocketGpuBridge:
         except websocket.WebSocketException:
             self._stop.set()
 
+    def _forward_caller_payload(self, payload: bytes) -> bool:
+        """Send one AudioSocket slin frame to the GPU as Telnyx media JSON."""
+        if self._ws is None or self._stop.is_set() or not payload:
+            return False
+        payload_b64 = _slin_to_ulaw_payload(payload)
+        if not payload_b64:
+            return False
+        try:
+            self._ws.send(_media_message(payload_b64))
+        except websocket.WebSocketException as exc:
+            _log(f"GPU send failed: {exc}")
+            self._stop.set()
+            return False
+        if not self._sent_caller_audio:
+            self._sent_caller_audio = True
+            _log(f"AudioSocket sent first caller audio ({len(payload)} bytes)")
+        return True
+
+    def _try_forward_caller_audio(self) -> bool:
+        """Non-blocking read of caller audio from AudioSocket → GPU (during greeting wait)."""
+        if self._ws is None or self._stop.is_set():
+            return False
+        self._maybe_keepalive_as()
+        prev_timeout = self._conn.gettimeout()
+        try:
+            self._conn.settimeout(0.0)
+            msg_type, payload = _as_read_frame(self._conn)
+        except socket.timeout:
+            return False
+        except OSError:
+            return False
+        finally:
+            self._conn.settimeout(prev_timeout)
+        if msg_type is None:
+            _log("AudioSocket read EOF")
+            self._stop.set()
+            return False
+        if msg_type == _AS_TYPE_TERM:
+            _log("AudioSocket terminate")
+            self._stop.set()
+            return False
+        if msg_type == _AS_TYPE_AUDIO and payload:
+            return self._forward_caller_payload(payload)
+        return False
+
     def _write_ulaw_to_as(self, ulaw: bytes, *, paced: bool | None = None) -> bool:
         if not ulaw:
             return False
@@ -681,6 +726,7 @@ class AudioSocketGpuBridge:
         last_count = 0
         idle_after = 0
         while time.time() < deadline and not self._stop.is_set():
+            self._try_forward_caller_audio()
             self._send_gpu_silence()
             time.sleep(0.02)
             count = self._gpu_media_packets
@@ -837,16 +883,8 @@ class AudioSocketGpuBridge:
                 _log("AudioSocket terminate")
                 break
             if msg_type == _AS_TYPE_AUDIO and payload:
-                payload_b64 = _slin_to_ulaw_payload(payload)
-                if payload_b64:
-                    try:
-                        ws.send(_media_message(payload_b64))
-                        if not self._sent_caller_audio:
-                            self._sent_caller_audio = True
-                            _log(f"AudioSocket sent first caller audio ({len(payload)} bytes)")
-                    except websocket.WebSocketException as exc:
-                        _log(f"GPU send failed: {exc}")
-                        break
+                if not self._forward_caller_payload(payload):
+                    break
             elif msg_type not in (_AS_TYPE_UUID, _AS_TYPE_DTMF):
                 _log(f"AudioSocket ignoring frame type=0x{msg_type:02x}")
 
