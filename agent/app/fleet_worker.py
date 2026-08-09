@@ -83,6 +83,10 @@ async def run_fleet_worker(bot_id: str) -> None:
     )
     logger.info("Voice stack pre-warmed")
 
+    from .vicidial_session import set_voice_stack_ready
+
+    set_voice_stack_ready(True)
+
     await _prepare_vicidial(ctx)
 
     logger.info(
