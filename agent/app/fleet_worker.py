@@ -70,12 +70,21 @@ async def run_fleet_worker(bot_id: str) -> None:
     if inference_pool_enabled():
         logger.info("Inference pool mode — workers will not load local GPU models")
 
-    prewarm_voice_stack(ctx.script, sample_rate=TELEPHONY_PIPELINE_RATE, telephony=True)
+    _media_thread, media_port = start_worker_server(ctx)
+    logger.info(
+        f"Media server listening on ws://0.0.0.0:{media_port}/ws — prewarming voice stack..."
+    )
+
+    await asyncio.to_thread(
+        prewarm_voice_stack,
+        ctx.script,
+        sample_rate=TELEPHONY_PIPELINE_RATE,
+        telephony=True,
+    )
     logger.info("Voice stack pre-warmed")
 
     await _prepare_vicidial(ctx)
 
-    _media_thread, media_port = start_worker_server(ctx)
     logger.info(
         f"Ready for ViciDial audio at ws://0.0.0.0:{media_port}/ws "
         f"(point AGI bridge at GPU_IP:{media_port})"
