@@ -61,8 +61,39 @@ export async function fetchGpuSupervisorStatus(): Promise<GpuSupervisorStatus | 
       cache: "no-store",
     });
     const raw = await res.text();
-    if (!raw.trim()) return null;
-    const body = JSON.parse(raw) as Record<string, unknown>;
+    if (!raw.trim()) {
+      return {
+        ok: false,
+        error: `Supervisor /status returned empty body (HTTP ${res.status}).`,
+        worker_count: 0,
+        workers: [],
+      };
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return {
+        ok: false,
+        error: `Supervisor /status non-JSON (HTTP ${res.status}): ${raw.slice(0, 120)}`,
+        worker_count: 0,
+        workers: [],
+      };
+    }
+    if (!res.ok) {
+      const detail =
+        typeof body.detail === "string"
+          ? body.detail
+          : typeof body.error === "string"
+            ? body.error
+            : `HTTP ${res.status}`;
+      return {
+        ok: false,
+        error: detail,
+        worker_count: 0,
+        workers: [],
+      };
+    }
     const workersRaw = Array.isArray(body.workers) ? body.workers : [];
     return {
       ok: body.ok !== false,
@@ -73,8 +104,14 @@ export async function fetchGpuSupervisorStatus(): Promise<GpuSupervisorStatus | 
         .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
         .map(parseSupervisorWorker),
     };
-  } catch {
-    return null;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "network error";
+    return {
+      ok: false,
+      error: `Supervisor unreachable (${reason})`,
+      worker_count: 0,
+      workers: [],
+    };
   }
 }
 

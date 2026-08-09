@@ -23,7 +23,12 @@ _PYTHON = sys.executable
 _SUPERVISOR_SECRET = os.getenv("GPU_SUPERVISOR_SECRET", "").strip()
 _POLL_SEC = float(os.getenv("FLEET_POLL_SEC", "20") or "20")
 _MAX_WORKERS = int(os.getenv("FLEET_MAX_WORKERS", "3") or "3")
-_MEDIA_BASE_PORT = int(os.getenv("FLEET_MEDIA_BASE_PORT", "8800") or "8800")
+
+
+def _media_base_port() -> int:
+    return int(os.getenv("FLEET_MEDIA_BASE_PORT", "8800") or "8800")
+
+
 _INFERENCE_POOL_PORT = int(os.getenv("INFERENCE_POOL_PORT", "8780") or "8780")
 _INFERENCE_POOL_HOST = os.getenv("INFERENCE_POOL_HOST", "127.0.0.1").strip() or "127.0.0.1"
 _INFERENCE_POOL_URL = (
@@ -178,12 +183,13 @@ class FleetSupervisor:
         return bots[:_MAX_WORKERS]
 
     def _next_media_port(self) -> int:
+        base = _media_base_port()
         used = {rec.media_port for rec in self._workers.values()}
         for offset in range(_MAX_WORKERS):
-            port = _MEDIA_BASE_PORT + offset
+            port = base + offset
             if port not in used:
                 return port
-        return _MEDIA_BASE_PORT + len(self._workers)
+        return base + len(self._workers)
 
     def _spawn_worker(self, bot: dict[str, str]) -> WorkerRecord:
         bot_id = bot["id"]

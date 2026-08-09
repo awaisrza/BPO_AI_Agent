@@ -173,16 +173,32 @@ export async function fetchGpuWarmupStatus(options?: {
       }
     }
     if (sup && sup.worker_count === 0) {
+      const supHint = sup.error
+        ? `Supervisor error: ${sup.error}`
+        : sup.ok === false
+          ? "Supervisor returned ok:false — check /tmp/supervisor.log on GPU."
+          : "Supervisor reachable but worker_count=0 — campaign may not be running in Supabase, or /sync failed.";
       return {
         phase: "waiting_supervisor",
         ready: false,
-        message: phaseMessage({
+        message: `${phaseMessage({
           phase: "waiting_supervisor",
           supervisorConfigured,
           workerRunning: false,
           uptimeSec: 0,
           logTail: [],
-        }),
+        })} ${supHint}`,
+        supervisorConfigured,
+        healthConfigured,
+        workerReachable: false,
+        logTail: [],
+      };
+    }
+    if (sup && !sup.ok && sup.error) {
+      return {
+        phase: "error",
+        ready: false,
+        message: sup.error,
         supervisorConfigured,
         healthConfigured,
         workerReachable: false,
@@ -194,13 +210,15 @@ export async function fetchGpuWarmupStatus(options?: {
   return {
     phase: supervisorConfigured ? "waiting_supervisor" : "supervisor_unconfigured",
     ready: false,
-    message: phaseMessage({
-      phase: supervisorConfigured ? "waiting_supervisor" : "supervisor_unconfigured",
-      supervisorConfigured,
-      workerRunning,
-      uptimeSec,
-      logTail,
-    }),
+    message: supervisorConfigured
+      ? "GPU supervisor URL set but /status unreachable — verify SUPERVISOR_PORT on GPU matches Vast (53604→53604) and GPU_SUPERVISOR_SECRET matches."
+      : phaseMessage({
+          phase: "supervisor_unconfigured",
+          supervisorConfigured,
+          workerRunning,
+          uptimeSec,
+          logTail,
+        }),
     supervisorConfigured,
     healthConfigured,
     workerReachable: false,

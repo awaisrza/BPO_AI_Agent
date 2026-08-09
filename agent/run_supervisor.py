@@ -5,6 +5,8 @@ Example:
   python run_supervisor.py
 """
 
+from app.config import settings  # noqa: F401 — load agent/.env.local before supervisor imports
+
 from app.fleet_supervisor import run_supervisor
 
 if __name__ == "__main__":
