@@ -215,12 +215,24 @@ def build_app() -> FastAPI:
         if not _state.loaded:
             raise HTTPException(status_code=503, detail=_state.load_error or "Pool not ready")
 
+        missing = [
+            t.strip()
+            for t in body.texts
+            if t.strip() and t.strip() not in _state.pcm_cache
+        ]
+        if not missing:
+            return {
+                "warmed": 0,
+                "cache_size": len(_state.pcm_cache),
+                "skipped": len(body.texts),
+            }
+
         async with _state.tts_lock:
             before = len(_state.pcm_cache)
 
             def _warm() -> dict[str, bytes]:
                 return warm_chatterbox_cache_sync(
-                    texts=body.texts,
+                    texts=missing,
                     reference_path=_state.reference_path,
                     device=_state.device,
                     exaggeration=settings.chatterbox_exaggeration,

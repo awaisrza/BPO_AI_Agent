@@ -655,6 +655,45 @@ def _build_stt(*, telephony: bool = False):
     )
 
 
+def _seed_pooled_greeting_cache(
+    svc: object,
+    *,
+    script: ScriptConfig,
+    sample_rate: int,
+) -> None:
+    """Ensure opening greeting PCM is on the worker for instant play / greeting kick."""
+    from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
+    from .speech_renderer import prepare_for_speech, render_speech_telephony
+
+    cache = getattr(svc, "_cache", None)
+    if not isinstance(cache, dict):
+        return
+    try:
+        from .inference_client import get_inference_client
+
+        client = get_inference_client()
+        telephony = sample_rate == TELEPHONY_PIPELINE_RATE
+        greeting = prepare_for_speech(script.greeting)
+        if not greeting.strip():
+            return
+        chunks = render_speech_telephony(
+            greeting, max_words=settings.telephony_utterance_max_words
+        )
+        for chunk in chunks:
+            line = chunk.text.strip()
+            if not line or line in cache:
+                continue
+            cache[line] = client.synthesize_sync(
+                line,
+                sample_rate=sample_rate,
+                telephony=telephony,
+            )
+        if cache:
+            logger.info(f"Pooled greeting seeded: {len(chunks)} chunk(s) in worker cache")
+    except Exception as exc:
+        logger.warning(f"Pooled greeting seed failed (live synth on call): {exc}")
+
+
 def _build_tts(*, script: ScriptConfig, sample_rate: int, telephony: bool = False):
     if _is_chatterbox_backend():
         from .chatterbox_paths import resolve_chatterbox_device, resolve_chatterbox_reference
@@ -678,7 +717,9 @@ def _build_tts(*, script: ScriptConfig, sample_rate: int, telephony: bool = Fals
                 )
             except Exception as exc:
                 logger.warning(f"Pooled cache warm failed (live synthesis only): {exc}")
-            return PooledChatterboxTTSService(sample_rate=sample_rate)
+            svc = PooledChatterboxTTSService(sample_rate=sample_rate)
+            _seed_pooled_greeting_cache(svc, script=script, sample_rate=sample_rate)
+            return svc
 
         reference = resolve_chatterbox_reference(settings.chatterbox_reference_audio or None)
         device = resolve_chatterbox_device(

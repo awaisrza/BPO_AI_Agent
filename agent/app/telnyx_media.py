@@ -110,8 +110,8 @@ def greeting_pcm_from_cache(
     )
 
     cache = getattr(tts, "_cache", None)
-    if not cache:
-        return None
+    if cache is None:
+        cache = {}
 
     prepared_script = prepare_for_speech(script_greeting) if script_greeting else ""
     norm_script = normalize_spoken_text(prepared_script)
@@ -126,11 +126,33 @@ def greeting_pcm_from_cache(
     chunks = render_speech_telephony(greeting_text, max_words=telephony_max_words)
     parts: list[bytes] = []
     for chunk in chunks:
-        pcm = cache.get(chunk.text.strip())
+        line = chunk.text.strip()
+        pcm = cache.get(line)
+        if pcm is None:
+            pcm = _synthesize_greeting_line(line)
+            if pcm is not None and isinstance(cache, dict):
+                cache[line] = pcm
         if pcm is None:
             return None
         parts.append(pcm)
-    return b"".join(parts)
+    return b"".join(parts) if parts else None
+
+
+def _synthesize_greeting_line(line: str) -> bytes | None:
+    if not line.strip():
+        return None
+    try:
+        from .inference_client import inference_pool_enabled, get_inference_client
+
+        if inference_pool_enabled():
+            return get_inference_client().synthesize_sync(
+                line.strip(),
+                sample_rate=TELEPHONY_PIPELINE_RATE,
+                telephony=True,
+            )
+    except Exception as exc:
+        logger.warning(f"Greeting pool synthesize failed ({line[:32]!r}): {exc}")
+    return None
 
 
 async def send_direct_bulk_pcm(
