@@ -406,8 +406,6 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             await websocket.send_text(payload)
 
         async def _send_greeting_pcm(*, mark_opened: bool, label: str) -> bool:
-            from .speech_renderer import CallState
-
             if shutdown.done or fronter is None or fronter._opened:
                 return False
 
@@ -416,7 +414,7 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             if mark_opened:
                 fronter._opened = True
                 fronter._touch_activity()
-                fronter._call.state = CallState.LISTENING
+                fronter._call.begin_bot_reply(1)
 
             tts_src = tts_for_cleanup or next(
                 (p for p in pipeline.processors if getattr(p, "_cache", None) is not None),
@@ -443,6 +441,9 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 sample_rate=TELEPHONY_PIPELINE_RATE,
                 encoding=bulk_encoding,
             )
+            if mark_opened:
+                fronter._call.finish_bot_playback()
+                await fronter._start_telephony_keepalive()
             _event(f"=== {label} sent direct bulk media (~{duration_ms}ms) ===")
             return True
 
