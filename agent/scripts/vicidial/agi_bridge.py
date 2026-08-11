@@ -868,6 +868,7 @@ class AudioSocketGpuBridge:
             try:
                 msg_type, payload = _as_read_frame(self._conn)
             except socket.timeout:
+                self._send_as_silence()
                 try:
                     ws.send(_media_message(silence))
                 except websocket.WebSocketException:

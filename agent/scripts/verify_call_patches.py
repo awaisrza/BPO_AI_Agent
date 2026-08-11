@@ -22,6 +22,24 @@ CHECKS: list[tuple[str, Path, str, str]] = [
         "python scripts/patch_caller_reply_fix.py",
     ),
     (
+        "bulk media wired to call websocket",
+        ROOT / "app" / "vicidial_session.py",
+        "telnyx_send_json=_ws_send_json",
+        "update vicidial_session.py + pipeline.py",
+    ),
+    (
+        "utterance flush after TTS chunks",
+        ROOT / "app" / "tts_spoken_chunk.py",
+        "UtteranceFlushFrame(final=getattr(frame, \"utterance_final\", False))",
+        "update tts_spoken_chunk.py + speech_renderer.py",
+    ),
+    (
+        "STT yields transcription frames",
+        ROOT / "app" / "pooled_stt.py",
+        "yield TranscriptionFrame(",
+        "fix app/pooled_stt.py",
+    ),
+    (
         "caller audio during greeting wait (bridge)",
         BRIDGE,
         "_try_forward_caller_audio",

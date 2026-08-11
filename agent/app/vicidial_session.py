@@ -284,6 +284,9 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
 
         shutdown = _CallShutdown(session_key=session_key, websocket=websocket)
 
+        async def _ws_send_json(payload: str) -> None:
+            await websocket.send_text(payload)
+
         encoding = cd.get("outbound_encoding") or "PCMU"
         serializer = TelnyxFrameSerializer(
             stream_id=stream_id,
@@ -330,9 +333,20 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             vicidial_call_id=vicidial_call_id,
             on_call_should_end=_on_call_should_end,
             is_call_active=lambda: not shutdown.done,
+            telnyx_send_json=_ws_send_json,
         )
         build_ms = (time.monotonic() - build_started) * 1000
         _event(f"=== PIPELINE BUILT in {build_ms:.0f}ms ===")
+        bulk_media = next(
+            (p for p in pipeline.processors if isinstance(p, TelnyxBulkMediaProcessor)),
+            None,
+        )
+        if bulk_media is None:
+            _event(
+                "WARNING: TelnyxBulkMediaProcessor missing — bot replies will NOT reach phone"
+            )
+        else:
+            _event("=== TelnyxBulkMediaProcessor active (bot replies use same WS as greeting) ===")
         if build_ms > 2000:
             _event(
                 "WARNING: pipeline build >2s — greeting may miss bridge sync window. "
@@ -393,16 +407,9 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             except asyncio.CancelledError:
                 pass
 
-        bulk_media = next(
-            (p for p in pipeline.processors if isinstance(p, TelnyxBulkMediaProcessor)),
-            None,
-        )
         bulk_encoding = (
             bulk_media._encoding if bulk_media is not None else os.getenv("TELNYX_STREAM_CODEC", "PCMU")
         )
-
-        async def _ws_send_json(payload: str) -> None:
-            await websocket.send_text(payload)
 
         async def _send_greeting_pcm(*, mark_opened: bool, label: str) -> bool:
             if shutdown.done or fronter is None or fronter._opened:

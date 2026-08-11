@@ -891,6 +891,7 @@ def build_pipeline(
     vicidial_call_id: str | None = None,
     on_call_should_end: Callable[[str], Awaitable[None]] | None = None,
     is_call_active: Callable[[], bool] | None = None,
+    telnyx_send_json: Callable[[str], Awaitable[None]] | None = None,
 ) -> Pipeline:
     """Assemble the live pipeline. `transport` provides audio in/out frames."""
     global _cached_stt
@@ -981,19 +982,29 @@ def build_pipeline(
         from .telnyx_media import TelnyxBulkMediaProcessor, telephony_bulk_media_enabled
 
         if telephony_bulk_media_enabled():
-            ws_client = getattr(transport, "_client", None)
-            if ws_client is not None:
+            send_json = telnyx_send_json
+            if send_json is None:
+                ws_client = getattr(transport, "_client", None) or getattr(
+                    transport, "_websocket", None
+                )
+                if ws_client is not None:
 
-                async def _send_json(payload: str) -> None:
-                    await ws_client.send(payload)
+                    async def send_json(payload: str) -> None:  # type: ignore[misc]
+                        if hasattr(ws_client, "send_text"):
+                            await ws_client.send_text(payload)
+                        else:
+                            await ws_client.send(payload)
 
+            if send_json is not None:
                 encoding = os.getenv("TELNYX_STREAM_CODEC", "PCMU")
                 processors.append(
-                    TelnyxBulkMediaProcessor(send_json=_send_json, encoding=encoding)
+                    TelnyxBulkMediaProcessor(send_json=send_json, encoding=encoding)
                 )
                 logger.info(f"Telnyx bulk media enabled (encoding={encoding})")
             else:
-                logger.warning("Telnyx bulk media skipped — transport has no WebSocket client")
+                logger.warning(
+                    "Telnyx bulk media skipped — pass telnyx_send_json or fix transport WS"
+                )
     processors.append(transport.output())
 
     return Pipeline(processors)

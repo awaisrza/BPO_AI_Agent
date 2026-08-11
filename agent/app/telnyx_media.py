@@ -274,4 +274,12 @@ if PIPECAT_AVAILABLE:
                     await self._bot_finished_playback()
                 return
 
+            if isinstance(frame, BotStoppedSpeakingFrame):
+                if self._pcm and not _is_silence_pcm(bytes(self._pcm)):
+                    duration_ms, is_silence = await self._flush()
+                    if duration_ms > 0 and not is_silence:
+                        await asyncio.sleep(duration_ms / 1000.0)
+                await self.push_frame(frame, direction)
+                return
+
             await self.push_frame(frame, direction)
