@@ -95,3 +95,11 @@ async def handle_spoken_chunk_frame(
                 ),
                 direction,
             )
+
+    if getattr(processor, "_telephony", False):
+        from .speech_renderer import UtteranceFlushFrame
+
+        await processor.push_frame(
+            UtteranceFlushFrame(final=getattr(frame, "utterance_final", False)),
+            direction,
+        )

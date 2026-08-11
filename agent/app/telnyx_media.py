@@ -235,6 +235,12 @@ if PIPECAT_AVAILABLE:
             self._pcm.clear()
             if msg:
                 await self._send_json(msg)
+                if not is_silence:
+                    from .call_trace import trace_call
+
+                    trace_call(
+                        f"=== bulk media sent (~{duration_ms}ms, {len(pcm)} pcm bytes) ==="
+                    )
             return duration_ms, is_silence
 
         async def process_frame(self, frame, direction):  # type: ignore[no-untyped-def]

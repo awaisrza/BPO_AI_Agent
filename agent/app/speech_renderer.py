@@ -307,6 +307,7 @@ if PIPECAT_AVAILABLE:
         pause_after_ms: int = 0
         reset_barge_in: bool = False
         prefetch_text: str = ""
+        utterance_final: bool = False
 
     @dataclass
     class UtteranceFlushFrame(DataFrame):
@@ -441,6 +442,7 @@ if PIPECAT_AVAILABLE:
                             pause_after_ms=pause_ms,
                             reset_barge_in=(idx == 0),
                             prefetch_text=prefetch,
+                            utterance_final=(idx == len(chunks) - 1),
                         ),
                         direction,
                     )
