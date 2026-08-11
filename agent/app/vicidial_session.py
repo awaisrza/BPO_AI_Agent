@@ -127,9 +127,9 @@ def _is_client_disconnected(exc: BaseException) -> bool:
     if name == "ClientDisconnected":
         return True
     mod = type(exc).__module__ or ""
-    return "ClientDisconnected" in name or "ClientDisconnected" in str(exc) or (
-        "uvicorn" in mod and "disconnect" in name.lower()
-    )
+    if "ClientDisconnected" in name or "ClientDisconnected" in str(exc):
+        return True
+    return "uvicorn" in mod and "disconnect" in name.lower()
 
 
 class _CallShutdown:

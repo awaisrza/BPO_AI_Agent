@@ -21,7 +21,19 @@ class PooledWhisperSTTService(SegmentedSTTService):
     """Segmented STT without loading Whisper locally — calls inference pool HTTP API."""
 
     def __init__(self, *, no_speech_prob: float = 0.65, sample_rate: int = 16000, **kwargs):
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        from pipecat.services.whisper.stt import WhisperSTTService
+        from pipecat.transcriptions.language import Language
+
+        from .config import settings
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=WhisperSTTService.Settings(
+                model=settings.whisper_model,
+                language=Language.EN,
+            ),
+            **kwargs,
+        )
         self._no_speech_prob = no_speech_prob
         self._client = get_inference_client()
         logger.info(
@@ -52,9 +64,11 @@ class PooledWhisperSTTService(SegmentedSTTService):
             from .call_trace import trace_call
 
             trace_call("=== STT: (empty segment) ===")
-            yield TranscriptionFrame(
-                text,
-                self._user_id,
-                time_now_iso8601(),
-                None,
-            )
+            return
+
+        yield TranscriptionFrame(
+            text,
+            self._user_id,
+            time_now_iso8601(),
+            None,
+        )
