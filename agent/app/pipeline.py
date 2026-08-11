@@ -273,6 +273,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             "STT heard caller while bot speaking — queued: "
             f"{cleaned[:64]!r} ({len(self._pending_caller_texts)} waiting)"
         )
+        if self._telephony:
+            from .call_trace import trace_call
+
+            trace_call(f"=== STT queued (bot speaking): {cleaned[:80]!r} ===")
 
     def _utterance_priority(self, item: str) -> int:
         if _looks_like_question(item):
@@ -312,9 +316,17 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._call.on_processing()
         await self._start_telephony_keepalive()
         logger.info(f"CALLER: {text}")
+        if self._telephony:
+            from .call_trace import trace_call
+
+            trace_call(f"=== CALLER: {text[:120]!r} ===")
         turn = self._engine.handle(text)
         spoken = render_speech(turn.reply)
         logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")
+        if self._telephony:
+            from .call_trace import trace_call
+
+            trace_call(f"=== BOT: {(turn.reply or '')[:120]!r} ===")
         followup = self._engine.take_pending_followup()
         self._followup_reply = followup or None
         if followup:
@@ -506,6 +518,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                         f"STT held (turn closed, state={self._call.state.value}): "
                         f"{text[:64]!r}"
                     )
+                    if self._telephony:
+                        from .call_trace import trace_call
+
+                        trace_call(
+                            f"=== STT held (state={self._call.state.value}): "
+                            f"{text[:80]!r} ==="
+                        )
                 return
 
             if not _is_meaningful_caller_text(text):
@@ -513,6 +532,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             self._buffer_caller_text(text)
             logger.info(f"STT buffered caller text: {text[:64]!r}")
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(f"=== STT buffered: {text[:80]!r} ===")
             self._schedule_caller_flush()
             return
 
@@ -625,10 +648,10 @@ def _require_api_keys() -> None:
 def _telephony_vad_params() -> VADParams:
     """PSTN audio is quieter and noisier than a laptop mic — relax Silero thresholds."""
     return VADParams(
-        confidence=0.55,
-        start_secs=0.2,
-        stop_secs=0.9,
-        min_volume=0.35,
+        confidence=0.45,
+        start_secs=0.15,
+        stop_secs=0.75,
+        min_volume=0.25,
     )
 
 
@@ -642,7 +665,7 @@ def _build_vad(*, telephony: bool = False) -> VADProcessor:
 
 def _build_stt(*, telephony: bool = False):
     if _is_local_gpu_backend():
-        no_speech_prob = 0.65 if telephony else 0.4
+        no_speech_prob = 0.55 if telephony else 0.4
         if _inference_pool_enabled():
             from .pooled_stt import PooledWhisperSTTService
 

@@ -35,13 +35,23 @@ class PooledWhisperSTTService(SegmentedSTTService):
             text = await self._client.transcribe(audio, no_speech_prob=self._no_speech_prob)
         except Exception as exc:
             logger.error(f"Pooled STT error: {exc}")
+            from .call_trace import trace_call
+
+            trace_call(f"=== STT ERROR: {exc} ===")
             yield ErrorFrame(f"Pooled STT error: {exc}")
             return
         finally:
             await self.stop_processing_metrics()
 
         if text:
-            logger.debug(f"Pooled transcription: [{text}]")
+            logger.info(f"Pooled STT: {text[:64]!r}")
+            from .call_trace import trace_call
+
+            trace_call(f"=== STT heard: {text[:80]!r} ===")
+        else:
+            from .call_trace import trace_call
+
+            trace_call("=== STT: (empty segment) ===")
             yield TranscriptionFrame(
                 text,
                 self._user_id,

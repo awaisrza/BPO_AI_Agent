@@ -350,11 +350,19 @@ if PIPECAT_AVAILABLE:
             await super().process_frame(frame, direction)
 
             if isinstance(frame, VADUserStartedSpeakingFrame):
+                if self._telephony:
+                    from .call_trace import trace_call
+
+                    trace_call("=== VAD: caller started speaking ===")
                 logger.info("VAD: caller started speaking")
                 await self._on_caller_started(frame, direction)
             elif isinstance(frame, UserStartedSpeakingFrame):
                 await self._on_caller_started(frame, direction)
             elif isinstance(frame, VADUserStoppedSpeakingFrame):
+                if self._telephony:
+                    from .call_trace import trace_call
+
+                    trace_call("=== VAD: caller stopped — sending segment to STT ===")
                 logger.info("VAD: caller stopped speaking — sending audio to STT")
 
             await self.push_frame(frame, direction)

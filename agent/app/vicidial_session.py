@@ -18,7 +18,6 @@ from loguru import logger
 from .bot_context import BotRunContext
 from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
 from .config import settings
-from .config import settings
 from .pipeline import FronterProcessor, build_pipeline, tts_processor_for_cleanup
 from .telnyx_media import (
     TelnyxBulkMediaProcessor,
