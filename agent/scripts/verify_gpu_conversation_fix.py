@@ -9,7 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED = [
-    ("vicidial_session telnyx_send_json", ROOT / "app" / "vicidial_session.py", "telnyx_send_json=_ws_send_json"),
+    ("direct reply path", ROOT / "app" / "pipeline.py", "set_direct_telephony_media"),
+    ("direct reply send", ROOT / "app" / "pipeline.py", "direct reply sent"),
     ("tts utterance flush", ROOT / "app" / "tts_spoken_chunk.py", "UtteranceFlushFrame"),
     ("stt yield fix", ROOT / "app" / "pooled_stt.py", "yield TranscriptionFrame"),
     ("bulk media trace", ROOT / "app" / "telnyx_media.py", "bulk media sent"),
@@ -38,8 +39,8 @@ def main() -> int:
     if ok:
         print("\nAll fixes present. Run: bash scripts/restart_fleet_supervisor.sh")
         print("On test call, vicidial_events.log must show:")
-        print("  === TelnyxBulkMediaProcessor active ===")
-        print("  === bulk media sent ===  (after you speak)")
+        print("  === direct telephony reply media enabled ===")
+        print("  === direct reply sent ===  (after you speak)")
         return 0
     print("\nSync latest code to GPU before testing again.")
     return 1

@@ -22,9 +22,9 @@ CHECKS: list[tuple[str, Path, str, str]] = [
         "python scripts/patch_caller_reply_fix.py",
     ),
     (
-        "bulk media wired to call websocket",
+        "direct telephony reply media",
         ROOT / "app" / "vicidial_session.py",
-        "telnyx_send_json=_ws_send_json",
+        "direct telephony reply media enabled",
         "update vicidial_session.py + pipeline.py",
     ),
     (

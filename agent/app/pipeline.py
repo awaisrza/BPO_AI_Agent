@@ -156,6 +156,80 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._flush_task: asyncio.Task | None = None
         self._caller_flush_delay_s = 0.4 if (telephony or telephony_phone_test) else 0.75
         self.last_activity_monotonic: float = time.monotonic()
+        self._telephony_send_json: Callable[[str], Awaitable[None]] | None = None
+        self._telephony_tts: object | None = None
+        self._telephony_encoding: str = "PCMU"
+        self._telephony_direct_media = False
+
+    def set_direct_telephony_media(
+        self,
+        *,
+        send_json: Callable[[str], Awaitable[None]],
+        tts: object | None,
+        encoding: str = "PCMU",
+    ) -> None:
+        """ViciDial: send bot replies via direct bulk PCM (same path as greeting)."""
+        self._telephony_send_json = send_json
+        self._telephony_tts = tts
+        self._telephony_encoding = encoding
+        self._telephony_direct_media = bool(send_json and tts)
+
+    async def _speak_bot_text(self, text: str) -> None:
+        """Play bot reply — direct bulk PCM on ViciDial, else pipeline TTS."""
+        reply = (text or "").strip()
+        if not reply:
+            return
+        if (
+            self._telephony_direct_media
+            and self._telephony_send_json is not None
+            and self._telephony_tts is not None
+        ):
+            from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
+            from .speech_renderer import render_speech_telephony
+            from .telnyx_media import greeting_pcm_from_cache, send_direct_bulk_pcm
+
+            self._call.begin_bot_reply(1)
+            self._touch_activity()
+            chunks = render_speech_telephony(
+                reply, max_words=settings.telephony_utterance_max_words
+            )
+            sent = False
+            for chunk in chunks:
+                line = chunk.text.strip()
+                if not line:
+                    continue
+                pcm = greeting_pcm_from_cache(
+                    self._telephony_tts,
+                    line,
+                    telephony_max_words=settings.telephony_utterance_max_words,
+                )
+                if not pcm:
+                    logger.warning(
+                        f"Direct reply cache miss for {line[:48]!r} — falling back to pipeline TTS"
+                    )
+                    self._call.finish_bot_playback()
+                    await self.push_frame(TTSSpeakFrame(reply))
+                    return
+                duration_ms = await send_direct_bulk_pcm(
+                    self._telephony_send_json,
+                    pcm,
+                    sample_rate=TELEPHONY_PIPELINE_RATE,
+                    encoding=self._telephony_encoding,
+                )
+                from .call_trace import trace_call
+
+                trace_call(f"=== direct reply sent (~{duration_ms}ms): {line[:72]!r} ===")
+                sent = True
+            if sent:
+                self._call.finish_bot_playback()
+                await self._start_telephony_keepalive()
+                if PIPECAT_AVAILABLE:
+                    from pipecat.frames.frames import BotStoppedSpeakingFrame
+                    from pipecat.processors.frame_processor import FrameDirection
+
+                    await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+                return
+        await self.push_frame(TTSSpeakFrame(reply))
 
     def _touch_activity(self) -> None:
         self.last_activity_monotonic = time.monotonic()
@@ -331,7 +405,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._followup_reply = followup or None
         if followup:
             logger.info(f"BOT follow-up queued: {followup[:64]!r}")
-        await self.push_frame(TTSSpeakFrame(turn.reply))
+        await self._speak_bot_text(turn.reply)
 
         if turn.action == Action.TRANSFER:
             if self._mic_test:
@@ -472,7 +546,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     f"BOT follow-up: {' | '.join(c.text for c in spoken) or followup}"
                 )
                 self._call.on_processing()
-                await self.push_frame(TTSSpeakFrame(followup))
+                await self._speak_bot_text(followup)
                 await self.push_frame(frame, direction)
                 return
             if not self._call.can_accept_caller():

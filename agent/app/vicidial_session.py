@@ -410,6 +410,13 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
         bulk_encoding = (
             bulk_media._encoding if bulk_media is not None else os.getenv("TELNYX_STREAM_CODEC", "PCMU")
         )
+        if fronter is not None:
+            fronter.set_direct_telephony_media(
+                send_json=_ws_send_json,
+                tts=tts_for_cleanup,
+                encoding=bulk_encoding,
+            )
+            _event("=== direct telephony reply media enabled (same WS path as greeting) ===")
 
         async def _send_greeting_pcm(*, mark_opened: bool, label: str) -> bool:
             if shutdown.done or fronter is None or fronter._opened:
