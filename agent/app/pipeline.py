@@ -169,14 +169,19 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
     async def on_direct_greeting_complete(self) -> None:
         """Opening line played via direct bulk PCM — match normal TTS end-of-playback."""
+        logger.info("Direct bulk greeting finished — releasing caller turn")
+        self._touch_activity()
+        self._call.finish_bot_playback()
+        await self._start_telephony_keepalive()
+        self._move_pending_to_buffer()
+        if self._caller_buffer.strip():
+            self._schedule_caller_flush()
         if not PIPECAT_AVAILABLE:
-            self._call.finish_bot_playback()
             return
         from pipecat.frames.frames import BotStoppedSpeakingFrame
         from pipecat.processors.frame_processor import FrameDirection
 
-        logger.info("Direct bulk greeting finished — releasing caller turn")
-        await self.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
     async def _interrupt_and_handle_caller(self, text: str, direction) -> None:  # type: ignore[no-untyped-def]
         """Stop current TTS and answer the caller immediately (telephony KB/questions)."""

@@ -12,7 +12,6 @@ from .models import KnowledgeEntry
 _AGENT_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _AGENT_ROOT.parent
 for _env_path in (
-    _AGENT_ROOT / ".env.example",
     _REPO_ROOT / ".env.local",
     _REPO_ROOT / "dashboard" / ".env.local",
     _AGENT_ROOT / ".env",
