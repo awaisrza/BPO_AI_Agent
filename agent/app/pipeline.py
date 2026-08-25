@@ -93,6 +93,16 @@ _STT_GREETING_FIXES = {
     "i'm dead": "I'm good",
     "im dead": "I'm good",
     "i am dead": "I am good",
+    "i'm good.": "I'm good",
+    "yes.": "yes",
+    "yeah.": "yeah",
+    "yep.": "yep",
+    "no.": "no",
+    "nope.": "nope",
+    "okay.": "okay",
+    "ok.": "okay",
+    "hello.": "hello",
+    "hi.": "hi",
 }
 
 
@@ -135,6 +145,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         telephony: bool = False,
         telephony_phone_test: bool = False,
         vicidial_call_id: str | None = None,
+        transfer_preset: str | None = None,
         on_call_should_end: Callable[[str], Awaitable[None]] | None = None,
         is_call_active: Callable[[], bool] | None = None,
     ):
@@ -143,6 +154,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._vici = vicidial
         self._agent_user = agent_user
         self._vicidial_call_id = (vicidial_call_id or "").strip() or None
+        self._transfer_preset = (transfer_preset or "").strip() or None
         self._mic_test = mic_test
         self._telephony = telephony
         self._telephony_phone_test = telephony_phone_test
@@ -154,7 +166,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._followup_reply: str | None = None
         self._caller_buffer: str = ""
         self._flush_task: asyncio.Task | None = None
-        self._caller_flush_delay_s = 0.4 if (telephony or telephony_phone_test) else 0.75
+        # Short flush: VAD already ended the utterance; long delay pads first reply.
+        self._caller_flush_delay_s = 0.12 if (telephony or telephony_phone_test) else 0.75
         self.last_activity_monotonic: float = time.monotonic()
         self._telephony_send_json: Callable[[str], Awaitable[None]] | None = None
         self._telephony_tts: object | None = None
@@ -215,7 +228,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     pcm,
                     sample_rate=TELEPHONY_PIPELINE_RATE,
                     encoding=self._telephony_encoding,
+                    pace=False,
                 )
+                if duration_ms > 0:
+                    await asyncio.sleep(duration_ms / 1000.0)
                 from .call_trace import trace_call
 
                 trace_call(f"=== direct reply sent (~{duration_ms}ms): {line[:72]!r} ===")
@@ -439,7 +455,11 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             logger.warning("Transfer skipped — no ViciDial client (check Integrations / .env)")
             return
         closer = (self._engine.script.transfer_closer_user or "").strip()
-        preset = self._engine.script.transfer_preset or settings.vicidial_transfer_preset
+        preset = (
+            (self._engine.script.transfer_preset or "").strip()
+            or self._transfer_preset
+            or settings.vicidial_transfer_preset
+        )
 
         if self._vicidial_call_id:
             extension = self._transfer_extension(closer)
@@ -722,10 +742,12 @@ def _require_api_keys() -> None:
 def _telephony_vad_params() -> VADParams:
     """PSTN audio is quieter and noisier than a laptop mic — relax Silero thresholds."""
     return VADParams(
-        confidence=0.45,
-        start_secs=0.15,
-        stop_secs=0.75,
-        min_volume=0.25,
+        confidence=0.35,
+        start_secs=0.12,
+        # End utterance sooner for faster first reply (bridge keeps the call up now).
+        stop_secs=0.28,
+        # 0.25 was too high for AudioSocket/ulaw — VAD never fired, so no STT/CALLER.
+        min_volume=0.08,
     )
 
 
@@ -963,6 +985,7 @@ def build_pipeline(
     telephony: bool = False,
     vicidial_client: ViciDialClient | None = None,
     vicidial_call_id: str | None = None,
+    transfer_preset: str | None = None,
     on_call_should_end: Callable[[str], Awaitable[None]] | None = None,
     is_call_active: Callable[[], bool] | None = None,
     telnyx_send_json: Callable[[str], Awaitable[None]] | None = None,
@@ -1029,6 +1052,7 @@ def build_pipeline(
         telephony=telephony,
         telephony_phone_test=telephony and mic_test,
         vicidial_call_id=vicidial_call_id,
+        transfer_preset=transfer_preset,
         on_call_should_end=on_call_should_end,
         is_call_active=is_call_active,
     )

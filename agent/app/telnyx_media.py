@@ -162,8 +162,13 @@ async def send_direct_bulk_pcm(
     sample_rate: int = TELEPHONY_PIPELINE_RATE,
     encoding: str = "PCMU",
     wire_rate: int = TELNYX_WIRE_RATE,
+    pace: bool = True,
 ) -> int:
-    """Send one bot utterance on the Telnyx media WebSocket (bypasses pipecat)."""
+    """Send one bot utterance on the Telnyx media WebSocket (bypasses pipecat).
+
+    When pace=False, returns immediately after send so the caller can open the
+    listening turn while acoustic playback still finishes on the phone.
+    """
     msg = pcm_to_telnyx_media_json(
         pcm,
         sample_rate=sample_rate,
@@ -176,7 +181,7 @@ async def send_direct_bulk_pcm(
     duration_ms = _playback_duration_ms(
         pcm, sample_rate=sample_rate, wire_rate=wire_rate
     )
-    if duration_ms > 0:
+    if pace and duration_ms > 0:
         await asyncio.sleep(duration_ms / 1000.0)
     return duration_ms
 

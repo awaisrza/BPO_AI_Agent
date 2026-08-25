@@ -45,9 +45,12 @@ import base64
 import contextlib
 import fcntl
 import json
+import math
 import os
+import queue
 import select
 import socket
+import struct
 import sys
 import threading
 import time
@@ -492,10 +495,17 @@ def _media_message(payload_b64: str) -> str:
 
 
 def _as_recv_exact(conn: socket.socket, nbytes: int) -> bytes | None:
+    """Read exactly nbytes. None = real EOF/error. Raises BlockingIOError if would block with no data."""
     buf = bytearray()
     while len(buf) < nbytes:
         try:
             chunk = conn.recv(nbytes - len(buf))
+        except BlockingIOError:
+            # Non-blocking socket, no data yet — not EOF.
+            if not buf:
+                raise
+            time.sleep(0.001)
+            continue
         except OSError:
             return None
         if not chunk:
@@ -551,6 +561,11 @@ class AudioSocketGpuBridge:
         vicidial_call_id: str = "",
     ) -> None:
         self._conn = conn
+        # Asterisk AudioSocket uses a nonblocking fd and aborts on EAGAIN/partial
+        # reads ("Failed to read type header"). Keep our side simple + paced.
+        with contextlib.suppress(OSError):
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        conn.setblocking(True)
         self.ws_url = ws_url
         self.stream_id = stream_id
         self.call_control_id = call_control_id
@@ -563,21 +578,78 @@ class AudioSocketGpuBridge:
         self._wrote_audio = False
         self._sent_caller_audio = False
         self._gpu_media_packets = 0
-        self._write_lock = threading.Lock()
+        self._caller_frame_count = 0
+        self._session_started = time.monotonic()
         self._recv_thread_started = False
+        self._writer_thread: threading.Thread | None = None
         self._last_as_write_time = 0.0
+        self._comfort_phase = 0
+        # Sole outbound path: recv thread enqueues 20 ms slin frames; writer
+        # ticks at 50 Hz and always emits exactly one full frame (speech or comfort).
+        self._audio_q: queue.Queue[bytes] = queue.Queue(maxsize=2000)
 
     def _touch_as_write(self) -> None:
         self._last_as_write_time = time.monotonic()
 
-    def _maybe_keepalive_as(self) -> None:
-        """Asterisk needs outbound frames even while we read caller audio."""
-        if time.monotonic() - self._last_as_write_time < 0.018:
-            return
-        if self._send_as_silence():
+    def _comfort_slin_frame(self) -> bytes:
+        """Fill frames while the speech queue is empty (exact 320-byte slin).
+
+        Default is digital silence — an audible 400 Hz tone was used earlier to
+        defeat dead-air detectors, but the 20 ms writer ticker is enough for
+        Asterisk AudioSocket now. Set AI_FRONTER_COMFORT_AMP>0 only if needed.
+        """
+        amp = int(os.getenv("AI_FRONTER_COMFORT_AMP", "0") or "0")
+        if amp <= 0:
+            return b"\x00" * SLIN_CHUNK_BYTES
+        out = bytearray()
+        t0 = self._comfort_phase
+        for i in range(SLIN_CHUNK_BYTES // 2):
+            sample = int(amp * math.sin(2.0 * math.pi * 400.0 * (t0 + i) / SAMPLE_RATE))
+            sample = max(-32767, min(32767, sample))
+            out.extend(struct.pack("<h", sample))
+        self._comfort_phase = (t0 + SLIN_CHUNK_BYTES // 2) % SAMPLE_RATE
+        return bytes(out)
+
+    def _writer_loop(self) -> None:
+        """Single 20 ms ticker — prevents Asterisk AudioSocket EAGAIN aborts."""
+        _log("AudioSocket writer thread started (20ms ticker)")
+        next_t = time.monotonic()
+        while not self._stop.is_set():
+            now = time.monotonic()
+            delay = next_t - now
+            if delay > 0:
+                # Short waits so _stop is noticed quickly.
+                self._stop.wait(min(delay, 0.005))
+                continue
+            next_t += 0.02
+            if next_t < time.monotonic() - 0.05:
+                # Fell behind (GC/pause) — resync rather than catch-up blasting.
+                next_t = time.monotonic() + 0.02
+            try:
+                frame = self._audio_q.get_nowait()
+            except queue.Empty:
+                frame = self._comfort_slin_frame()
+            if len(frame) != SLIN_CHUNK_BYTES:
+                frame = (frame + b"\x00" * SLIN_CHUNK_BYTES)[:SLIN_CHUNK_BYTES]
+            if not _as_write_frame(self._conn, _AS_TYPE_AUDIO, frame):
+                self._stop.set()
+                break
             self._touch_as_write()
 
+    def _start_writer_thread(self) -> None:
+        if self._writer_thread is not None and self._writer_thread.is_alive():
+            return
+        self._writer_thread = threading.Thread(
+            target=self._writer_loop, name="as-writer", daemon=True
+        )
+        self._writer_thread.start()
+
+    # Back-compat name used by connect()/retries.
+    def _start_keepalive_thread(self) -> None:
+        self._start_writer_thread()
+
     def _as_realtime_pace(self) -> bool:
+        # Writer thread always paces; env kept for log compatibility.
         return os.getenv("AI_FRONTER_AS_REALTIME_PACE", "true").strip().lower() in (
             "1",
             "true",
@@ -615,17 +687,16 @@ class AudioSocketGpuBridge:
         """Non-blocking read of caller audio from AudioSocket → GPU (during greeting wait)."""
         if self._ws is None or self._stop.is_set():
             return False
-        self._maybe_keepalive_as()
-        prev_timeout = self._conn.gettimeout()
         try:
-            self._conn.settimeout(0.0)
+            readable, _, _ = select.select([self._conn], [], [], 0)
+        except (OSError, ValueError):
+            return False
+        if not readable:
+            return False
+        try:
             msg_type, payload = _as_read_frame(self._conn)
-        except socket.timeout:
+        except (socket.timeout, BlockingIOError, OSError):
             return False
-        except OSError:
-            return False
-        finally:
-            self._conn.settimeout(prev_timeout)
         if msg_type is None:
             _log("AudioSocket read EOF")
             self._stop.set()
@@ -635,33 +706,44 @@ class AudioSocketGpuBridge:
             self._stop.set()
             return False
         if msg_type == _AS_TYPE_AUDIO and payload:
+            self._caller_frame_count += 1
             return self._forward_caller_payload(payload)
         return False
 
     def _write_ulaw_to_as(self, ulaw: bytes, *, paced: bool | None = None) -> bool:
+        """Enqueue bot PCMU as 20 ms slin frames for the writer ticker."""
+        del paced  # writer thread always real-time paces
         if not ulaw:
             return False
         slin = audioop.ulaw2lin(ulaw, 2)
         chunk = SLIN_CHUNK_BYTES
-        if paced is None:
-            paced = self._as_realtime_pace()
-        wrote = False
-        with self._write_lock:
-            for offset in range(0, len(slin), chunk):
-                frame = slin[offset : offset + chunk]
-                if not _as_write_frame(self._conn, _AS_TYPE_AUDIO, frame):
-                    self._stop.set()
-                    return False
-                wrote = True
-                self._touch_as_write()
-                if paced:
-                    time.sleep(0.02)
-        if not wrote:
+        short_padded = 0
+        queued = 0
+        for offset in range(0, len(slin), chunk):
+            if self._stop.is_set():
+                return False
+            frame = slin[offset : offset + chunk]
+            if len(frame) < chunk:
+                frame = frame + b"\x00" * (chunk - len(frame))
+                short_padded += 1
+            try:
+                self._audio_q.put(frame, timeout=2.0)
+            except queue.Full:
+                _log("AudioSocket audio queue full — dropping utterance")
+                self._stop.set()
+                return False
+            queued += 1
+        if queued == 0:
             return False
         self._gpu_media_packets += 1
+        if short_padded:
+            _log(f"AudioSocket padded {short_padded} short frame(s) to {chunk} bytes")
         if not self._wrote_audio:
             self._wrote_audio = True
-            _log(f"AudioSocket wrote first bot audio ({len(slin)} bytes slin, chunked)")
+            _log(
+                f"AudioSocket queued first bot audio "
+                f"({len(slin)} bytes slin → {queued} frames)"
+            )
         return True
 
     def _handle_gpu_raw(self, raw: str | bytes, *, paced: bool | None = None) -> bool:
@@ -718,8 +800,8 @@ class AudioSocketGpuBridge:
         self._recv_thread_started = True
 
     def _wait_for_greeting_audio(self) -> bool:
-        """Feed GPU silence while recv thread pace-writes greeting (matches direct Telnyx timing)."""
-        min_messages = int(os.getenv("AI_FRONTER_GREETING_MIN_MESSAGES", "2") or "2")
+        """Feed GPU silence while writer plays queued greeting frames."""
+        min_messages = int(os.getenv("AI_FRONTER_GREETING_MIN_MESSAGES", "1") or "1")
         wait_s = float(os.getenv("AI_FRONTER_GREETING_WAIT_S", "20") or "20")
         max_idle = int(os.getenv("AI_FRONTER_GREETING_IDLE_CHUNKS", "50") or "50")
         deadline = time.time() + wait_s
@@ -730,10 +812,16 @@ class AudioSocketGpuBridge:
             self._send_gpu_silence()
             time.sleep(0.02)
             count = self._gpu_media_packets
+            if self._stop.is_set():
+                _log("Greeting wait aborted (AudioSocket stop/EOF during greeting)")
+                return False
             if count >= min_messages:
+                # Wait until the ticker has drained the greeting queue.
+                if not self._audio_q.empty():
+                    continue
                 _log(
                     f"Greeting ready ({count} GPU audio messages, "
-                    f"paced={self._as_realtime_pace()})"
+                    f"paced={self._as_realtime_pace()}, queue_drained=True)"
                 )
                 return True
             if count > last_count:
@@ -772,20 +860,27 @@ class AudioSocketGpuBridge:
 
     def _open_ws_and_greeting(self) -> bool:
         self._open_ws_only()
+        self._start_keepalive_thread()
         self._start_recv_thread()
         return self._wait_for_greeting_audio()
 
     def _close_ws(self) -> None:
-        if self._recv_thread is not None:
-            self._recv_thread.join(timeout=2)
-            self._recv_thread = None
-        self._recv_thread_started = False
+        # Do not set _stop or join keepalive — Asterisk still needs frames while
+        # connect() retries the GPU WebSocket. close() stops keepalive.
         if self._ws is not None:
             with contextlib.suppress(Exception):
                 self._ws.close()
             self._ws = None
+        if self._recv_thread is not None:
+            self._recv_thread.join(timeout=2)
+            self._recv_thread = None
+        self._recv_thread_started = False
 
     def connect(self) -> None:
+        # Feed AudioSocket immediately — _wait_gpu_ready can block many seconds while
+        # the prior call finishes; without frames Asterisk drops (~8–10s silence).
+        self._start_keepalive_thread()
+
         gpu_host = self.ws_url.split("//", 1)[-1].split("/", 1)[0]
         host_part, _, port_part = gpu_host.rpartition(":")
         media_port = int(port_part or "8800")
@@ -801,12 +896,15 @@ class AudioSocketGpuBridge:
         for attempt in range(1, max(1, retries) + 1):
             if attempt > 1:
                 _log(f"Retrying GPU WebSocket (attempt {attempt}/{retries})")
+                self._start_keepalive_thread()
                 time.sleep(1.0)
             try:
                 got = self._open_ws_and_greeting()
             except Exception as exc:  # noqa: BLE001
                 _log(f"WebSocket connect failed: {exc}")
                 self._close_ws()
+                self._stop.clear()
+                self._start_keepalive_thread()
                 if attempt >= retries:
                     raise
                 continue
@@ -814,6 +912,8 @@ class AudioSocketGpuBridge:
                 break
             _log("WARNING: no bot audio from GPU during greeting wait (check GPU worker log)")
             self._close_ws()
+            self._stop.clear()
+            self._start_keepalive_thread()
             if attempt >= retries:
                 break
 
@@ -849,51 +949,74 @@ class AudioSocketGpuBridge:
                 _log(f"GPU recv error: {exc}")
             self._stop.set()
 
-    def _send_as_silence(self) -> bool:
-        """Keep Asterisk AudioSocket fed between bot utterances (avoids 'Failed to receive frame')."""
-        silence_slin = b"\x00" * SLIN_CHUNK_BYTES
-        with self._write_lock:
-            ok = _as_write_frame(self._conn, _AS_TYPE_AUDIO, silence_slin)
-        if ok:
-            self._touch_as_write()
-        return ok
+    def close(self) -> None:
+        self._stop.set()
+        if self._writer_thread is not None:
+            self._writer_thread.join(timeout=1)
+            self._writer_thread = None
+        self._close_ws()
+        with contextlib.suppress(OSError):
+            self._conn.close()
 
     def pump_caller_audio(self) -> None:
         assert self._ws is not None
         ws = self._ws
-        self._conn.settimeout(0.02)
         silence = base64.b64encode(b"\xff" * ULAW_CHUNK_BYTES).decode("ascii")
+        gap_ms = (time.monotonic() - self._last_as_write_time) * 1000.0
+        writer_alive = bool(self._writer_thread and self._writer_thread.is_alive())
+        _log(
+            f"AudioSocket entering caller pump (post-greeting, "
+            f"ms_since_as_write={gap_ms:.0f}, "
+            f"writer_alive={writer_alive}, qsize={self._audio_q.qsize()})"
+        )
+        end_reason = "stop"
         while not self._stop.is_set():
-            self._maybe_keepalive_as()
             try:
-                msg_type, payload = _as_read_frame(self._conn)
-            except socket.timeout:
-                self._send_as_silence()
+                readable, _, _ = select.select([self._conn], [], [], 0.02)
+            except (OSError, ValueError) as exc:
+                _log(f"AudioSocket select ended: {exc}")
+                end_reason = f"select:{exc}"
+                break
+            if not readable:
                 try:
                     ws.send(_media_message(silence))
                 except websocket.WebSocketException:
+                    end_reason = "gpu_ws_send_failed"
                     break
+                continue
+            try:
+                msg_type, payload = _as_read_frame(self._conn)
+            except (socket.timeout, BlockingIOError):
                 continue
             except OSError as exc:
                 _log(f"AudioSocket read ended: {exc}")
+                end_reason = f"os_error:{exc}"
                 break
             if msg_type is None:
-                _log("AudioSocket read EOF")
+                gap_ms = (time.monotonic() - self._last_as_write_time) * 1000.0
+                _log(
+                    f"AudioSocket read EOF "
+                    f"(ms_since_as_write={gap_ms:.0f}, gpu_packets={self._gpu_media_packets})"
+                )
+                end_reason = "eof"
                 break
             if msg_type == _AS_TYPE_TERM:
                 _log("AudioSocket terminate")
+                end_reason = "term"
                 break
             if msg_type == _AS_TYPE_AUDIO and payload:
+                self._caller_frame_count += 1
                 if not self._forward_caller_payload(payload):
+                    end_reason = "gpu_forward_failed"
                     break
             elif msg_type not in (_AS_TYPE_UUID, _AS_TYPE_DTMF):
                 _log(f"AudioSocket ignoring frame type=0x{msg_type:02x}")
-
-    def close(self) -> None:
-        self._stop.set()
-        self._close_ws()
-        with contextlib.suppress(OSError):
-            self._conn.close()
+        duration_s = time.monotonic() - self._session_started
+        _log(
+            f"AudioSocket pump ended ({end_reason}, {duration_s:.1f}s, "
+            f"caller_frames={self._caller_frame_count}, "
+            f"caller_sent={self._sent_caller_audio})"
+        )
 
 
 def _handle_audiosocket_client(conn: socket.socket, addr: tuple, agent_user: str) -> None:
@@ -939,7 +1062,9 @@ def _handle_audiosocket_client(conn: socket.socket, addr: tuple, agent_user: str
             bridge.close()
             _log(
                 f"AudioSocket session ended (gpu_packets={bridge._gpu_media_packets}, "
-                f"caller_sent={bridge._sent_caller_audio})"
+                f"caller_sent={bridge._sent_caller_audio}, "
+                f"caller_frames={bridge._caller_frame_count}, "
+                f"duration={time.monotonic() - bridge._session_started:.1f}s)"
             )
     except Exception as exc:  # noqa: BLE001
         _log(f"AudioSocket handler error: {exc}")

@@ -7,6 +7,7 @@ bridge can forward RTP without custom codecs in the agent.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 import traceback
@@ -90,7 +91,76 @@ def _extract_vicidial_call_id(cd: dict[str, Any]) -> str | None:
             raw = start.get("vicidial_call_id")
             if raw and _looks_like_vicidial_call_id(str(raw)):
                 return str(raw).strip()
+    start = cd.get("start")
+    if isinstance(start, dict):
+        raw = start.get("vicidial_call_id")
+        if raw and _looks_like_vicidial_call_id(str(raw)):
+            return str(raw).strip()
     return None
+
+
+def _capture_vicidial_call_id_from_text(text: str) -> str | None:
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("event") != "start":
+        return None
+    raw = data.get("vicidial_call_id")
+    if raw and _looks_like_vicidial_call_id(str(raw)):
+        return str(raw).strip()
+    start = data.get("start")
+    if isinstance(start, dict):
+        raw = start.get("vicidial_call_id")
+        if raw and _looks_like_vicidial_call_id(str(raw)):
+            return str(raw).strip()
+    return None
+
+
+class _HandshakeCaptureWebsocket:
+    """Wrap FastAPI WS so we keep custom Telnyx start fields pipecat strips."""
+
+    def __init__(self, websocket: Any) -> None:
+        self._ws = websocket
+        self.vicidial_call_id: str | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._ws, name)
+
+    def _note(self, text: str) -> None:
+        if self.vicidial_call_id:
+            return
+        found = _capture_vicidial_call_id_from_text(text)
+        if found:
+            self.vicidial_call_id = found
+
+    async def receive_text(self) -> str:
+        text = await self._ws.receive_text()
+        self._note(text)
+        return text
+
+    async def receive(self) -> Any:
+        msg = await self._ws.receive()
+        if isinstance(msg, dict) and msg.get("type") == "websocket.receive":
+            text = msg.get("text")
+            if isinstance(text, str):
+                self._note(text)
+        return msg
+
+    async def receive_json(self) -> Any:
+        data = await self._ws.receive_json()
+        if isinstance(data, dict) and data.get("event") == "start":
+            raw = data.get("vicidial_call_id")
+            if raw and _looks_like_vicidial_call_id(str(raw)):
+                self.vicidial_call_id = str(raw).strip()
+            start = data.get("start")
+            if isinstance(start, dict):
+                raw = start.get("vicidial_call_id")
+                if raw and _looks_like_vicidial_call_id(str(raw)):
+                    self.vicidial_call_id = str(raw).strip()
+        return data
 
 
 def _call_data_dict(call_data: Any) -> dict[str, Any]:
@@ -244,7 +314,8 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 return
             raise
         try:
-            transport_type, call_data = await parse_telephony_websocket(websocket)
+            handshake_ws = _HandshakeCaptureWebsocket(websocket)
+            transport_type, call_data = await parse_telephony_websocket(handshake_ws)
         except ValueError as exc:
             if "WebSocket closed before receiving telephony handshake" in str(exc):
                 _event("=== VICIDIAL WS closed before handshake (bridge retry/probe) ===")
@@ -252,9 +323,16 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 return
             raise
         cd = _call_data_dict(call_data)
-        vicidial_call_id = _extract_vicidial_call_id(cd)
+        vicidial_call_id = (
+            _extract_vicidial_call_id(cd) or handshake_ws.vicidial_call_id
+        )
         if vicidial_call_id:
             _event(f"=== ViciDial remote call id={vicidial_call_id} ===")
+        else:
+            _event(
+                "=== WARNING: no vicidial_call_id in handshake — "
+                "warm transfer will use agent API (may fail for remote agent) ==="
+            )
         _event(f"=== parsed transport={transport_type} keys={list(cd.keys())} ===")
 
         stream_id = cd.get("stream_id") or f"vd-{ctx.agent_user}-{int(time.time())}"
@@ -331,6 +409,7 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             telephony=True,
             vicidial_client=vici,
             vicidial_call_id=vicidial_call_id,
+            transfer_preset=ctx.transfer_preset,
             on_call_should_end=_on_call_should_end,
             is_call_active=lambda: not shutdown.done,
             telnyx_send_json=_ws_send_json,
@@ -454,7 +533,12 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 pcm,
                 sample_rate=TELEPHONY_PIPELINE_RATE,
                 encoding=bulk_encoding,
+                pace=False,
             )
+            # Wait for acoustic playback before opening STT — otherwise the bot
+            # hears its own greeting (echo) and the first FSM turn goes wrong.
+            if duration_ms > 0:
+                await asyncio.sleep(duration_ms / 1000.0)
             if mark_opened:
                 await fronter.on_direct_greeting_complete()
                 _event("=== greeting done — caller turn open (pending STT flushed) ===")

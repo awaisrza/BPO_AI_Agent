@@ -172,10 +172,25 @@ export async function fetchGpuWarmupStatus(options?: {
         };
       }
     }
+    if (sup && !sup.ok && sup.error) {
+      const unreachable = /unreachable|fetch failed|network/i.test(sup.error);
+      return {
+        phase: unreachable ? "offline" : "error",
+        ready: false,
+        message: unreachable
+          ? `${sup.error} Vast is not forwarding the supervisor public port. ` +
+            "In Vast → Connect, copy the current public port for internal 8770, " +
+            "or comment out GPU_SUPERVISOR_URL and use GPU_WORKER_HEALTH_URL (internal 10200)."
+          : sup.error,
+        supervisorConfigured,
+        healthConfigured,
+        workerReachable: false,
+        logTail: [],
+      };
+    }
     if (sup && sup.worker_count === 0) {
-      const supHint = sup.error
-        ? `Supervisor error: ${sup.error}`
-        : sup.ok === false
+      const supHint =
+        sup.ok === false
           ? "Supervisor returned ok:false — check /tmp/supervisor.log on GPU."
           : "Supervisor reachable but worker_count=0 — campaign may not be running in Supabase, or /sync failed.";
       return {
@@ -188,17 +203,6 @@ export async function fetchGpuWarmupStatus(options?: {
           uptimeSec: 0,
           logTail: [],
         })} ${supHint}`,
-        supervisorConfigured,
-        healthConfigured,
-        workerReachable: false,
-        logTail: [],
-      };
-    }
-    if (sup && !sup.ok && sup.error) {
-      return {
-        phase: "error",
-        ready: false,
-        message: sup.error,
         supervisorConfigured,
         healthConfigured,
         workerReachable: false,
@@ -226,8 +230,37 @@ export async function fetchGpuWarmupStatus(options?: {
   };
 }
 
-/** Mark campaign running and nudge GPU supervisor (when URL is configured). */
+/** Mark campaign running and nudge GPU supervisor (when URL is configured).
+ * If the worker is offline and Vast/RunPod is configured, start the host first.
+ */
 export async function startGpuWarmup(campaignId: string): Promise<{ message: string }> {
+  const health = await fetchGpuWorkerHealth();
+  if (!health.ready) {
+    try {
+      const { startGpuForCampaign } = await import("./orchestrator");
+      const gpu = await startGpuForCampaign(campaignId);
+      return {
+        message: gpu.configured
+          ? gpu.message
+          : `${gpu.message} Worker should start on the next supervisor poll (~20s) if run_supervisor.py is running on the GPU.`,
+      };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "GPU host start failed";
+      // Fall through to plain /sync — supervisor may already be up without worker health yet.
+      try {
+        const gpu = await syncGpuSupervisor(campaignId, "start");
+        return {
+          message: `${reason}. Fallback sync: ${gpu.message}`,
+        };
+      } catch (syncErr) {
+        const syncReason = syncErr instanceof Error ? syncErr.message : "supervisor sync failed";
+        return {
+          message: `${reason}. ${syncReason}`,
+        };
+      }
+    }
+  }
+
   try {
     const gpu = await syncGpuSupervisor(campaignId, "start");
     return {
