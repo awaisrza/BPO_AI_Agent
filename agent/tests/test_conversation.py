@@ -359,3 +359,53 @@ def test_third_kb_in_pitch_advances_to_pitch():
     e.handle("who is calling")
     turn = e.handle("why are you calling me")
     assert "Medicare review" in turn.reply
+
+def test_age_answer_advances_qualify():
+    from app.conversation import _extract_age_years, _age_qualify_result
+
+    assert _extract_age_years('I am 90 years old.') == 90
+    assert _extract_age_years('I am 75.') == 75
+    assert _extract_age_years('75') == 75
+    assert _age_qualify_result('I am 75.') == 'yes'
+    assert _age_qualify_result('I am 40.') == 'no'
+
+    script = ScriptConfig(
+        greeting='Hi.',
+        pitch='Medicare benefits. Do you have a moment?',
+        qualifying_questions=['How old are you?', 'Do you make your own decisions?'],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle('ok')
+    e.handle('yes')  # consent -> ask age
+    turn = e.handle('I am 75.')
+    assert turn.reply == 'Do you make your own decisions?'
+    turn2 = e.handle('yes')
+    assert turn2.action == Action.TRANSFER
+
+
+def test_age_answer_not_hijacked_by_kb():
+    from app.knowledge import answer_offscript as kb_answer
+
+    script = ScriptConfig(
+        greeting='Hi.',
+        pitch='Medicare. Ready?',
+        qualifying_questions=['How old are you?', 'Do you have Part A?'],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic='Age confirm',
+                triggers=['years old', 'I am'],
+                answer='Just to confirm you qualify - what age are you?',
+            ),
+        ],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
+    )
+    e.open()
+    e.handle('ok')
+    e.handle('yes')
+    turn = e.handle('I am 90 years old.')
+    assert 'confirm you qualify' not in turn.reply.lower()
+    assert turn.reply == 'Do you have Part A?'

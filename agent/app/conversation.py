@@ -87,6 +87,7 @@ _CONSENT = {
     "all good",
 }
 _QUALIFY_YES = {"yes", "yeah", "yep", "sure", "correct", "absolutely", "definitely"}
+_AGE_QUESTION_MARKERS = ("how old", "what age", "your age", "age are you", "years old")
 _NEGATIVE = (
     "no",
     "nope",
@@ -167,6 +168,40 @@ def _is_qualify_yes(utterance: str) -> bool:
         return True
     words = set(u.replace(",", " ").replace(".", " ").split())
     return bool(words & _QUALIFY_YES)
+
+
+def _is_age_question(question: str) -> bool:
+    q = (question or "").strip().lower()
+    return any(marker in q for marker in _AGE_QUESTION_MARKERS)
+
+
+def _extract_age_years(utterance: str) -> int | None:
+    """Pull a plausible adult age from speech (65, I'm 75, 90 years old)."""
+    u = (utterance or "").strip().lower()
+    if not u:
+        return None
+    # Prefer patterns with age context first.
+    for pattern in (
+        r"\b(?:i(?:'?m| am)|age(?:\s+is)?|turned)\s*(\d{2,3})\b",
+        r"\b(\d{2,3})\s*(?:years?\s*old|yrs?\s*old|years?)\b",
+        r"\b(\d{2,3})\b",
+    ):
+        match = re.search(pattern, u)
+        if not match:
+            continue
+        age = int(match.group(1))
+        if 18 <= age <= 120:
+            return age
+    return None
+
+
+def _age_qualify_result(utterance: str) -> str | None:
+    """Return 'yes' / 'no' for an age answer, or None if not an age reply."""
+    age = _extract_age_years(utterance)
+    if age is None:
+        return None
+    # Medicare fronter: 65+ counts as qualifying; younger is an answered "no".
+    return "yes" if age >= 65 else "no"
 
 
 def _is_greeting_ack_only(utterance: str) -> bool:
@@ -284,6 +319,8 @@ class ConversationEngine:
         if self._unclear_at_qualify == 0:
             self._unclear_at_qualify += 1
             return self._speak_new(current)
+        if _is_age_question(current):
+            return self._speak_new("Sorry — what age are you?")
         return self._speak_new("Sorry — could you say yes or no?")
 
     def _pitch_consent_question(self) -> str:
@@ -409,6 +446,17 @@ class ConversationEngine:
                     if turn:
                         return turn
                 return self._escalate()
+
+            # Age numbers first — KB triggers like "I am" / "years old" must not loop.
+            if self._qualify_idx > 0:
+                current_q = self.script.qualifying_questions[self._qualify_idx - 1]
+                if _is_age_question(current_q):
+                    age_result = _age_qualify_result(utterance)
+                    if age_result == "yes":
+                        self._positives += 1
+                        return self._next_qualifier()
+                    if age_result == "no":
+                        return self._next_qualifier()
 
             if self._kb_only_answer(utterance):
                 turn = self._respond_offscript_qualify(utterance)

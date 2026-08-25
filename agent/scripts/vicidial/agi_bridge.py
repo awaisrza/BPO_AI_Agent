@@ -357,8 +357,37 @@ def _looks_like_vicidial_call_id(value: str) -> bool:
     return token[0] in ("V", "Y") and token[1:].replace("-", "").isalnum()
 
 
+def _read_vicidial_call_id_file(agent_user: str) -> str:
+    """Optional dialplan drop: echo -n '${CALLERID(name)}' > /tmp/ai-fronter-vdcallid-6666"""
+    candidates = [
+        Path(f"/tmp/ai-fronter-vdcallid-{agent_user}"),
+        Path("/tmp/ai-fronter-vdcallid"),
+    ]
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            token = path.read_text(encoding="utf-8", errors="replace").strip()
+            # Fresh enough for this call (avoid stale ID from a prior dial).
+            age_s = time.time() - path.stat().st_mtime
+            if age_s > 120:
+                _log(f"Ignoring stale call-id file {path} ({age_s:.0f}s old)")
+                continue
+            if _looks_like_vicidial_call_id(token):
+                _log(f"ViciDial call ID from file {path}: {token}")
+                return token
+            if token:
+                _log(f"Call-id file {path} rejected: {token[:40]!r}")
+        except OSError as exc:
+            _log(f"Call-id file read failed ({path}): {exc}")
+    return ""
+
+
 def _lookup_vicidial_call_id(agent_user: str) -> str:
     """Read active remote-agent call ID from vicidial_live_agents (AudioSocket path)."""
+    from_file = _read_vicidial_call_id_file(agent_user)
+    if from_file:
+        return from_file
     if os.getenv("AI_FRONTER_SKIP_VD_CALL_ID_LOOKUP", "").strip().lower() in (
         "1",
         "true",
