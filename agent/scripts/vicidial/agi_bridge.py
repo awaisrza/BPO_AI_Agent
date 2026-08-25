@@ -386,27 +386,59 @@ def _lookup_vicidial_call_id(agent_user: str) -> str:
             if mysql_user:
                 break
     if not mysql_user:
+        _log("ViciDial call ID lookup skipped — no MySQL user configured")
         return ""
+    safe_user = agent_user.replace("'", "''")
     sql = (
         "SELECT callerid FROM vicidial_live_agents "
-        f"WHERE user='{agent_user.replace(chr(39), chr(39) + chr(39))}' "
-        "AND callerid IS NOT NULL AND callerid != '' LIMIT 1;"
+        f"WHERE user='{safe_user}' "
+        "AND callerid IS NOT NULL AND callerid != '' "
+        "ORDER BY last_update_time DESC LIMIT 1;"
     )
-    try:
-        import subprocess
+    # AudioSocket can connect slightly before live_agents.callerid is written.
+    attempts = int(os.getenv("AI_FRONTER_VD_CALL_ID_LOOKUP_TRIES", "8") or "8")
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            import subprocess
 
-        proc = subprocess.run(
-            ["mysql", "-N", "-B", "-u", mysql_user, f"-p{mysql_pass}", mysql_db, "-e", sql],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        candidate = (proc.stdout or "").strip().splitlines()[0].strip() if proc.stdout else ""
-        if _looks_like_vicidial_call_id(candidate):
-            _log(f"ViciDial call ID from live_agents: {candidate}")
-            return candidate
-    except Exception as exc:  # noqa: BLE001
-        _log(f"ViciDial call ID lookup failed: {exc}")
+            proc = subprocess.run(
+                [
+                    "mysql",
+                    "-N",
+                    "-B",
+                    "-u",
+                    mysql_user,
+                    f"-p{mysql_pass}",
+                    mysql_db,
+                    "-e",
+                    sql,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            candidate = (
+                (proc.stdout or "").strip().splitlines()[0].strip() if proc.stdout else ""
+            )
+            if _looks_like_vicidial_call_id(candidate):
+                _log(f"ViciDial call ID from live_agents: {candidate}")
+                return candidate
+            if candidate:
+                _log(
+                    f"ViciDial live_agents.callerid rejected (not V/Y call id): "
+                    f"{candidate[:40]!r} (try {attempt}/{attempts})"
+                )
+            elif attempt == 1 or attempt == attempts:
+                err = (proc.stderr or "").strip()
+                _log(
+                    f"ViciDial call ID lookup empty for user={agent_user} "
+                    f"(try {attempt}/{attempts})"
+                    + (f" mysql_err={err[:120]!r}" if err else "")
+                )
+        except Exception as exc:  # noqa: BLE001
+            _log(f"ViciDial call ID lookup failed: {exc}")
+            break
+        time.sleep(0.15)
     return ""
 
 
@@ -1042,6 +1074,13 @@ def _handle_audiosocket_client(conn: socket.socket, addr: tuple, agent_user: str
 
         stream_id = f"vd-{agent_user}-{call_uuid[:8]}"
         vd_call_id = _lookup_vicidial_call_id(agent_user)
+        if vd_call_id:
+            _log(f"AudioSocket handshake vicidial_call_id={vd_call_id}")
+        else:
+            _log(
+                "WARNING: AudioSocket handshake has no vicidial_call_id — "
+                "GPU warm transfer via ra_call_control will fail"
+            )
         bridge = AudioSocketGpuBridge(
             conn=conn,
             ws_url=f"ws://{gpu_host}:{media_port}/ws",

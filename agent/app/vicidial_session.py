@@ -125,6 +125,7 @@ class _HandshakeCaptureWebsocket:
     def __init__(self, websocket: Any) -> None:
         self._ws = websocket
         self.vicidial_call_id: str | None = None
+        self._start_keys: list[str] = []
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._ws, name)
@@ -132,9 +133,25 @@ class _HandshakeCaptureWebsocket:
     def _note(self, text: str) -> None:
         if self.vicidial_call_id:
             return
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return
+        if not isinstance(data, dict) or data.get("event") != "start":
+            return
+        self._start_keys = sorted(data.keys())
+        start = data.get("start")
+        if isinstance(start, dict):
+            self._start_keys.extend(f"start.{k}" for k in sorted(start.keys()))
         found = _capture_vicidial_call_id_from_text(text)
         if found:
             self.vicidial_call_id = found
+
+    async def iter_text(self):
+        # pipecat parse_telephony_websocket uses iter_text(), not receive_text().
+        async for text in self._ws.iter_text():
+            self._note(text)
+            yield text
 
     async def receive_text(self) -> str:
         text = await self._ws.receive_text()
@@ -151,15 +168,8 @@ class _HandshakeCaptureWebsocket:
 
     async def receive_json(self) -> Any:
         data = await self._ws.receive_json()
-        if isinstance(data, dict) and data.get("event") == "start":
-            raw = data.get("vicidial_call_id")
-            if raw and _looks_like_vicidial_call_id(str(raw)):
-                self.vicidial_call_id = str(raw).strip()
-            start = data.get("start")
-            if isinstance(start, dict):
-                raw = start.get("vicidial_call_id")
-                if raw and _looks_like_vicidial_call_id(str(raw)):
-                    self.vicidial_call_id = str(raw).strip()
+        if isinstance(data, dict):
+            self._note(json.dumps(data))
         return data
 
 
@@ -329,8 +339,10 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
         if vicidial_call_id:
             _event(f"=== ViciDial remote call id={vicidial_call_id} ===")
         else:
+            keys = ",".join(handshake_ws._start_keys) or "(no start event seen)"
             _event(
                 "=== WARNING: no vicidial_call_id in handshake — "
+                f"start_keys=[{keys}] — "
                 "warm transfer will use agent API (may fail for remote agent) ==="
             )
         _event(f"=== parsed transport={transport_type} keys={list(cd.keys())} ===")
