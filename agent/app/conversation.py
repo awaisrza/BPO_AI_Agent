@@ -457,6 +457,8 @@ class ConversationEngine:
                         return self._next_qualifier()
                     if age_result == "no":
                         return self._next_qualifier()
+                    # "okay" / "go ahead" are consent words — never skip age for them.
+                    return self._escalate()
 
             if self._kb_only_answer(utterance):
                 turn = self._respond_offscript_qualify(utterance)

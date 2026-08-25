@@ -220,7 +220,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     logger.warning(
                         f"Direct reply cache miss for {line[:48]!r} — falling back to pipeline TTS"
                     )
-                    self._call.finish_bot_playback()
+                    # Stay in SPEAKING — SpeechRenderer/Telnyx bulk will emit BSSF when done.
+                    # Finishing here opened the caller turn mid-pitch and stranded queued Yes.
                     await self.push_frame(TTSSpeakFrame(reply))
                     return
                 duration_ms = await send_direct_bulk_pcm(
@@ -261,6 +262,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         """
         self._touch_activity()
         await self._start_telephony_keepalive()
+        if self._telephony:
+            from .call_trace import trace_call
+
+            trace_call(
+                f"=== bot playback complete (direct) pending={len(self._pending_caller_texts)} "
+                f"followup={bool(self._followup_reply)} ==="
+            )
         if not PIPECAT_AVAILABLE:
             self._call.finish_bot_playback()
             self._move_pending_to_buffer()
@@ -350,6 +358,16 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
         cleaned = text.strip()
         if not cleaned:
+            return
+        # If the caller turn is already open, never leave speech stuck in the
+        # mid-utterance queue (that caused silence, then Hello? skipping Yes).
+        if self._call.can_accept_caller():
+            self._buffer_caller_text(cleaned)
+            self._schedule_caller_flush()
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(f"=== STT late-flush (turn open): {cleaned[:80]!r} ===")
             return
         # Queue each distinct utterance — do not overwrite earlier answers.
         if self._pending_caller_texts:
@@ -631,6 +649,20 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 return
 
             if not _is_meaningful_caller_text(text):
+                return
+
+            # Drain mid-bot STT before accepting new audio — prefer Yes over Hello?.
+            if self._pending_caller_texts:
+                self._pending_caller_texts.append(text.strip())
+                merged = self._collapse_caller_queue()
+                if merged:
+                    self._caller_buffer = merged
+                    logger.info(f"STT merged with mid-bot queue: {merged[:64]!r}")
+                    if self._telephony:
+                        from .call_trace import trace_call
+
+                        trace_call(f"=== STT merged pending: {merged[:80]!r} ===")
+                    self._schedule_caller_flush()
                 return
 
             self._buffer_caller_text(text)
