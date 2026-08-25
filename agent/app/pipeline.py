@@ -237,13 +237,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 trace_call(f"=== direct reply sent (~{duration_ms}ms): {line[:72]!r} ===")
                 sent = True
             if sent:
-                self._call.finish_bot_playback()
-                await self._start_telephony_keepalive()
-                if PIPECAT_AVAILABLE:
-                    from pipecat.frames.frames import BotStoppedSpeakingFrame
-                    from pipecat.processors.frame_processor import FrameDirection
-
-                    await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+                # Do not finish_bot_playback here — _complete_direct_bot_playback runs the
+                # same BotStoppedSpeaking path as pipeline TTS (follow-up + one queued STT).
+                await self._complete_direct_bot_playback()
                 return
         await self.push_frame(TTSSpeakFrame(reply))
 
@@ -257,21 +253,29 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if self._telephony and PIPECAT_AVAILABLE:
             await self.push_frame(RtpKeepaliveStartFrame())
 
-    async def on_direct_greeting_complete(self) -> None:
-        """Opening line played via direct bulk PCM — match normal TTS end-of-playback."""
-        logger.info("Direct bulk greeting finished — releasing caller turn")
+    async def _complete_direct_bot_playback(self) -> None:
+        """End direct bulk PCM the same way pipeline TTS ends (local BSSF handling).
+
+        push_frame(BSSF, DOWNSTREAM) never reaches this processor — follow-ups stayed
+        silent and STT queued mid-utterance dumped later as a rapid qualify burst.
+        """
         self._touch_activity()
-        self._call.finish_bot_playback()
         await self._start_telephony_keepalive()
-        self._move_pending_to_buffer()
-        if self._caller_buffer.strip():
-            self._schedule_caller_flush()
         if not PIPECAT_AVAILABLE:
+            self._call.finish_bot_playback()
+            self._move_pending_to_buffer()
+            if self._caller_buffer.strip():
+                self._schedule_caller_flush()
             return
         from pipecat.frames.frames import BotStoppedSpeakingFrame
         from pipecat.processors.frame_processor import FrameDirection
 
-        await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        await self.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+    async def on_direct_greeting_complete(self) -> None:
+        """Opening line played via direct bulk PCM — match normal TTS end-of-playback."""
+        logger.info("Direct bulk greeting finished — releasing caller turn")
+        await self._complete_direct_bot_playback()
 
     async def _interrupt_and_handle_caller(self, text: str, direction) -> None:  # type: ignore[no-untyped-def]
         """Stop current TTS and answer the caller immediately (telephony KB/questions)."""
@@ -369,12 +373,17 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             trace_call(f"=== STT queued (bot speaking): {cleaned[:80]!r} ===")
 
     def _utterance_priority(self, item: str) -> int:
-        if _looks_like_question(item):
-            return 3
+        # Prefer real answers (age / yes) over "What?" when several STT fragments queued.
+        from .conversation import _extract_age_years
+
+        if _extract_age_years(item) is not None:
+            return 4
         t = item.strip().lower().rstrip(".!?")
         if t in ("yes", "yeah", "yep", "sure", "ok", "okay", "go ahead", "correct"):
-            return 2
+            return 3
         if _is_consent(item):
+            return 2
+        if _looks_like_question(item):
             return 1
         return 0
 

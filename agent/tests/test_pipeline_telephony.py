@@ -43,3 +43,14 @@ def test_no_barge_in_for_short_yes():
 def test_no_barge_in_for_thank_you():
     engine = _medicare_engine()
     assert not should_telephony_barge_in("Thank you.", engine)
+
+
+def test_collapse_prefers_yes_over_what():
+    from app.pipeline import FronterProcessor
+
+    engine = _medicare_engine()
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc._pending_caller_texts = ["Yes.", "What?", "Yeah."]
+    chosen = proc._collapse_caller_queue()
+    assert chosen.lower().rstrip(".!") in {"yes", "yeah"}
+    assert proc._pending_caller_texts == []
