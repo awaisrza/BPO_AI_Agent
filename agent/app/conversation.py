@@ -392,6 +392,22 @@ class ConversationEngine:
         self._qualify_idx = 0
         self._pitch_confirmed = False
         self._answered_kb_pre_consent = False
+        pitch = prepare_for_speech(self.script.pitch)
+        question = self._pitch_consent_question()
+        # Speak the lead, then always play the consent question as its own line so
+        # telephony chunking / cache misses cannot drop "Do you have Medicare Part A…?".
+        if question and "?" in pitch:
+            q = question.strip()
+            lower = pitch.lower()
+            q_lower = q.lower()
+            pos = lower.rfind(q_lower)
+            if pos >= 0:
+                body = pitch[:pos].strip().rstrip(".—-,; ")
+                if body:
+                    self._queue_followup(q if q.endswith("?") else f"{q}?")
+                    return self._speak_new(body)
+            elif not pitch.rstrip().endswith("?"):
+                self._queue_followup(q if q.endswith("?") else f"{q}?")
         return self._speak_new(self.script.pitch)
 
     def _objection_reply(self, utterance: str) -> str:

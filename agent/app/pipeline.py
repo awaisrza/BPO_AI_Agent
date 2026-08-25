@@ -198,50 +198,37 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             and self._telephony_tts is not None
         ):
             from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
-            from .speech_renderer import render_speech_telephony
             from .telnyx_media import greeting_pcm_from_cache, send_direct_bulk_pcm
 
             self._call.begin_bot_reply(1)
             self._touch_activity()
-            chunks = render_speech_telephony(
-                reply, max_words=settings.telephony_utterance_max_words
+            # One joined PCM for the full reply — chunk-by-chunk used to play the
+            # first sentence then drop the consent question on a cache miss.
+            pcm = greeting_pcm_from_cache(
+                self._telephony_tts,
+                reply,
+                telephony_max_words=settings.telephony_utterance_max_words,
             )
-            sent = False
-            for chunk in chunks:
-                line = chunk.text.strip()
-                if not line:
-                    continue
-                pcm = greeting_pcm_from_cache(
-                    self._telephony_tts,
-                    line,
-                    telephony_max_words=settings.telephony_utterance_max_words,
+            if not pcm:
+                logger.warning(
+                    f"Direct reply cache miss for {reply[:48]!r} — falling back to pipeline TTS"
                 )
-                if not pcm:
-                    logger.warning(
-                        f"Direct reply cache miss for {line[:48]!r} — falling back to pipeline TTS"
-                    )
-                    # Stay in SPEAKING — SpeechRenderer/Telnyx bulk will emit BSSF when done.
-                    # Finishing here opened the caller turn mid-pitch and stranded queued Yes.
-                    await self.push_frame(TTSSpeakFrame(reply))
-                    return
-                duration_ms = await send_direct_bulk_pcm(
-                    self._telephony_send_json,
-                    pcm,
-                    sample_rate=TELEPHONY_PIPELINE_RATE,
-                    encoding=self._telephony_encoding,
-                    pace=False,
-                )
-                if duration_ms > 0:
-                    await asyncio.sleep(duration_ms / 1000.0)
-                from .call_trace import trace_call
-
-                trace_call(f"=== direct reply sent (~{duration_ms}ms): {line[:72]!r} ===")
-                sent = True
-            if sent:
-                # Do not finish_bot_playback here — _complete_direct_bot_playback runs the
-                # same BotStoppedSpeaking path as pipeline TTS (follow-up + one queued STT).
-                await self._complete_direct_bot_playback()
+                await self.push_frame(TTSSpeakFrame(reply))
                 return
+            duration_ms = await send_direct_bulk_pcm(
+                self._telephony_send_json,
+                pcm,
+                sample_rate=TELEPHONY_PIPELINE_RATE,
+                encoding=self._telephony_encoding,
+                pace=False,
+            )
+            if duration_ms > 0:
+                await asyncio.sleep(duration_ms / 1000.0)
+            from .call_trace import trace_call
+
+            trace_call(f"=== direct reply sent (~{duration_ms}ms): {reply[:72]!r} ===")
+            await self._complete_direct_bot_playback()
+            return
         await self.push_frame(TTSSpeakFrame(reply))
 
     def _touch_activity(self) -> None:
@@ -283,6 +270,20 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     async def on_direct_greeting_complete(self) -> None:
         """Opening line played via direct bulk PCM — match normal TTS end-of-playback."""
         logger.info("Direct bulk greeting finished — releasing caller turn")
+        # Drop STT captured during the greeting (echo of our own voice) so we do not
+        # jump straight into the pitch without hearing the caller.
+        dropped = len(self._pending_caller_texts) + (
+            1 if self._caller_buffer.strip() else 0
+        )
+        self._pending_caller_texts.clear()
+        self._caller_buffer = ""
+        self._cancel_flush_task()
+        if dropped and self._telephony:
+            from .call_trace import trace_call
+
+            trace_call(
+                f"=== greeting done — discarded {dropped} echo STT fragment(s); waiting for caller ==="
+            )
         await self._complete_direct_bot_playback()
 
     async def _interrupt_and_handle_caller(self, text: str, direction) -> None:  # type: ignore[no-untyped-def]

@@ -411,16 +411,35 @@ def test_age_answer_not_hijacked_by_kb():
     assert turn.reply == 'Do you have Part A?'
 
 
-def test_okay_does_not_skip_age_question():
+def test_pitch_queues_medicare_consent_followup():
     script = ScriptConfig(
-        greeting='Hi.',
-        pitch='Medicare. Ready?',
-        qualifying_questions=['How old are you?', 'Do you make your own decisions?'],
+        greeting="Hi, how are you?",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan. Do you have Medicare Part A and Part B?"
+        ),
+        qualifying_questions=["How old are you?"],
     )
     e = ConversationEngine(script=script)
     e.open()
-    e.handle('ok')
-    e.handle('yes')
-    turn = e.handle('Oh, okay.')
-    assert 'old' in turn.reply.lower() or 'age' in turn.reply.lower()
-    assert turn.reply != 'Do you make your own decisions?'
+    turn = e.handle("I am good")
+    assert "Part A" not in turn.reply
+    assert "qualify" in turn.reply.lower()
+    follow = e.take_pending_followup()
+    assert "Part A" in follow
+    assert follow.strip().endswith("?")
+
+
+def test_okay_does_not_skip_age_question():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare. Ready?",
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("ok")
+    e.handle("yes")
+    turn = e.handle("Oh, okay.")
+    assert "old" in turn.reply.lower() or "age" in turn.reply.lower()
+    assert turn.reply != "Do you make your own decisions?"
