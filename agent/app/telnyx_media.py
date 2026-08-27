@@ -94,6 +94,48 @@ def _playback_duration_ms(pcm: bytes, *, sample_rate: int, wire_rate: int) -> in
 
 
 
+def _synthesize_line(line: str, tts: object | None = None) -> bytes | None:
+    """Synthesize one telephony line — inference pool first, then in-process Chatterbox."""
+    if not line.strip():
+        return None
+    text = line.strip()
+    try:
+        from .inference_client import inference_pool_enabled, get_inference_client
+
+        if inference_pool_enabled():
+            pcm = get_inference_client().synthesize_sync(
+                text,
+                sample_rate=TELEPHONY_PIPELINE_RATE,
+                telephony=True,
+            )
+            if pcm:
+                return pcm
+    except Exception as exc:
+        logger.warning(f"Pool synthesize failed ({text[:32]!r}): {exc}")
+
+    if tts is None:
+        return None
+    try:
+        from .chatterbox_tts import synthesize_pcm_sync
+
+        reference = getattr(tts, "_reference", None)
+        device = getattr(tts, "_device", None)
+        if reference is None or device is None:
+            return None
+        return synthesize_pcm_sync(
+            text=text,
+            reference_path=reference,
+            device=device,
+            exaggeration=float(getattr(tts, "_exaggeration", 0.35) or 0.35),
+            cfg_weight=float(getattr(tts, "_cfg_weight", 0.5) or 0.5),
+            sample_rate=int(getattr(tts, "sample_rate", TELEPHONY_PIPELINE_RATE) or TELEPHONY_PIPELINE_RATE),
+            telephony=True,
+        )
+    except Exception as exc:
+        logger.warning(f"In-process synthesize failed ({text[:32]!r}): {exc}")
+    return None
+
+
 def greeting_pcm_from_cache(
     tts,
     greeting_text: str,
@@ -127,9 +169,19 @@ def greeting_pcm_from_cache(
     parts: list[bytes] = []
     for chunk in chunks:
         line = chunk.text.strip()
+        if not line:
+            continue
         pcm = cache.get(line)
         if pcm is None:
-            pcm = _synthesize_greeting_line(line)
+            # Also try normalized / prepared keys from warm-cache.
+            prepared = prepare_for_speech(line)
+            for key in (prepared, normalize_spoken_text(prepared), normalize_spoken_text(line)):
+                key = (key or "").strip()
+                if key and key in cache:
+                    pcm = cache[key]
+                    break
+        if pcm is None:
+            pcm = _synthesize_line(line, tts=tts)
             if pcm is not None and isinstance(cache, dict):
                 cache[line] = pcm
         if pcm is None:
@@ -139,20 +191,8 @@ def greeting_pcm_from_cache(
 
 
 def _synthesize_greeting_line(line: str) -> bytes | None:
-    if not line.strip():
-        return None
-    try:
-        from .inference_client import inference_pool_enabled, get_inference_client
-
-        if inference_pool_enabled():
-            return get_inference_client().synthesize_sync(
-                line.strip(),
-                sample_rate=TELEPHONY_PIPELINE_RATE,
-                telephony=True,
-            )
-    except Exception as exc:
-        logger.warning(f"Greeting pool synthesize failed ({line[:32]!r}): {exc}")
-    return None
+    """Backward-compatible wrapper — prefer greeting_pcm_from_cache / _synthesize_line."""
+    return _synthesize_line(line, tts=None)
 
 
 async def send_direct_bulk_pcm(

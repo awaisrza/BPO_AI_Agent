@@ -211,7 +211,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             )
             if not pcm:
                 logger.warning(
-                    f"Direct reply cache miss for {reply[:48]!r} — falling back to pipeline TTS"
+                    f"Direct reply cache/synth miss for {reply[:48]!r} — falling back to pipeline TTS"
+                )
+                from .call_trace import trace_call
+
+                trace_call(
+                    f"=== WARNING: no direct PCM for reply — pipeline TTS "
+                    f"(caller may hear silence): {reply[:72]!r} ==="
                 )
                 await self.push_frame(TTSSpeakFrame(reply))
                 return
@@ -222,6 +228,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 encoding=self._telephony_encoding,
                 pace=False,
             )
+            if duration_ms <= 0:
+                logger.warning(f"Direct reply send returned 0ms for {reply[:48]!r}")
+                from .call_trace import trace_call
+
+                trace_call(f"=== WARNING: direct reply 0ms (no audio on wire): {reply[:72]!r} ===")
+                await self.push_frame(TTSSpeakFrame(reply))
+                return
             if duration_ms > 0:
                 await asyncio.sleep(duration_ms / 1000.0)
             from .call_trace import trace_call
@@ -392,7 +405,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             trace_call(f"=== STT queued (bot speaking): {cleaned[:80]!r} ===")
 
     def _utterance_priority(self, item: str) -> int:
-        # Prefer real answers (age / yes) over "What?" when several STT fragments queued.
+        # Prefer real answers (age / yes) over "What?" / "Hello?" when several STT fragments queued.
         from .conversation import _extract_age_years
 
         if _extract_age_years(item) is not None:
@@ -402,9 +415,44 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return 3
         if _is_consent(item):
             return 2
+        if t in ("hello", "hi", "hey", "you there", "are you there"):
+            return 0
         if _looks_like_question(item):
             return 1
         return 0
+
+    def _pending_is_early_ack_only(self) -> bool:
+        """True when queued STT is only yes/okay/hello — not an age answer or real question."""
+        from .conversation import _extract_age_years
+
+        if not self._pending_caller_texts:
+            return False
+        for item in self._pending_caller_texts:
+            if _extract_age_years(item) is not None:
+                return False
+            t = item.strip().lower().rstrip(".!?")
+            if t in (
+                "yes",
+                "yeah",
+                "yep",
+                "sure",
+                "ok",
+                "okay",
+                "go ahead",
+                "correct",
+                "hello",
+                "hi",
+                "hey",
+            ):
+                continue
+            if _is_consent(item):
+                continue
+            if _looks_like_question(item) and t not in ("hello", "hi", "hey"):
+                return False
+            # Other content (e.g. "I am thinking") — don't force follow-up first.
+            if len(t.split()) > 2 and t not in ("are you there", "you there"):
+                return False
+        return True
 
     def _collapse_caller_queue(self) -> str | None:
         """Pick the strongest signal when the caller spoke over the bot multiple times."""
@@ -570,8 +618,18 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, BotStoppedSpeakingFrame):
-            # Caller speech waiting always beats a scripted follow-up re-ask.
-            if self._pending_caller_texts:
+            # Scripted follow-up (Part A/B after pitch body) beats early yes/hello so the
+            # caller hears the question; their queued Yes answers it on the next BSSF.
+            if (
+                self._followup_reply
+                and self._pending_caller_texts
+                and self._pending_is_early_ack_only()
+            ):
+                logger.info(
+                    "Keeping bot follow-up — queued STT is early ack only "
+                    f"({len(self._pending_caller_texts)} waiting)"
+                )
+            elif self._pending_caller_texts:
                 if self._followup_reply:
                     logger.info(
                         "Dropping bot follow-up — caller has queued speech waiting"
@@ -698,6 +756,7 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
         # Must match SpeechRendererNode (telephony_utterance_max_words), not speech_max_words.
         max_words = settings.telephony_utterance_max_words
     engine = ConversationEngine(script=script)
+    consent_q = engine._pitch_consent_question()
     lines = [
         script.greeting,
         script.pitch,
@@ -705,8 +764,16 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
         engine._short_prompt,
         *script.qualifying_questions,
     ]
+    # Pitch is spoken as body + consent follow-up — warm both so first reply isn't silent.
+    if consent_q and "?" in (script.pitch or ""):
+        pitch = prepare_for_speech(script.pitch)
+        pos = pitch.lower().rfind(consent_q.strip().lower())
+        if pos >= 0:
+            body = pitch[:pos].strip().rstrip(".—-,; ")
+            if body:
+                lines.append(body)
+        lines.append(consent_q if consent_q.endswith("?") else f"{consent_q}?")
     lines.extend([script.transfer_line, script.not_interested_line])
-    consent_q = engine._pitch_consent_question()
     for entry in script.knowledge_base:
         answer = prepare_for_speech(entry.answer)
         if not answer:

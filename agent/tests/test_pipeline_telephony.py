@@ -54,3 +54,25 @@ def test_collapse_prefers_yes_over_what():
     chosen = proc._collapse_caller_queue()
     assert chosen.lower().rstrip(".!") in {"yes", "yeah"}
     assert proc._pending_caller_texts == []
+
+
+def test_collapse_prefers_age_over_hello():
+    from app.pipeline import FronterProcessor
+
+    engine = _medicare_engine()
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc._pending_caller_texts = ["Yes.", "Hello?", "I am 85."]
+    chosen = proc._collapse_caller_queue()
+    assert "85" in chosen
+
+
+def test_pending_early_ack_keeps_followup():
+    from app.pipeline import FronterProcessor
+
+    engine = _medicare_engine()
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc._followup_reply = "Do you have Medicare Part A and Part B?"
+    proc._pending_caller_texts = ["Yes.", "Hello?"]
+    assert proc._pending_is_early_ack_only()
+    proc._pending_caller_texts = ["I am 85."]
+    assert not proc._pending_is_early_ack_only()
