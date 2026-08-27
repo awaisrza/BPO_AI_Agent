@@ -432,11 +432,9 @@ def test_pitch_queues_medicare_consent_followup():
     e = ConversationEngine(script=script)
     e.open()
     turn = e.handle("I am good")
-    assert "Part A" not in turn.reply
+    assert "Part A" in turn.reply
     assert "qualify" in turn.reply.lower()
-    follow = e.take_pending_followup()
-    assert "Part A" in follow
-    assert follow.strip().endswith("?")
+    assert not e.take_pending_followup()
     turn2 = e.handle("Yes.")
     assert "old" in turn2.reply.lower()
 
@@ -457,8 +455,9 @@ def test_pitch_then_part_a_then_age_order():
     e = ConversationEngine(script=script)
     e.open()
     turn = e.handle("I'm fine")
-    assert "Part A" not in turn.reply
-    assert e.take_pending_followup() == "Do you have Medicare Part A and Part B?"
+    assert "Part A" in turn.reply
+    assert "qualify" in turn.reply.lower()
+    assert not e.take_pending_followup()
     turn = e.handle("Yes")
     assert turn.reply == "How old are you?"
     turn = e.handle("I am 82.")
@@ -476,8 +475,8 @@ def test_medicare_prepends_part_a_when_script_starts_at_age():
     )
     e = ConversationEngine(script=script)
     e.open()
-    e.handle("I'm fine")
-    assert "Part A" in e.take_pending_followup()
+    turn = e.handle("I'm fine")
+    assert "Part A" in turn.reply
     turn = e.handle("Yes")
     assert "old" in turn.reply.lower()
 

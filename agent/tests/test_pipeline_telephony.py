@@ -82,6 +82,7 @@ def test_echo_drops_thank_you_and_you_can():
     from app.pipeline import (
         FronterProcessor,
         _is_likely_bot_echo,
+        _is_meaningful_caller_text,
         _is_whisper_phantom,
     )
 
@@ -102,3 +103,15 @@ def test_echo_drops_thank_you_and_you_can():
     assert proc._should_drop_stt_as_echo("You can.")
     assert not proc._should_drop_stt_as_echo("I am fine.")
     assert not proc._should_drop_stt_as_echo("Yes.")
+    assert _is_meaningful_caller_text("61")
+    assert _is_meaningful_caller_text("92")
+    assert not _is_meaningful_caller_text("hi")
+
+
+def test_merge_age_fragments():
+    from app.pipeline import FronterProcessor
+
+    engine = _medicare_engine()
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    assert proc._merge_transcripts("I am.", "61") == "I am 61"
+    assert "92" in proc._merge_transcripts("I am", "92")

@@ -504,15 +504,19 @@ class ConversationEngine:
                 questions.insert(0, embedded)
 
         questions = _ensure_part_a_first(questions, medicare=medicare)
-        # Statement pitch (or Part A from pitch): speak lead, then Q1 with a pause.
+        # Statement pitch: speak lead + Part A/B (Q1) in ONE turn so STT cannot
+        # delay/skip the qualify ask (follow-up path was getting stolen by Okay/Hello).
         self._questions = questions
         self._pitch_confirmed = True
         if questions:
             first = questions[0]
-            self._queue_followup(first if first.endswith("?") else f"{first}?")
+            if not first.endswith("?"):
+                first = f"{first}?"
             self._qualify_idx = 1
-        else:
-            self._qualify_idx = 0
+            if first.lower() not in body.lower():
+                return self._speak_new(f"{body} {first}".strip())
+            return self._speak_new(body if body else first)
+        self._qualify_idx = 0
         return self._speak_new(body)
 
     def _objection_reply(self, utterance: str) -> str:

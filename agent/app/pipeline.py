@@ -136,6 +136,9 @@ def _is_meaningful_caller_text(text: str) -> bool:
     if t in _STT_IGNORE:
         return False
     words = [w for w in t.replace(",", " ").split() if w]
+    # Bare ages ("65", "82") must pass — single 2-digit tokens were dropped before.
+    if len(words) == 1 and words[0].isdigit() and 18 <= int(words[0]) <= 120:
+        return True
     if len(words) == 1 and len(words[0]) <= 2 and words[0] not in {"no", "yes"}:
         return False
     return True
@@ -295,12 +298,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         # Acoustic tail after bot audio — short phantoms are almost always echo.
         if self._bot_audio_until and time.monotonic() < self._bot_audio_until:
             t = _normalize_echo_text(text)
-            if len(t.split()) <= 4 and not _is_cant_hear(text):
-                # Allow clear yes/no/age during tail; drop the rest.
-                from .conversation import _extract_age_years
+            from .conversation import _extract_age_years
 
-                if _extract_age_years(text) is not None:
-                    return False
+            # Never drop a real age during the echo tail.
+            if _extract_age_years(text) is not None:
+                return False
+            if len(t.split()) <= 4 and not _is_cant_hear(text):
+                # Allow clear yes/no during tail; drop the rest.
                 if _is_qualify_yes(text) or _is_consent(text):
                     return False
                 return True
@@ -474,6 +478,17 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return prev_s
         if pl in nl:
             return new_s
+        # "I am." + "61" / "I am" + "92" → one age answer for the qualify FSM.
+        from .conversation import _extract_age_years
+
+        if _extract_age_years(prev_s) is None and _extract_age_years(new_s) is not None:
+            if pl.rstrip(".!") in {"i am", "i'm", "im", "age", "years"} or pl.endswith(
+                ("i am", "i'm", "im")
+            ):
+                return f"{prev_s.rstrip('.!')} {new_s}".strip()
+        if _extract_age_years(f"{prev_s} {new_s}") is not None:
+            if _extract_age_years(prev_s) is None or _extract_age_years(new_s) is None:
+                return f"{prev_s} {new_s}".strip()
         # Keep both — never drop an earlier answer for a longer clarification.
         return f"{prev_s} {new_s}"
 
@@ -832,9 +847,6 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     f"BOT follow-up: {' | '.join(c.text for c in spoken) or followup}"
                 )
                 self._call.on_processing()
-                # Natural beat between pitch body and Part A / next qualify ask.
-                if self._telephony:
-                    await asyncio.sleep(0.45)
                 await self._speak_bot_text(followup)
                 await self.push_frame(frame, direction)
                 return

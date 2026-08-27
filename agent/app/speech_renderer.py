@@ -237,27 +237,32 @@ def render_speech(
 
 
 def render_speech_telephony(text: str, *, max_words: int = 40) -> list[SpeechChunk]:
-    """PSTN: lead sentence first (cached/instant), remainder prefetched while speaking."""
+    """PSTN: one continuous TTS call so Chatterbox keeps natural prosody (no micro-pauses)."""
     spoken = normalize_spoken_text(text)
     if not spoken:
         return []
 
-    sentences = split_spoken_sentences(spoken, max_words=18)
-    if len(sentences) <= 1:
+    words = spoken.split()
+    if len(words) <= max_words:
         return [SpeechChunk(text=spoken, pause_after_ms=0)]
 
-    first = sentences[0]
-    rest = " ".join(sentences[1:])
-    if len(rest.split()) > max_words:
-        rest_parts = split_spoken_sentences(rest, max_words=max_words)
-        chunks = [SpeechChunk(text=first, pause_after_ms=0)]
-        chunks.extend(SpeechChunk(text=part, pause_after_ms=0) for part in rest_parts)
-        return chunks
-
-    return [
-        SpeechChunk(text=first, pause_after_ms=0),
-        SpeechChunk(text=rest, pause_after_ms=0),
-    ]
+    # Long off-script reply: split at sentence boundaries only, no artificial pauses.
+    sentences = split_spoken_sentences(spoken, max_words=max(14, max_words // 2))
+    chunks: list[SpeechChunk] = []
+    batch: list[str] = []
+    batch_words = 0
+    for sentence in sentences:
+        count = len(sentence.split())
+        if batch and batch_words + count > max_words:
+            chunks.append(SpeechChunk(text=" ".join(batch), pause_after_ms=0))
+            batch = [sentence]
+            batch_words = count
+        else:
+            batch.append(sentence)
+            batch_words += count
+    if batch:
+        chunks.append(SpeechChunk(text=" ".join(batch), pause_after_ms=0))
+    return chunks
 
 
 def iter_chunk_texts(texts: Iterable[str], *, telephony: bool = False, **kwargs) -> list[str]:
@@ -432,14 +437,10 @@ if PIPECAT_AVAILABLE:
                     if self._cancel_stream:
                         break
                     prefetch = chunks[idx + 1].text if idx + 1 < len(chunks) else ""
-                    # Keep RTP alive between sentences on PSTN (Telnyx drops silent gaps).
-                    pause_ms = chunk.pause_after_ms
-                    if self._telephony and idx < len(chunks) - 1 and pause_ms <= 0:
-                        pause_ms = 180
                     await self.push_frame(
                         SpokenChunkFrame(
                             text=chunk.text,
-                            pause_after_ms=pause_ms,
+                            pause_after_ms=chunk.pause_after_ms,
                             reset_barge_in=(idx == 0),
                             prefetch_text=prefetch,
                             utterance_final=(idx == len(chunks) - 1),
