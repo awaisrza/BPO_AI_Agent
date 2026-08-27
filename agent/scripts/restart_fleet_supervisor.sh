@@ -50,6 +50,46 @@ _kill_port() {
       kill -9 ${pids} 2>/dev/null || true
     fi
   fi
+  # Vast sometimes hides pids from ss -tlnp; fall back to /proc inode walk.
+  python3 - "$port" <<'PY' 2>/dev/null || true
+import os, sys
+port = int(sys.argv[1])
+want = f"{port:04X}"
+inodes = set()
+for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+    try:
+        lines = open(path).read().splitlines()[1:]
+    except OSError:
+        continue
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 10:
+            continue
+        local = parts[1]
+        if local.endswith(":" + want) and parts[3] == "0A":  # LISTEN
+            inodes.add(parts[9])
+if not inodes:
+    raise SystemExit(0)
+killed = []
+for pid in os.listdir("/proc"):
+    if not pid.isdigit():
+        continue
+    fd_dir = f"/proc/{pid}/fd"
+    try:
+        for fd in os.listdir(fd_dir):
+            try:
+                target = os.readlink(f"{fd_dir}/{fd}")
+            except OSError:
+                continue
+            if target.startswith("socket:[") and target[8:-1] in inodes:
+                os.kill(int(pid), 9)
+                killed.append(pid)
+                break
+    except OSError:
+        continue
+if killed:
+    print(f"kill -9 /proc PIDs on port {port}: {' '.join(killed)}")
+PY
 }
 
 for port in "$SUP_PORT" "$MEDIA_PORT" 8800; do

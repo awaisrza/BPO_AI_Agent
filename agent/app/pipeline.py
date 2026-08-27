@@ -454,8 +454,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         silent and STT queued mid-utterance dumped later as a rapid qualify burst.
         """
         self._touch_activity()
-        # After short qualify asks, drop mid-playback yes/okay so they don't
-        # auto-answer a question the caller hasn't heard yet.
+        # After short qualify asks, drop bare mid-playback yes/okay/hello so they
+        # don't auto-answer a question the caller hasn't heard. Keep "Yes, I do"
+        # / age numbers (not early-ack-only).
         if self._discard_early_ack_after_play and self._pending_is_early_ack_only():
             dropped = len(self._pending_caller_texts)
             self._pending_caller_texts.clear()
@@ -685,6 +686,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 continue
             if _is_consent(item):
                 continue
+            # "Yes, I do" / "Yes, I have" are real qualify answers — keep them.
             if _looks_like_question(item) and t not in ("hello", "hi", "hey"):
                 return False
             if len(t.split()) > 2 and t not in ("are you there", "you there"):
@@ -1018,12 +1020,34 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
         max_words = settings.telephony_utterance_max_words
     engine = ConversationEngine(script=script)
     consent_q = engine._pitch_consent_question()
+    # Match live `_deliver_pitch`: statement + Part A/B in one spoken turn.
+    pitch_body, pitch_embedded = engine._pitch_statement_and_first_question()
+    from .conversation import _ensure_part_a_first, _looks_like_medicare_script, _PART_A_QUESTION
+
+    medicare = _looks_like_medicare_script(script)
+    questions = _ensure_part_a_first(list(script.qualifying_questions), medicare=medicare)
+    if pitch_embedded and not questions:
+        questions = [pitch_embedded]
+    joined_pitch = pitch_body
+    if questions:
+        first = questions[0]
+        if not first.endswith("?"):
+            first = f"{first}?"
+        if first.lower() not in (pitch_body or "").lower():
+            joined_pitch = f"{(pitch_body or '').rstrip(' .!?')}. {first}".strip()
+
     lines = [
         script.greeting,
         script.pitch,
+        joined_pitch,
+        pitch_body,
         engine._consent_prompt(),
         engine._short_prompt,
+        *questions,
+        _PART_A_QUESTION,
         *script.qualifying_questions,
+        "Sorry — what age are you?",
+        "Sorry — could you say yes or no?",
     ]
     # Pitch is spoken as body + consent follow-up — warm both so first reply isn't silent.
     if consent_q and "?" in (script.pitch or ""):
@@ -1043,7 +1067,7 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
         if telephony:
             lines.append(f"{answer} {consent_q}")
             lines.append(f"{answer} {engine._short_prompt}")
-            for question in script.qualifying_questions:
+            for question in questions:
                 lines.append(f"{answer} {question}")
     if telephony:
         lines.append(TELEPHONY_KB_MISS_REPLY)
