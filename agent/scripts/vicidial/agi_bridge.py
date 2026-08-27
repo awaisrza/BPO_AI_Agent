@@ -790,9 +790,24 @@ class AudioSocketGpuBridge:
             try:
                 self._audio_q.put(frame, timeout=2.0)
             except queue.Full:
-                _log("AudioSocket audio queue full — dropping utterance")
-                self._stop.set()
-                return False
+                # Prefer real speech over killing the call — drop oldest frames.
+                dropped = 0
+                while dropped < 50:
+                    try:
+                        self._audio_q.get_nowait()
+                        dropped += 1
+                    except queue.Empty:
+                        break
+                try:
+                    self._audio_q.put(frame, timeout=1.0)
+                except queue.Full:
+                    _log(
+                        "AudioSocket audio queue full — dropping frame "
+                        "(keeping call alive)"
+                    )
+                    continue
+                if dropped:
+                    _log(f"AudioSocket queue full — dropped {dropped} old frame(s)")
             queued += 1
         if queued == 0:
             return False

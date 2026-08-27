@@ -38,6 +38,7 @@ from .speech_renderer import (
     CallController,
     CallState,
     RtpKeepaliveStartFrame,
+    RtpKeepaliveStopFrame,
     SpeechRendererNode,
     iter_chunk_texts,
     prepare_for_speech,
@@ -109,6 +110,22 @@ _STT_GREETING_FIXES = {
 def _normalize_caller_stt(text: str) -> str:
     key = text.strip().lower().rstrip(".")
     return _STT_GREETING_FIXES.get(key, text)
+
+
+_CANT_HEAR_MARKERS = (
+    "can't hear",
+    "cannot hear",
+    "can you hear",
+    "can't fear",  # common STT mangling of "can't hear"
+    "can't share you",
+    "i don't hear",
+    "not hearing",
+)
+
+
+def _is_cant_hear(text: str) -> bool:
+    u = (text or "").strip().lower()
+    return any(marker in u for marker in _CANT_HEAR_MARKERS)
 
 
 def _is_meaningful_caller_text(text: str) -> bool:
@@ -204,65 +221,66 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 greeting_pcm_from_cache,
                 send_direct_bulk_pcm,
             )
+            from .call_trace import trace_call
 
             self._call.begin_bot_reply(1)
             self._touch_activity()
-            pcm = greeting_pcm_from_cache(
-                self._telephony_tts,
-                reply,
-                telephony_max_words=settings.telephony_utterance_max_words,
-            )
-            if not pcm:
-                # Force per-chunk synth so short script lines (How old…) still go
-                # out on the same WS path as the greeting — pipeline TTS often
-                # leaves SPEAKING stuck with silence and queued STT never flushes.
-                parts: list[bytes] = []
-                for chunk in render_speech_telephony(
-                    reply, max_words=settings.telephony_utterance_max_words
-                ):
-                    line = chunk.text.strip()
-                    if not line:
-                        continue
-                    piece = _synthesize_line(line, tts=self._telephony_tts)
-                    if not piece:
-                        parts = []
-                        break
-                    parts.append(piece)
-                    cache = getattr(self._telephony_tts, "_cache", None)
-                    if isinstance(cache, dict):
-                        cache[line] = piece
-                pcm = b"".join(parts) if parts else None
-            if not pcm:
-                from .call_trace import trace_call
+            # Stop keepalive silence so it does not flood the AudioSocket queue
+            # while we enqueue real speech (queue-full used to kill the call).
+            if PIPECAT_AVAILABLE:
+                await self.push_frame(RtpKeepaliveStopFrame())
 
+            chunks = render_speech_telephony(
+                reply, max_words=settings.telephony_utterance_max_words
+            )
+            if not chunks:
+                from .speech_renderer import SpeechChunk
+
+                chunks = [SpeechChunk(text=reply, pause_after_ms=0)]
+            sent_any = False
+            for chunk in chunks:
+                line = chunk.text.strip()
+                if not line:
+                    continue
+                pcm = greeting_pcm_from_cache(
+                    self._telephony_tts,
+                    line,
+                    telephony_max_words=settings.telephony_utterance_max_words,
+                )
+                if not pcm:
+                    pcm = _synthesize_line(line, tts=self._telephony_tts)
+                    if pcm is not None:
+                        cache = getattr(self._telephony_tts, "_cache", None)
+                        if isinstance(cache, dict):
+                            cache[line] = pcm
+                if not pcm:
+                    trace_call(
+                        f"=== WARNING: no PCM for sentence — skipping: {line[:72]!r} ==="
+                    )
+                    continue
+                duration_ms = await send_direct_bulk_pcm(
+                    self._telephony_send_json,
+                    pcm,
+                    sample_rate=TELEPHONY_PIPELINE_RATE,
+                    encoding=self._telephony_encoding,
+                    pace=False,
+                )
+                if duration_ms <= 0:
+                    trace_call(f"=== WARNING: direct reply 0ms: {line[:72]!r} ===")
+                    continue
+                await asyncio.sleep(duration_ms / 1000.0)
+                trace_call(f"=== direct reply sent (~{duration_ms}ms): {line[:72]!r} ===")
+                sent_any = True
+
+            if not sent_any:
                 trace_call(
-                    f"=== WARNING: no direct PCM — opening caller turn + best-effort TTS: "
+                    f"=== WARNING: no direct PCM for full reply — opening turn + TTS: "
                     f"{reply[:72]!r} ==="
                 )
-                # Never stay SPEAKING forever on a silent fallback (I am 82 stayed queued).
                 await self._complete_direct_bot_playback()
                 await self.push_frame(TTSSpeakFrame(reply))
                 return
-            duration_ms = await send_direct_bulk_pcm(
-                self._telephony_send_json,
-                pcm,
-                sample_rate=TELEPHONY_PIPELINE_RATE,
-                encoding=self._telephony_encoding,
-                pace=False,
-            )
-            if duration_ms <= 0:
-                from .call_trace import trace_call
 
-                trace_call(
-                    f"=== WARNING: direct reply 0ms — opening caller turn: {reply[:72]!r} ==="
-                )
-                await self._complete_direct_bot_playback()
-                await self.push_frame(TTSSpeakFrame(reply))
-                return
-            await asyncio.sleep(duration_ms / 1000.0)
-            from .call_trace import trace_call
-
-            trace_call(f"=== direct reply sent (~{duration_ms}ms): {reply[:72]!r} ===")
             await self._complete_direct_bot_playback()
             return
         await self.push_frame(TTSSpeakFrame(reply))
@@ -451,6 +469,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if not self._pending_caller_texts:
             return False
         for item in self._pending_caller_texts:
+            if _is_cant_hear(item):
+                continue  # treat as noise — still play the scripted follow-up
             if _extract_age_years(item) is not None:
                 return False
             t = item.strip().lower().rstrip(".!?")
@@ -472,7 +492,6 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 continue
             if _looks_like_question(item) and t not in ("hello", "hi", "hey"):
                 return False
-            # Other content (e.g. "I am thinking") — don't force follow-up first.
             if len(t.split()) > 2 and t not in ("are you there", "you there"):
                 return False
         return True
@@ -481,7 +500,11 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         """Pick the strongest signal when the caller spoke over the bot multiple times."""
         if not self._pending_caller_texts:
             return None
-        items = list(self._pending_caller_texts)
+        items = [t for t in self._pending_caller_texts if not _is_cant_hear(t)]
+        if not items:
+            # Only "can't hear you" — clear and let caller turn re-open / repeat path.
+            self._pending_caller_texts.clear()
+            return None
         self._pending_caller_texts.clear()
         best_idx = max(range(len(items)), key=lambda i: (self._utterance_priority(items[i]), i))
         chosen = items[best_idx]
@@ -509,6 +532,18 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             from .call_trace import trace_call
 
             trace_call(f"=== CALLER: {text[:120]!r} ===")
+
+        # Caller can't hear bot audio — repeat last line instead of KB/qualify skip.
+        if self._telephony and _is_cant_hear(text):
+            repeat = (self._engine._last_reply or self._followup_reply or "").strip()
+            if repeat:
+                from .call_trace import trace_call
+
+                trace_call(f"=== can't-hear — repeating last bot line: {repeat[:72]!r} ===")
+                self._followup_reply = self._followup_reply or None
+                await self._speak_bot_text(repeat)
+                return
+
         turn = self._engine.handle(text)
         spoken = render_speech(turn.reply)
         logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")
