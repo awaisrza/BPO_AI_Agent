@@ -18,10 +18,13 @@ echo "=== stopping fleet processes ==="
 pkill -9 -f run_supervisor 2>/dev/null || true
 pkill -9 -f 'app.fleet_worker' 2>/dev/null || true
 pkill -9 -f 'app.fleet_supervisor' 2>/dev/null || true
+pkill -9 -f 'uvicorn.*fleet_supervisor' 2>/dev/null || true
 sleep 2
 
 # Include 8800 — stale workers from before FLEET_MEDIA_BASE_PORT=10200
-for port in "$SUP_PORT" "$MEDIA_PORT" 8800; do
+# Vast often lacks fuser/lsof; also parse ss when port stays busy (Errno 98).
+_kill_port() {
+  local port="$1"
   if command -v fuser >/dev/null 2>&1; then
     fuser -k "${port}/tcp" 2>/dev/null || true
   fi
@@ -32,6 +35,25 @@ for port in "$SUP_PORT" "$MEDIA_PORT" 8800; do
       kill -9 ${pids} 2>/dev/null || true
     fi
   fi
+  if command -v ss >/dev/null 2>&1; then
+    # ss -tlnp: users:(("python",pid=1234,fd=...))
+    pids=$(ss -tlnp 2>/dev/null | awk -v p=":${port}" '
+      index($0, p) {
+        while (match($0, /pid=[0-9]+/)) {
+          print substr($0, RSTART+4, RLENGTH-4)
+          $0 = substr($0, RSTART+RLENGTH)
+        }
+      }' | sort -u)
+    if [ -n "${pids:-}" ]; then
+      echo "kill -9 ss PIDs on port ${port}: ${pids}"
+      # shellcheck disable=SC2086
+      kill -9 ${pids} 2>/dev/null || true
+    fi
+  fi
+}
+
+for port in "$SUP_PORT" "$MEDIA_PORT" 8800; do
+  _kill_port "$port"
 done
 sleep 1
 

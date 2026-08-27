@@ -12,7 +12,13 @@ CHECKS: list[tuple[str, Path, str, str]] = [
     (
         "caller turn after direct greeting",
         ROOT / "app" / "pipeline.py",
-        "finish_bot_playback()\n        await self._start_telephony_keepalive()\n        self._move_pending_to_buffer()",
+        "async def on_direct_greeting_complete",
+        "git pull && restart supervisor",
+    ),
+    (
+        "direct telephony media setter",
+        ROOT / "app" / "pipeline.py",
+        "def set_direct_telephony_media",
         "git pull && restart supervisor",
     ),
     (

@@ -315,6 +315,19 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         tail_s = 0.55
         self._bot_audio_until = time.monotonic() + max(0, duration_ms) / 1000.0 + tail_s
 
+    def set_direct_telephony_media(
+        self,
+        *,
+        send_json: Callable[[str], Awaitable[None]],
+        tts: object | None = None,
+        encoding: str = "PCMU",
+    ) -> None:
+        """Wire the AudioSocket/Telnyx WS sender so FSM replies use the same bulk PCM path as greeting."""
+        self._telephony_send_json = send_json
+        self._telephony_tts = tts
+        self._telephony_encoding = (encoding or "PCMU").strip() or "PCMU"
+        self._telephony_direct_media = True
+
     async def _speak_bot_text(self, text: str) -> None:
         """Play bot reply — direct bulk PCM on ViciDial, else pipeline TTS."""
         reply = (text or "").strip()
