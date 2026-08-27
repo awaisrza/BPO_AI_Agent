@@ -481,6 +481,38 @@ def test_medicare_prepends_part_a_when_script_starts_at_age():
     assert "old" in turn.reply.lower()
 
 
+def test_yeah_i_dont_know_is_not_qualify_yes():
+    from app.conversation import _is_qualify_yes
+
+    assert _is_qualify_yes("Yes.")
+    assert _is_qualify_yes("Yes, I do.")
+    assert _is_qualify_yes("Yes, I have.")
+    assert _is_qualify_yes("Yes, I make.")
+    assert not _is_qualify_yes("Yeah, I don't know.")
+    assert not _is_qualify_yes("Yes but I'm not sure.")
+    assert not _is_qualify_yes("No.")
+
+
+def test_decisions_unclear_does_not_transfer():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        transfer_line="Perfect — transferring you now.",
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("I'm good")
+    e.handle("Yes")
+    e.handle("I am 92")
+    turn = e.handle("Yeah, I don't know.")
+    assert turn.action != Action.TRANSFER
+    assert "yes or no" in turn.reply.lower() or "decisions" in turn.reply.lower()
+
+
 def test_yes_i_have_answers_part_a_not_already_have_kb():
     from app.knowledge import answer_offscript as kb_answer
 

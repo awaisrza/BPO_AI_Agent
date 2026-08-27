@@ -799,6 +799,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     f"FSM -> remote-agent EXTENSIONTRANSFER ext={extension} "
                     f"call_id={self._vicidial_call_id}"
                 )
+                if self._telephony:
+                    from .call_trace import trace_call
+
+                    trace_call(
+                        f"=== INGROUPTRANSFER skipped (using EXTENSIONTRANSFER "
+                        f"ext={extension} call_id={self._vicidial_call_id}) ==="
+                    )
                 result = await self._vici.remote_agent_transfer(
                     self._agent_user,
                     self._vicidial_call_id,
@@ -811,6 +818,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     f"FSM -> remote-agent INGROUPTRANSFER ingroup={ingroup} "
                     f"call_id={self._vicidial_call_id}"
                 )
+                if self._telephony:
+                    from .call_trace import trace_call
+
+                    trace_call(
+                        f"=== INGROUPTRANSFER ingroup={ingroup} "
+                        f"call_id={self._vicidial_call_id} ==="
+                    )
                 result = await self._vici.remote_agent_transfer(
                     self._agent_user,
                     self._vicidial_call_id,
@@ -821,6 +835,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 logger.error(f"Remote-agent transfer failed: {result[:200]}")
             return
 
+        if self._telephony:
+            from .call_trace import trace_call
+
+            trace_call(
+                "=== WARNING: transfer with no vicidial_call_id — "
+                "trying agent-seat warm_transfer (often fails for remote agent) ==="
+            )
         if closer:
             logger.info(f"FSM -> warm transfer to closer {closer}")
             result = await self._vici.warm_transfer(self._agent_user, closer_user=closer)
@@ -830,6 +851,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         await self._vici.set_disposition(self._agent_user, "XFER")
         if not ViciDialClient.api_succeeded(result):
             logger.error(f"Warm transfer failed: {result[:200]}")
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(f"=== WARNING: warm transfer failed: {result[:160]} ===")
 
     async def _execute_hangup(self) -> None:
         if self._vici is None:

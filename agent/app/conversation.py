@@ -87,6 +87,26 @@ _CONSENT = {
     "all good",
 }
 _QUALIFY_YES = {"yes", "yeah", "yep", "sure", "correct", "absolutely", "definitely"}
+_QUALIFY_NEGATION_MARKERS = (
+    "don't know",
+    "do not know",
+    "dont know",
+    "not sure",
+    "don't think",
+    "do not think",
+    "don't believe",
+    "not really",
+    "i don't",
+    "i do not",
+    "i dont",
+    "no i",
+    "nope",
+    "never",
+    "can't",
+    "cannot",
+    "won't",
+    "will not",
+)
 _AGE_QUESTION_MARKERS = ("how old", "what age", "your age", "age are you", "years old")
 _CONSENT_QUESTION_MARKERS = (
     "moment",
@@ -174,16 +194,40 @@ def _is_consent(utterance: str) -> bool:
     return _matches_phrase(utterance, _CONSENT)
 
 
+def _has_qualify_negation(utterance: str) -> bool:
+    u = utterance.strip().lower()
+    if not u:
+        return False
+    if _matches_phrase(u, _NEGATIVE):
+        return True
+    return any(marker in u for marker in _QUALIFY_NEGATION_MARKERS)
+
+
 def _is_qualify_yes(utterance: str) -> bool:
+    """True for a clear yes on Part A / decisions — not 'yeah I don't know'."""
+    if _has_qualify_negation(utterance):
+        return False
     if _is_consent(utterance):
+        # Bare consent words only — "yeah, …" with extra doubt is handled above.
+        u = utterance.strip().lower().rstrip(".!?")
+        if len(u.split()) <= 3 or _matches_phrase(u, ("i do", "i have", "yes i do", "yes i have")):
+            return True
+        # "yeah" buried in a longer uncertain line is not a clean yes.
+        if len(u.split()) > 3:
+            return False
         return True
     u = utterance.strip().lower()
     if not u:
         return False
-    if _matches_phrase(u, ("i do", "i have")):
+    if _matches_phrase(u, ("i do", "i have", "yes i do", "yes i have", "yes i make")):
         return True
     words = set(u.replace(",", " ").replace(".", " ").split())
-    return bool(words & _QUALIFY_YES)
+    # Require a yes-token and no competing uncertainty for short answers.
+    if not (words & _QUALIFY_YES):
+        return False
+    if len(words) <= 4:
+        return True
+    return False
 
 
 def _is_age_question(question: str) -> bool:
