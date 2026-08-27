@@ -432,7 +432,16 @@ class ConversationEngine:
             if self._negatives >= 2:
                 self.state = State.END
                 return Turn(self.script.not_interested_line, Action.HANGUP)
-            return self._speak_new(self._objection_reply(utterance))
+            reply = self._objection_reply(utterance)
+            turn = self._speak_new(reply)
+            # Soft no before consent — keep the Part A/B (or consent) ask coming next.
+            if self.state == State.QUALIFY and not self._pitch_confirmed:
+                question = self._pitch_consent_question()
+                if question and question.strip().lower() not in reply.lower():
+                    self._queue_followup(
+                        question if question.endswith("?") else f"{question}?"
+                    )
+            return turn
 
         is_question = intent == Intent.QUESTION or bool(self._kb_only_answer(utterance))
 

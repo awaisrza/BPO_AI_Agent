@@ -198,27 +198,49 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             and self._telephony_tts is not None
         ):
             from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
-            from .telnyx_media import greeting_pcm_from_cache, send_direct_bulk_pcm
+            from .speech_renderer import render_speech_telephony
+            from .telnyx_media import (
+                _synthesize_line,
+                greeting_pcm_from_cache,
+                send_direct_bulk_pcm,
+            )
 
             self._call.begin_bot_reply(1)
             self._touch_activity()
-            # One joined PCM for the full reply — chunk-by-chunk used to play the
-            # first sentence then drop the consent question on a cache miss.
             pcm = greeting_pcm_from_cache(
                 self._telephony_tts,
                 reply,
                 telephony_max_words=settings.telephony_utterance_max_words,
             )
             if not pcm:
-                logger.warning(
-                    f"Direct reply cache/synth miss for {reply[:48]!r} — falling back to pipeline TTS"
-                )
+                # Force per-chunk synth so short script lines (How old…) still go
+                # out on the same WS path as the greeting — pipeline TTS often
+                # leaves SPEAKING stuck with silence and queued STT never flushes.
+                parts: list[bytes] = []
+                for chunk in render_speech_telephony(
+                    reply, max_words=settings.telephony_utterance_max_words
+                ):
+                    line = chunk.text.strip()
+                    if not line:
+                        continue
+                    piece = _synthesize_line(line, tts=self._telephony_tts)
+                    if not piece:
+                        parts = []
+                        break
+                    parts.append(piece)
+                    cache = getattr(self._telephony_tts, "_cache", None)
+                    if isinstance(cache, dict):
+                        cache[line] = piece
+                pcm = b"".join(parts) if parts else None
+            if not pcm:
                 from .call_trace import trace_call
 
                 trace_call(
-                    f"=== WARNING: no direct PCM for reply — pipeline TTS "
-                    f"(caller may hear silence): {reply[:72]!r} ==="
+                    f"=== WARNING: no direct PCM — opening caller turn + best-effort TTS: "
+                    f"{reply[:72]!r} ==="
                 )
+                # Never stay SPEAKING forever on a silent fallback (I am 82 stayed queued).
+                await self._complete_direct_bot_playback()
                 await self.push_frame(TTSSpeakFrame(reply))
                 return
             duration_ms = await send_direct_bulk_pcm(
@@ -229,14 +251,15 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 pace=False,
             )
             if duration_ms <= 0:
-                logger.warning(f"Direct reply send returned 0ms for {reply[:48]!r}")
                 from .call_trace import trace_call
 
-                trace_call(f"=== WARNING: direct reply 0ms (no audio on wire): {reply[:72]!r} ===")
+                trace_call(
+                    f"=== WARNING: direct reply 0ms — opening caller turn: {reply[:72]!r} ==="
+                )
+                await self._complete_direct_bot_playback()
                 await self.push_frame(TTSSpeakFrame(reply))
                 return
-            if duration_ms > 0:
-                await asyncio.sleep(duration_ms / 1000.0)
+            await asyncio.sleep(duration_ms / 1000.0)
             from .call_trace import trace_call
 
             trace_call(f"=== direct reply sent (~{duration_ms}ms): {reply[:72]!r} ===")

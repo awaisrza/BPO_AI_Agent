@@ -443,3 +443,22 @@ def test_okay_does_not_skip_age_question():
     turn = e.handle("Oh, okay.")
     assert "old" in turn.reply.lower() or "age" in turn.reply.lower()
     assert turn.reply != "Do you make your own decisions?"
+
+
+def test_soft_no_requeues_consent_followup():
+    script = ScriptConfig(
+        greeting="Hi, how are you?",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan. Do you have Medicare Part A and Part B?"
+        ),
+        qualifying_questions=["How old are you?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("I'm fine")
+    e.take_pending_followup()  # clear pitch body follow-up
+    turn = e.handle("No.")
+    assert "eligibility" in turn.reply.lower() or "thirty" in turn.reply.lower()
+    follow = e.take_pending_followup()
+    assert "Part A" in follow
