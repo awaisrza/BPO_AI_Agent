@@ -481,6 +481,39 @@ def test_medicare_prepends_part_a_when_script_starts_at_age():
     assert "old" in turn.reply.lower()
 
 
+def test_yes_i_have_answers_part_a_not_already_have_kb():
+    from app.knowledge import answer_offscript as kb_answer
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic="Already have benefits",
+                triggers=["already have", "already on medicare", "have insurance", "i have"],
+                answer=(
+                    "That's great - a lot of folks still qualify for extra benefits "
+                    "they didn't know about. Worth a quick check?"
+                ),
+            ),
+        ],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
+    )
+    e.open()
+    turn = e.handle("I'm good.")
+    assert "Part A" in turn.reply
+    turn = e.handle("Yes, I have.")
+    assert "old" in turn.reply.lower()
+    assert "extra benefits" not in turn.reply.lower()
+
+
 def test_schedule_kb_ignored_during_pitch():
     from app.knowledge import answer_offscript as kb_answer
 

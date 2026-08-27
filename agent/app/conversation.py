@@ -514,7 +514,8 @@ class ConversationEngine:
                 first = f"{first}?"
             self._qualify_idx = 1
             if first.lower() not in body.lower():
-                return self._speak_new(f"{body} {first}".strip())
+                lead = body.rstrip(" .!?")
+                return self._speak_new(f"{lead}. {first}".strip())
             return self._speak_new(body if body else first)
         self._qualify_idx = 0
         return self._speak_new(body)
@@ -598,6 +599,12 @@ class ConversationEngine:
                         return self._next_qualifier()
                     # "okay" / "go ahead" are consent words — never skip age for them.
                     return self._escalate()
+
+                # Part A/B / yes-no qualifies: answer the script before any KB
+                # ("Yes, I have" must not hit "already have benefits").
+                if _is_qualify_yes(utterance):
+                    self._positives += 1
+                    return self._next_qualifier()
 
             if self._kb_only_answer(utterance):
                 turn = self._respond_offscript_qualify(utterance)

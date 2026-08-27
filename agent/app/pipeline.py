@@ -303,6 +303,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             # Never drop a real age during the echo tail.
             if _extract_age_years(text) is not None:
                 return False
+            # Age preamble fragments ("I am" / "I'm") — wait for the number.
+            if t in {"i am", "im", "i m", "i'm"} or t.endswith(" years old"):
+                return False
             if len(t.split()) <= 4 and not _is_cant_hear(text):
                 # Allow clear yes/no during tail; drop the rest.
                 if _is_qualify_yes(text) or _is_consent(text):
@@ -700,7 +703,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if self._telephony:
             from .call_trace import trace_call
 
-            trace_call(f"=== BOT: {(turn.reply or '')[:120]!r} ===")
+            trace_call(f"=== BOT: {(turn.reply or '')[:240]!r} ===")
         followup = self._engine.take_pending_followup()
         self._followup_reply = followup or None
         if followup:
