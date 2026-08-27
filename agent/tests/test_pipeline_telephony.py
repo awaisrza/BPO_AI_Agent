@@ -76,3 +76,29 @@ def test_pending_early_ack_keeps_followup():
     assert proc._pending_is_early_ack_only()
     proc._pending_caller_texts = ["I am 85."]
     assert not proc._pending_is_early_ack_only()
+
+
+def test_echo_drops_thank_you_and_you_can():
+    from app.pipeline import (
+        FronterProcessor,
+        _is_likely_bot_echo,
+        _is_whisper_phantom,
+    )
+
+    assert _is_whisper_phantom("Thank you.")
+    assert _is_whisper_phantom("Thank you. Thank you.")
+    assert _is_whisper_phantom("You can.")
+    pitch = (
+        "I'm calling because you qualify for some free Medicare benefits "
+        "with your current Medicare plan"
+    )
+    assert _is_likely_bot_echo("medicare benefits", pitch)
+    assert _is_likely_bot_echo("you qualify", pitch)
+
+    engine = _medicare_engine()
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc._engine._last_reply = pitch
+    assert proc._should_drop_stt_as_echo("Thank you.")
+    assert proc._should_drop_stt_as_echo("You can.")
+    assert not proc._should_drop_stt_as_echo("I am fine.")
+    assert not proc._should_drop_stt_as_echo("Yes.")

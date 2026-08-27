@@ -28,6 +28,7 @@ from .conversation import (
     Action,
     ConversationEngine,
     _is_consent,
+    _is_qualify_yes,
     _looks_like_question,
 )
 from .fish_tts import FishAudioTTSService
@@ -140,6 +141,85 @@ def _is_meaningful_caller_text(text: str) -> bool:
     return True
 
 
+_WHISPER_PHANTOM_UTTERANCES = frozenset(
+    {
+        "thank you",
+        "thanks",
+        "thank you.",
+        "thanks.",
+        "thank you thank you",
+        "thanks for watching",
+        "you",
+        "you can",
+        "you can.",
+        "the",
+        "a",
+        "uh",
+        "um",
+    }
+)
+
+
+def _normalize_echo_text(text: str) -> str:
+    import re
+
+    cleaned = re.sub(r"[^\w\s]", " ", (text or "").lower())
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _is_whisper_phantom(text: str) -> bool:
+    """Drop common false STT (silence/echo hallucinations), not real answers."""
+    t = _normalize_echo_text(text)
+    if not t:
+        return True
+    if t in _WHISPER_PHANTOM_UTTERANCES:
+        return True
+    # "Thank you. Thank you." / repeated thanks only
+    thanks_only = t.replace("thank you", " ").replace("thanks", " ").strip()
+    if not thanks_only and "thank" in t:
+        return True
+    return False
+
+
+def _is_likely_bot_echo(text: str, bot_reply: str) -> bool:
+    """True when STT is the bot hearing itself (e.g. 'you can' from 'you qualify')."""
+    t = _normalize_echo_text(text)
+    b = _normalize_echo_text(bot_reply)
+    if not t or not b:
+        return False
+    if t in b:
+        return True
+    t_words = t.split()
+    b_words = b.split()
+    b_set = set(b_words)
+    if not t_words:
+        return False
+
+    def _word_in_bot(w: str) -> bool:
+        if len(w) <= 2:
+            return True
+        if w in b_set:
+            return True
+        # Partial hear: "can" inside "qualify", "med" from "medicare"
+        return any(
+            (len(bw) >= 4 and (bw.startswith(w) or w in bw))
+            for bw in b_words
+        )
+
+    # Short fragment whose words all appear (or are prefixes) in the bot line.
+    if len(t_words) <= 4:
+        content = [w for w in t_words if len(w) > 2]
+        if content and all(_word_in_bot(w) for w in content):
+            return True
+    # High token overlap for slightly longer mis-hears of the same sentence.
+    content = [w for w in t_words if len(w) > 2]
+    if len(content) >= 2:
+        overlap = sum(1 for w in content if _word_in_bot(w))
+        if overlap >= max(2, int(len(content) * 0.75)):
+            return True
+    return False
+
+
 def should_telephony_barge_in(text: str, engine: ConversationEngine) -> bool:
     """Stop bot playback on PSTN when the caller asks a real question (KB or off-script)."""
     normalized = _normalize_caller_stt(text)
@@ -190,19 +270,46 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._telephony_tts: object | None = None
         self._telephony_encoding: str = "PCMU"
         self._telephony_direct_media = False
+        self._bot_audio_until: float = 0.0
 
-    def set_direct_telephony_media(
-        self,
-        *,
-        send_json: Callable[[str], Awaitable[None]],
-        tts: object | None,
-        encoding: str = "PCMU",
-    ) -> None:
-        """ViciDial: send bot replies via direct bulk PCM (same path as greeting)."""
-        self._telephony_send_json = send_json
-        self._telephony_tts = tts
-        self._telephony_encoding = encoding
-        self._telephony_direct_media = bool(send_json and tts)
+    def _bot_reference_text(self) -> str:
+        parts = [
+            self._engine._last_reply or "",
+            self._followup_reply or "",
+            self.script_pitch_hint() if hasattr(self, "script_pitch_hint") else "",
+        ]
+        return " ".join(p for p in parts if p)
+
+    def script_pitch_hint(self) -> str:
+        return (self._engine.script.pitch or "") + " " + (self._engine.script.greeting or "")
+
+    def _should_drop_stt_as_echo(self, text: str) -> bool:
+        """Drop bot-loopback / Whisper phantoms so fake 'Thank you' never advances the script."""
+        if not self._telephony:
+            return False
+        if _is_whisper_phantom(text):
+            return True
+        bot = self._bot_reference_text()
+        if bot and _is_likely_bot_echo(text, bot):
+            return True
+        # Acoustic tail after bot audio — short phantoms are almost always echo.
+        if self._bot_audio_until and time.monotonic() < self._bot_audio_until:
+            t = _normalize_echo_text(text)
+            if len(t.split()) <= 4 and not _is_cant_hear(text):
+                # Allow clear yes/no/age during tail; drop the rest.
+                from .conversation import _extract_age_years
+
+                if _extract_age_years(text) is not None:
+                    return False
+                if _is_qualify_yes(text) or _is_consent(text):
+                    return False
+                return True
+        return False
+
+    def _mark_bot_audio_window(self, duration_ms: int = 0) -> None:
+        # Hold off STT briefly after speech so line echo is not treated as the caller.
+        tail_s = 0.55
+        self._bot_audio_until = time.monotonic() + max(0, duration_ms) / 1000.0 + tail_s
 
     async def _speak_bot_text(self, text: str) -> None:
         """Play bot reply — direct bulk PCM on ViciDial, else pipeline TTS."""
@@ -268,6 +375,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 if duration_ms <= 0:
                     trace_call(f"=== WARNING: direct reply 0ms: {line[:72]!r} ===")
                     continue
+                self._mark_bot_audio_window(duration_ms)
                 await asyncio.sleep(duration_ms / 1000.0)
                 trace_call(f"=== direct reply sent (~{duration_ms}ms): {line[:72]!r} ===")
                 sent_any = True
@@ -405,6 +513,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if not _is_meaningful_caller_text(text):
             logger.info(f"Ignoring low-confidence STT fragment: {text!r}")
             return
+        if self._should_drop_stt_as_echo(text):
+            logger.info(f"STT echo/phantom dropped on flush: {text[:64]!r}")
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(f"=== STT echo dropped: {text[:80]!r} ===")
+            return
         self._call.close_user_turn()
         await self._handle_caller(text)
 
@@ -413,6 +528,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
         cleaned = text.strip()
         if not cleaned:
+            return
+        if self._should_drop_stt_as_echo(cleaned):
+            logger.info(f"STT echo/phantom dropped (bot speaking): {cleaned[:64]!r}")
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(f"=== STT echo dropped: {cleaned[:80]!r} ===")
             return
         # If the caller turn is already open, never leave speech stuck in the
         # mid-utterance queue (that caused silence, then Hello? skipping Yes).
@@ -769,6 +891,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 return
 
             if not _is_meaningful_caller_text(text):
+                return
+
+            if self._should_drop_stt_as_echo(text):
+                logger.info(f"STT echo/phantom dropped: {text[:64]!r}")
+                if self._telephony:
+                    from .call_trace import trace_call
+
+                    trace_call(f"=== STT echo dropped: {text[:80]!r} ===")
                 return
 
             # Drain mid-bot STT before accepting new audio — prefer Yes over Hello?.
