@@ -97,6 +97,13 @@ _CONSENT_QUESTION_MARKERS = (
     "thirty seconds",
     "30 seconds",
 )
+_PART_A_QUESTION = "Do you have Medicare Part A and Part B?"
+_SCHEDULE_REPLY_MARKERS = (
+    "what time works",
+    "call you back",
+    "works best for you tomorrow",
+    "schedule",
+)
 _NEGATIVE = (
     "no",
     "nope",
@@ -187,6 +194,36 @@ def _is_age_question(question: str) -> bool:
 def _is_consent_question(question: str) -> bool:
     q = (question or "").strip().lower()
     return any(marker in q for marker in _CONSENT_QUESTION_MARKERS)
+
+
+def _is_schedule_kb_reply(reply: str) -> bool:
+    u = (reply or "").strip().lower()
+    return any(marker in u for marker in _SCHEDULE_REPLY_MARKERS)
+
+
+def _looks_like_medicare_script(script: ScriptConfig) -> bool:
+    blob = " ".join(
+        [
+            script.greeting or "",
+            script.pitch or "",
+            " ".join(script.qualifying_questions or []),
+        ]
+    ).lower()
+    return "medicare" in blob or "part a" in blob
+
+
+def _ensure_part_a_first(questions: list[str], *, medicare: bool) -> list[str]:
+    """Medicare fronter always asks Part A/B before age / other qualifies."""
+    if not medicare:
+        return questions
+    out = list(questions)
+    for i, q in enumerate(out):
+        if "part a" in q.lower():
+            if i == 0:
+                return out
+            item = out.pop(i)
+            return [item, *out]
+    return [_PART_A_QUESTION, *out]
 
 
 def _extract_age_years(utterance: str) -> int | None:
@@ -399,6 +436,12 @@ class ConversationEngine:
         answer = self._try_offscript(utterance)
         if not answer or answer == self._last_reply:
             return None
+        # Never leave the script for callback scheduling mid-pitch / pre-consent.
+        if (
+            (self.state == State.PITCH or (self.state == State.QUALIFY and not self._pitch_confirmed))
+            and _is_schedule_kb_reply(answer)
+        ):
+            return None
         if self.state == State.PITCH:
             self._pitch_kb_answers += 1
         elif self.state == State.QUALIFY and not self._pitch_confirmed:
@@ -429,9 +472,12 @@ class ConversationEngine:
         self._answered_kb_pre_consent = False
         self._consent_misses = 0
         body, embedded = self._pitch_statement_and_first_question()
+        medicare = _looks_like_medicare_script(self.script)
         questions = list(self.script.qualifying_questions)
 
         if embedded:
+            short_ask = len(embedded.split()) <= 3
+            consent_ask = _is_consent_question(embedded) or short_ask
             matches_first = bool(
                 questions
                 and (
@@ -443,21 +489,22 @@ class ConversationEngine:
                 embedded.lower()[:28] in q.lower() or q.lower()[:28] in embedded.lower()
                 for q in questions
             )
-            if matches_first or _is_consent_question(embedded):
-                # Pitch ask / "do you have a moment?" — wait for yes, then Q1.
+            if consent_ask or matches_first:
+                # "moment?" / pitch re-asks Q1 — wait for yes, then first qualify.
+                questions = _ensure_part_a_first(questions, medicare=medicare)
                 self._questions = questions
                 self._pitch_confirmed = False
                 self._qualify_idx = 0
                 self._queue_followup(embedded)
                 turn = self._speak_new(body)
-                # Escalate treats consent as already asked (follow-up will speak it).
                 self._last_reply = f"{body} {embedded}".strip()
                 return turn
             if not in_qualify:
-                # Part A/B (etc.) only in pitch text — prepend as real Q1.
+                # Part A/B lived only in pitch — become real Q1.
                 questions.insert(0, embedded)
 
-        # Statement pitch, or Part A prepended: speak lead, then first qualify.
+        questions = _ensure_part_a_first(questions, medicare=medicare)
+        # Statement pitch (or Part A from pitch): speak lead, then Q1 with a pause.
         self._questions = questions
         self._pitch_confirmed = True
         if questions:
