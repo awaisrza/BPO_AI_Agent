@@ -274,6 +274,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._telephony_encoding: str = "PCMU"
         self._telephony_direct_media = False
         self._bot_audio_until: float = 0.0
+        self._discard_early_ack_after_play = False
 
     def _bot_reference_text(self) -> str:
         parts = [
@@ -306,10 +307,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             # Age preamble fragments ("I am" / "I'm") — wait for the number.
             if t in {"i am", "im", "i m", "i'm"} or t.endswith(" years old"):
                 return False
+            # Mid-playback "yes"/"okay"/"hello" are usually echo or impatience.
+            # Real answers are accepted after the turn opens.
             if len(t.split()) <= 4 and not _is_cant_hear(text):
-                # Allow clear yes/no during tail; drop the rest.
-                if _is_qualify_yes(text) or _is_consent(text):
-                    return False
                 return True
         return False
 
@@ -350,12 +350,11 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             )
             from .call_trace import trace_call
 
-            self._call.begin_bot_reply(1)
+            # Stay PROCESSING while synthesizing — do NOT enter SPEAKING until
+            # PCM is ready. Entering SPEAKING early caused post–Part A silence
+            # while STT queued, then a qualify burst on BSSF.
+            self._call.on_processing()
             self._touch_activity()
-            # Stop keepalive silence so it does not flood the AudioSocket queue
-            # while we enqueue real speech (queue-full used to kill the call).
-            if PIPECAT_AVAILABLE:
-                await self.push_frame(RtpKeepaliveStopFrame())
 
             chunks = render_speech_telephony(
                 reply, max_words=settings.telephony_utterance_max_words
@@ -364,7 +363,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 from .speech_renderer import SpeechChunk
 
                 chunks = [SpeechChunk(text=reply, pause_after_ms=0)]
-            sent_any = False
+
+            prepared: list[tuple[str, bytes]] = []
             for chunk in chunks:
                 line = chunk.text.strip()
                 if not line:
@@ -385,6 +385,31 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                         f"=== WARNING: no PCM for sentence — skipping: {line[:72]!r} ==="
                     )
                     continue
+                prepared.append((line, pcm))
+
+            if not prepared:
+                trace_call(
+                    f"=== WARNING: no direct PCM for full reply — pipeline TTS: "
+                    f"{reply[:72]!r} ==="
+                )
+                # Keep turn closed until pipeline TTS BSSF (do not complete early).
+                self._call.begin_bot_reply(1)
+                if PIPECAT_AVAILABLE:
+                    await self.push_frame(RtpKeepaliveStopFrame())
+                await self.push_frame(TTSSpeakFrame(reply))
+                return
+
+            # Short qualify asks: discard mid-synth "yes"/"okay" after play so they
+            # do not auto-answer the question the caller never heard.
+            self._discard_early_ack_after_play = len(reply.split()) <= 14
+
+            self._call.begin_bot_reply(1)
+            self._touch_activity()
+            if PIPECAT_AVAILABLE:
+                await self.push_frame(RtpKeepaliveStopFrame())
+
+            sent_any = False
+            for line, pcm in prepared:
                 duration_ms = await send_direct_bulk_pcm(
                     self._telephony_send_json,
                     pcm,
@@ -402,10 +427,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             if not sent_any:
                 trace_call(
-                    f"=== WARNING: no direct PCM for full reply — opening turn + TTS: "
+                    f"=== WARNING: direct PCM send failed — pipeline TTS: "
                     f"{reply[:72]!r} ==="
                 )
-                await self._complete_direct_bot_playback()
                 await self.push_frame(TTSSpeakFrame(reply))
                 return
 
@@ -430,6 +454,21 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         silent and STT queued mid-utterance dumped later as a rapid qualify burst.
         """
         self._touch_activity()
+        # After short qualify asks, drop mid-playback yes/okay so they don't
+        # auto-answer a question the caller hasn't heard yet.
+        if self._discard_early_ack_after_play and self._pending_is_early_ack_only():
+            dropped = len(self._pending_caller_texts)
+            self._pending_caller_texts.clear()
+            self._discard_early_ack_after_play = False
+            if dropped and self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(
+                    f"=== discarded {dropped} early-ack STT after qualify ask "
+                    "(waiting for real answer) ==="
+                )
+        else:
+            self._discard_early_ack_after_play = False
         await self._start_telephony_keepalive()
         if self._telephony:
             from .call_trace import trace_call
@@ -538,6 +577,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     async def _flush_caller_buffer(self) -> None:
         self._cancel_flush_task()
         if not self._call.can_accept_caller():
+            # Turn still closed (bot still speaking) — retry shortly; don't orphan.
+            if self._caller_buffer.strip():
+                self._schedule_caller_flush()
             return
         text = self._caller_buffer.strip()
         self._caller_buffer = ""
