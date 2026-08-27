@@ -710,6 +710,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     f"BOT follow-up: {' | '.join(c.text for c in spoken) or followup}"
                 )
                 self._call.on_processing()
+                # Natural beat between pitch body and Part A / next qualify ask.
+                if self._telephony:
+                    await asyncio.sleep(0.45)
                 await self._speak_bot_text(followup)
                 await self.push_frame(frame, direction)
                 return

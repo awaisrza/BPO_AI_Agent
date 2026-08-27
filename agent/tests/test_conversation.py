@@ -130,7 +130,9 @@ def test_thank_you_during_pitch_playback_does_not_repeat_consent():
     e = ConversationEngine(script=script)
     e.open()
     pitch_turn = e.handle("I'm good")
-    assert "eligibility check" in pitch_turn.reply.lower()
+    assert "Medicare plan" in pitch_turn.reply
+    follow = e.take_pending_followup()
+    assert "eligibility check" in follow.lower()
     turn = e.handle("thank you")
     assert "Part A" in turn.reply
     assert turn.reply != "Do you have a moment for a quick eligibility check?"
@@ -418,7 +420,7 @@ def test_pitch_queues_medicare_consent_followup():
             "I'm calling because you qualify for some free Medicare benefits "
             "with your current Medicare plan. Do you have Medicare Part A and Part B?"
         ),
-        qualifying_questions=["How old are you?"],
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
     )
     e = ConversationEngine(script=script)
     e.open()
@@ -428,6 +430,33 @@ def test_pitch_queues_medicare_consent_followup():
     follow = e.take_pending_followup()
     assert "Part A" in follow
     assert follow.strip().endswith("?")
+    # Part A is Q1 — yes advances to age, not skip-to-transfer.
+    turn2 = e.handle("Yes.")
+    assert "old" in turn2.reply.lower()
+
+
+def test_pitch_then_part_a_then_age_order():
+    script = ScriptConfig(
+        greeting="Hi, how are you?",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=[
+            "Do you have Medicare Part A and Part B?",
+            "How old are you?",
+            "Do you make your own decisions?",
+        ],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    turn = e.handle("I'm fine")
+    assert "Part A" not in turn.reply
+    assert e.take_pending_followup() == "Do you have Medicare Part A and Part B?"
+    turn = e.handle("Yes")
+    assert turn.reply == "How old are you?"
+    turn = e.handle("I am 82.")
+    assert turn.reply == "Do you make your own decisions?"
 
 
 def test_okay_does_not_skip_age_question():
@@ -457,7 +486,7 @@ def test_soft_no_requeues_consent_followup():
     e = ConversationEngine(script=script)
     e.open()
     e.handle("I'm fine")
-    e.take_pending_followup()  # clear pitch body follow-up
+    e.take_pending_followup()  # Part A already queued as current Q
     turn = e.handle("No.")
     assert "eligibility" in turn.reply.lower() or "thirty" in turn.reply.lower()
     follow = e.take_pending_followup()

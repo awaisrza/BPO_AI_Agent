@@ -88,6 +88,15 @@ _CONSENT = {
 }
 _QUALIFY_YES = {"yes", "yeah", "yep", "sure", "correct", "absolutely", "definitely"}
 _AGE_QUESTION_MARKERS = ("how old", "what age", "your age", "age are you", "years old")
+_CONSENT_QUESTION_MARKERS = (
+    "moment",
+    "eligibility check",
+    "quick check",
+    "have a second",
+    "fair enough",
+    "thirty seconds",
+    "30 seconds",
+)
 _NEGATIVE = (
     "no",
     "nope",
@@ -175,6 +184,11 @@ def _is_age_question(question: str) -> bool:
     return any(marker in q for marker in _AGE_QUESTION_MARKERS)
 
 
+def _is_consent_question(question: str) -> bool:
+    q = (question or "").strip().lower()
+    return any(marker in q for marker in _CONSENT_QUESTION_MARKERS)
+
+
 def _extract_age_years(utterance: str) -> int | None:
     """Pull a plausible adult age from speech (65, I'm 75, 90 years old)."""
     u = (utterance or "").strip().lower()
@@ -251,6 +265,8 @@ class ConversationEngine:
     _answered_kb_pre_consent: bool = False
     _pending_followup: str = ""
     _short_prompt: str = "Just a quick yes or no — do you have a moment?"
+    # Active qualify list for this call (may prepend Part A stripped from pitch).
+    _questions: list[str] = field(default_factory=list)
 
     def take_pending_followup(self) -> str:
         """Return and clear a deferred follow-up line (e.g. re-ask after KB)."""
@@ -262,6 +278,9 @@ class ConversationEngine:
         line = (text or "").strip()
         if line:
             self._pending_followup = line
+
+    def _active_questions(self) -> list[str]:
+        return self._questions or list(self.script.qualifying_questions)
 
     def _consent_prompt(self) -> str:
         pitch = prepare_for_speech(self.script.pitch)
@@ -312,7 +331,7 @@ class ConversationEngine:
                 return self._speak_new(self._consent_prompt())
             return self._speak_new(self._short_prompt)
 
-        questions = self.script.qualifying_questions
+        questions = self._active_questions()
         if not questions or self._qualify_idx == 0:
             return Turn("Sorry, could you repeat that?", Action.SPEAK)
         current = questions[self._qualify_idx - 1]
@@ -370,7 +389,7 @@ class ConversationEngine:
         turn = self._respond_offscript(utterance)
         if not turn or not self._pitch_confirmed or self._qualify_idx == 0:
             return turn
-        questions = self.script.qualifying_questions
+        questions = self._active_questions()
         current = questions[self._qualify_idx - 1]
         if current.strip().lower() not in turn.reply.strip().lower():
             self._queue_followup(current)
@@ -386,29 +405,68 @@ class ConversationEngine:
             self._answered_kb_pre_consent = True
         return self._speak_new(answer)
 
+    def _pitch_statement_and_first_question(self) -> tuple[str, str]:
+        """Split pitch into spoken lead + optional trailing question from the pitch text."""
+        pitch = prepare_for_speech(self.script.pitch)
+        body = pitch
+        embedded = ""
+        if "?" in pitch:
+            candidate = self._pitch_consent_question()
+            if candidate and candidate.strip().lower() in pitch.lower():
+                embedded = candidate.strip()
+                pos = pitch.lower().rfind(embedded.lower())
+                if pos >= 0:
+                    stripped = pitch[:pos].strip().rstrip(".—-,; ")
+                    if stripped:
+                        body = stripped
+        if embedded and not embedded.endswith("?"):
+            embedded = f"{embedded}?"
+        return body or pitch, embedded
+
     def _deliver_pitch(self) -> Turn:
         self._pitch_kb_answers = 0
         self.state = State.QUALIFY
-        self._qualify_idx = 0
-        self._pitch_confirmed = False
         self._answered_kb_pre_consent = False
-        pitch = prepare_for_speech(self.script.pitch)
-        question = self._pitch_consent_question()
-        # Speak the lead, then always play the consent question as its own line so
-        # telephony chunking / cache misses cannot drop "Do you have Medicare Part A…?".
-        if question and "?" in pitch:
-            q = question.strip()
-            lower = pitch.lower()
-            q_lower = q.lower()
-            pos = lower.rfind(q_lower)
-            if pos >= 0:
-                body = pitch[:pos].strip().rstrip(".—-,; ")
-                if body:
-                    self._queue_followup(q if q.endswith("?") else f"{q}?")
-                    return self._speak_new(body)
-            elif not pitch.rstrip().endswith("?"):
-                self._queue_followup(q if q.endswith("?") else f"{q}?")
-        return self._speak_new(self.script.pitch)
+        self._consent_misses = 0
+        body, embedded = self._pitch_statement_and_first_question()
+        questions = list(self.script.qualifying_questions)
+
+        if embedded:
+            matches_first = bool(
+                questions
+                and (
+                    embedded.lower()[:28] in questions[0].lower()
+                    or questions[0].lower()[:28] in embedded.lower()
+                )
+            )
+            in_qualify = any(
+                embedded.lower()[:28] in q.lower() or q.lower()[:28] in embedded.lower()
+                for q in questions
+            )
+            if matches_first or _is_consent_question(embedded):
+                # Pitch ask / "do you have a moment?" — wait for yes, then Q1.
+                self._questions = questions
+                self._pitch_confirmed = False
+                self._qualify_idx = 0
+                self._queue_followup(embedded)
+                turn = self._speak_new(body)
+                # Escalate treats consent as already asked (follow-up will speak it).
+                self._last_reply = f"{body} {embedded}".strip()
+                return turn
+            if not in_qualify:
+                # Part A/B (etc.) only in pitch text — prepend as real Q1.
+                questions.insert(0, embedded)
+
+        # Statement pitch, or Part A prepended: speak lead, then first qualify.
+        self._questions = questions
+        self._pitch_confirmed = True
+        if questions:
+            first = questions[0]
+            self._queue_followup(first if first.endswith("?") else f"{first}?")
+            self._qualify_idx = 1
+        else:
+            self._qualify_idx = 0
+        return self._speak_new(body)
 
     def _objection_reply(self, utterance: str) -> str:
         if self.answer_offscript is not None:
@@ -434,8 +492,13 @@ class ConversationEngine:
                 return Turn(self.script.not_interested_line, Action.HANGUP)
             reply = self._objection_reply(utterance)
             turn = self._speak_new(reply)
-            # Soft no before consent — keep the Part A/B (or consent) ask coming next.
-            if self.state == State.QUALIFY and not self._pitch_confirmed:
+            # Soft no — re-ask the current qualify question (Part A/B, age, …).
+            if self.state == State.QUALIFY and self._qualify_idx > 0:
+                questions = self._active_questions()
+                current = questions[self._qualify_idx - 1]
+                if current.strip().lower() not in reply.lower():
+                    self._queue_followup(current)
+            elif self.state == State.QUALIFY and not self._pitch_confirmed:
                 question = self._pitch_consent_question()
                 if question and question.strip().lower() not in reply.lower():
                     self._queue_followup(
@@ -474,7 +537,7 @@ class ConversationEngine:
 
             # Age numbers first — KB triggers like "I am" / "years old" must not loop.
             if self._qualify_idx > 0:
-                current_q = self.script.qualifying_questions[self._qualify_idx - 1]
+                current_q = self._active_questions()[self._qualify_idx - 1]
                 if _is_age_question(current_q):
                     age_result = _age_qualify_result(utterance)
                     if age_result == "yes":
@@ -509,7 +572,7 @@ class ConversationEngine:
 
     def _next_qualifier(self) -> Turn:
         self._unclear_at_qualify = 0
-        questions = self.script.qualifying_questions
+        questions = self._active_questions()
         if self._qualify_idx < len(questions):
             q = questions[self._qualify_idx]
             self._qualify_idx += 1
