@@ -212,26 +212,50 @@ def _has_qualify_negation(utterance: str) -> bool:
     return any(marker in u for marker in _QUALIFY_NEGATION_MARKERS)
 
 
+_BARE_YES_WORDS = _QUALIFY_YES | {"ok", "okay", "go", "ahead"}
+
+
+def _is_bare_yes(utterance: str) -> bool:
+    """Short yes only — not 'Yes, I have' (avoids KB / wrong qualify advance on Part A)."""
+    if _has_qualify_negation(utterance):
+        return False
+    u = utterance.strip().lower().rstrip(".!?")
+    if not u:
+        return False
+    if u in ("yes", "yeah", "yep", "sure", "correct", "ok", "okay", "go ahead", "absolutely"):
+        return True
+    words = u.replace(",", " ").split()
+    if len(words) > 2:
+        return False
+    if not (set(words) & _BARE_YES_WORDS):
+        return False
+    # "Yes, I have" / "Yeah I got it" — not a bare yes for Part A.
+    if any(marker in u for marker in (" have", " i've", " i got", " already", " insurance")):
+        return False
+    return True
+
+
+def _is_part_a_question(question: str) -> bool:
+    return "part a" in (question or "").strip().lower()
+
+
 def _is_qualify_yes(utterance: str) -> bool:
-    """True for a clear yes on Part A / decisions — not 'yeah I don't know'."""
+    """True for yes on age/decisions — Part A uses _is_bare_yes via handle()."""
     if _has_qualify_negation(utterance):
         return False
     if _is_consent(utterance):
-        # Bare consent words only — "yeah, …" with extra doubt is handled above.
         u = utterance.strip().lower().rstrip(".!?")
-        if len(u.split()) <= 3 or _matches_phrase(u, ("i do", "i have", "yes i do", "yes i have")):
+        if len(u.split()) <= 3 or _matches_phrase(u, ("i do", "yes i do", "yes i make")):
             return True
-        # "yeah" buried in a longer uncertain line is not a clean yes.
         if len(u.split()) > 3:
             return False
         return True
     u = utterance.strip().lower()
     if not u:
         return False
-    if _matches_phrase(u, ("i do", "i have", "yes i do", "yes i have", "yes i make")):
+    if _matches_phrase(u, ("i do", "yes i do", "yes i make")):
         return True
     words = set(u.replace(",", " ").replace(".", " ").split())
-    # Require a yes-token and no competing uncertainty for short answers.
     if not (words & _QUALIFY_YES):
         return False
     if len(words) <= 4:
@@ -494,12 +518,14 @@ class ConversationEngine:
         answer = self._try_offscript(utterance)
         if not answer or answer == self._last_reply:
             return None
-        # Never leave the script for callback scheduling mid-pitch / pre-consent.
-        if (
-            (self.state == State.PITCH or (self.state == State.QUALIFY and not self._pitch_confirmed))
-            and _is_schedule_kb_reply(answer)
-        ):
-            return None
+        # Never leave the script for callback scheduling mid-pitch / pre-consent / Part A.
+        if _is_schedule_kb_reply(answer):
+            if self.state == State.PITCH or (self.state == State.QUALIFY and not self._pitch_confirmed):
+                return None
+            if self.state == State.QUALIFY and self._qualify_idx > 0:
+                current = self._active_questions()[self._qualify_idx - 1]
+                if _is_part_a_question(current):
+                    return None
         if self.state == State.PITCH:
             self._pitch_kb_answers += 1
         elif self.state == State.QUALIFY and not self._pitch_confirmed:
@@ -562,21 +588,11 @@ class ConversationEngine:
                 questions.insert(0, embedded)
 
         questions = _ensure_part_a_first(questions, medicare=medicare)
-        # Statement pitch: speak lead + Part A/B (Q1) in ONE turn so STT cannot
-        # delay/skip the qualify ask (follow-up path was getting stolen by Okay/Hello).
+        # Telnyx-era flow: pitch body only — wait for caller, then Part A via _next_qualifier.
         self._questions = questions
-        self._pitch_confirmed = True
-        if questions:
-            first = questions[0]
-            if not first.endswith("?"):
-                first = f"{first}?"
-            self._qualify_idx = 1
-            if first.lower() not in body.lower():
-                lead = body.rstrip(" .!?")
-                return self._speak_new(f"{lead}. {first}".strip())
-            return self._speak_new(body if body else first)
+        self._pitch_confirmed = False
         self._qualify_idx = 0
-        return self._speak_new(body)
+        return self._speak_new(body or self.script.pitch)
 
     def _objection_reply(self, utterance: str) -> str:
         if self.answer_offscript is not None:
@@ -669,8 +685,25 @@ class ConversationEngine:
                     if _has_qualify_negation(utterance):
                         return self._escalate()
 
-                # Part A/B / yes-no qualifies: answer the script before any KB
-                # ("Yes, I have" must not hit "already have benefits").
+                if _is_part_a_question(current_q):
+                    if _is_bare_yes(utterance):
+                        self._positives += 1
+                        return self._next_qualifier()
+                    # "Yes, I have" — re-ask Part A; real KB questions fall through below.
+                    u = utterance.strip().lower()
+                    if _is_qualify_yes(utterance) and any(
+                        marker in u for marker in (" have", " i've", " i got", " already")
+                    ):
+                        return self._escalate()
+                    if is_question:
+                        turn = self._respond_offscript_qualify(utterance)
+                        if turn:
+                            return turn
+                    if self._kb_only_answer(utterance) and not is_question:
+                        return self._escalate()
+                    return self._escalate()
+
+                # Other yes/no qualifies (after Part A): answer before KB.
                 if _is_qualify_yes(utterance):
                     self._positives += 1
                     return self._next_qualifier()
