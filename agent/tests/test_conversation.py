@@ -432,14 +432,11 @@ def test_pitch_queues_medicare_consent_followup():
     e = ConversationEngine(script=script)
     e.open()
     turn = e.handle("I am good")
-    # Telnyx-era: pitch body only — Part A comes after caller acks the pitch.
-    assert "Part A" not in turn.reply
+    assert "Part A" in turn.reply
     assert "qualify" in turn.reply.lower()
     assert not e.take_pending_followup()
     turn2 = e.handle("Yes.")
-    assert "Part A" in turn2.reply
-    turn3 = e.handle("Yes.")
-    assert "old" in turn3.reply.lower()
+    assert "old" in turn2.reply.lower()
 
 
 def test_pitch_then_part_a_then_age_order():
@@ -458,10 +455,9 @@ def test_pitch_then_part_a_then_age_order():
     e = ConversationEngine(script=script)
     e.open()
     turn = e.handle("I'm fine")
-    assert "Part A" not in turn.reply
-    assert "qualify" in turn.reply.lower()
-    turn = e.handle("Yes")
     assert "Part A" in turn.reply
+    assert "qualify" in turn.reply.lower()
+    assert not e.take_pending_followup()
     turn = e.handle("Yes")
     assert turn.reply == "How old are you?"
     turn = e.handle("I am 82.")
@@ -480,19 +476,18 @@ def test_medicare_prepends_part_a_when_script_starts_at_age():
     e = ConversationEngine(script=script)
     e.open()
     turn = e.handle("I'm fine")
-    assert "Part A" not in turn.reply
-    turn = e.handle("Yes")
     assert "Part A" in turn.reply
     turn = e.handle("Yes")
     assert "old" in turn.reply.lower()
 
 
 def test_yeah_i_dont_know_is_not_qualify_yes():
-    from app.conversation import _is_bare_yes, _is_qualify_yes
+    from app.conversation import _is_qualify_yes
 
-    assert _is_bare_yes("Yes.")
-    assert not _is_bare_yes("Yes, I have.")
+    assert _is_qualify_yes("Yes.")
     assert _is_qualify_yes("Yes, I do.")
+    assert _is_qualify_yes("Yes, I have.")
+    assert _is_qualify_yes("Yes, I make.")
     assert not _is_qualify_yes("Yeah, I don't know.")
     assert not _is_qualify_yes("Yes but I'm not sure.")
     assert not _is_qualify_yes("No.")
@@ -511,7 +506,6 @@ def test_i_dont_know_how_i_think_does_not_transfer():
     e = ConversationEngine(script=script)
     e.open()
     e.handle("I'm fine")
-    e.handle("Yes")
     e.handle("Yes")
     e.handle("I am 90 years old.")
     turn = e.handle("I don't know how I think.")
@@ -547,15 +541,14 @@ def test_decisions_unclear_does_not_transfer():
     e = ConversationEngine(script=script)
     e.open()
     e.handle("I'm good")
-    e.handle("Yes")  # pitch → Part A
-    e.handle("Yes")  # Part A → age
+    e.handle("Yes")
     e.handle("I am 92")
     turn = e.handle("Yeah, I don't know.")
     assert turn.action != Action.TRANSFER
     assert "yes or no" in turn.reply.lower() or "decisions" in turn.reply.lower()
 
 
-def test_yes_i_have_on_part_a_reasks_not_age():
+def test_yes_i_have_answers_part_a_not_already_have_kb():
     from app.knowledge import answer_offscript as kb_answer
 
     script = ScriptConfig(
@@ -581,11 +574,10 @@ def test_yes_i_have_on_part_a_reasks_not_age():
         answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
     )
     e.open()
-    e.handle("I'm good.")
-    e.handle("Yes")  # pitch ack → Part A
+    turn = e.handle("I'm good.")
+    assert "Part A" in turn.reply
     turn = e.handle("Yes, I have.")
-    assert "Part A" in turn.reply or "yes or no" in turn.reply.lower()
-    assert "old" not in turn.reply.lower()
+    assert "old" in turn.reply.lower()
     assert "extra benefits" not in turn.reply.lower()
 
 
@@ -641,8 +633,8 @@ def test_soft_no_requeues_consent_followup():
     e = ConversationEngine(script=script)
     e.open()
     e.handle("I'm fine")
-    e.handle("Yes")  # pitch ack → Part A
+    e.take_pending_followup()  # Part A already queued as current Q
     turn = e.handle("No.")
     assert "eligibility" in turn.reply.lower() or "thirty" in turn.reply.lower()
     follow = e.take_pending_followup()
-    assert follow and "Part A" in follow
+    assert "Part A" in follow

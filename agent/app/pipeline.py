@@ -113,28 +113,6 @@ def _normalize_caller_stt(text: str) -> str:
     return _STT_GREETING_FIXES.get(key, text)
 
 
-def _normalize_part_a_yes_stt(text: str, engine: ConversationEngine) -> str:
-    """Whisper often hears 'Yes, I have' when caller only said yes on Part A/B."""
-    from .conversation import State, _is_part_a_question
-
-    if engine.state != State.QUALIFY or not engine._pitch_confirmed or engine._qualify_idx <= 0:
-        return text
-    current = engine._active_questions()[engine._qualify_idx - 1]
-    if not _is_part_a_question(current):
-        return text
-    u = text.strip().lower().rstrip(".!?")
-    for prefix in ("yes", "yeah", "yep", "sure", "ok", "okay"):
-        if u == prefix:
-            return text
-        if u.startswith(f"{prefix} ") and any(
-            marker in u for marker in (" have", " i've", " i got", " already")
-        ):
-            words = u.split()
-            if len(words) <= 4:
-                return prefix.capitalize() if text[:1].isupper() else prefix
-    return text
-
-
 _CANT_HEAR_MARKERS = (
     "can't hear",
     "cannot hear",
@@ -758,7 +736,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._caller_buffer = next_text
 
     async def _handle_caller(self, text: str) -> None:
-        text = _normalize_part_a_yes_stt(_normalize_caller_stt(text), self._engine)
+        text = _normalize_caller_stt(text)
         self._call.close_user_turn()
         self._call.on_processing()
         await self._start_telephony_keepalive()
@@ -1083,27 +1061,27 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
         max_words = settings.telephony_utterance_max_words
     engine = ConversationEngine(script=script)
     consent_q = engine._pitch_consent_question()
-    # Telnyx-era: pitch body only on first reply; Part A/B is a separate qualify turn.
+    # Match live `_deliver_pitch`: statement + Part A/B in one spoken turn.
     pitch_body, pitch_embedded = engine._pitch_statement_and_first_question()
-    from .conversation import (
-        _ensure_part_a_first,
-        _is_part_a_question,
-        _looks_like_medicare_script,
-        _PART_A_QUESTION,
-    )
+    from .conversation import _ensure_part_a_first, _looks_like_medicare_script, _PART_A_QUESTION
 
     medicare = _looks_like_medicare_script(script)
     questions = _ensure_part_a_first(list(script.qualifying_questions), medicare=medicare)
-    if pitch_embedded and pitch_embedded.lower() not in " ".join(q.lower() for q in questions):
-        if _is_part_a_question(pitch_embedded):
-            questions = _ensure_part_a_first([pitch_embedded, *questions], medicare=medicare)
-        elif not questions:
-            questions = [pitch_embedded]
+    if pitch_embedded and not questions:
+        questions = [pitch_embedded]
+    joined_pitch = pitch_body
+    if questions:
+        first = questions[0]
+        if not first.endswith("?"):
+            first = f"{first}?"
+        if first.lower() not in (pitch_body or "").lower():
+            joined_pitch = f"{(pitch_body or '').rstrip(' .!?')}. {first}".strip()
 
     lines = [
         script.greeting,
         script.pitch,
-        pitch_body or script.pitch,
+        joined_pitch,
+        pitch_body,
         engine._consent_prompt(),
         engine._short_prompt,
         *questions,
