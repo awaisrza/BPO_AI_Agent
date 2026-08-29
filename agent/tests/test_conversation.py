@@ -493,6 +493,41 @@ def test_yeah_i_dont_know_is_not_qualify_yes():
     assert not _is_qualify_yes("No.")
 
 
+def test_i_dont_know_how_i_think_does_not_transfer():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        transfer_line="Perfect — transferring you now.",
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("I'm fine")
+    e.handle("Yes")
+    e.handle("I am 90 years old.")
+    turn = e.handle("I don't know how I think.")
+    assert turn.action != Action.TRANSFER
+
+
+def test_stale_age_on_decisions_reasks_not_transfer():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare benefits.",
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        transfer_line="Perfect — transferring you now.",
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("yes")
+    e.handle("I am 62")
+    turn = e.handle("62 years old.")
+    assert turn.action != Action.TRANSFER
+    assert "decision" in turn.reply.lower() or "yes or no" in turn.reply.lower()
+
+
 def test_decisions_unclear_does_not_transfer():
     script = ScriptConfig(
         greeting="Hi.",

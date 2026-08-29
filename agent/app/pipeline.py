@@ -643,8 +643,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
     def _utterance_priority(self, item: str) -> int:
         # Prefer real answers (age / yes) over "What?" / "Hello?" when several STT fragments queued.
-        from .conversation import _extract_age_years
+        from .conversation import _extract_age_years, _has_qualify_negation
 
+        if _has_qualify_negation(item):
+            return 5
         if _extract_age_years(item) is not None:
             return 4
         t = item.strip().lower().rstrip(".!?")
@@ -703,6 +705,20 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._pending_caller_texts.clear()
             return None
         self._pending_caller_texts.clear()
+        from .conversation import _has_qualify_negation
+
+        if any(_has_qualify_negation(x) for x in items):
+            filtered = [
+                x
+                for x in items
+                if not (
+                    x.strip().lower().rstrip(".!?")
+                    in ("yes", "yeah", "yep", "sure", "ok", "okay")
+                    and not _has_qualify_negation(x)
+                )
+            ]
+            if filtered:
+                items = filtered
         best_idx = max(range(len(items)), key=lambda i: (self._utterance_priority(items[i]), i))
         chosen = items[best_idx]
         if len(items) > 1:

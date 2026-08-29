@@ -106,6 +106,15 @@ _QUALIFY_NEGATION_MARKERS = (
     "cannot",
     "won't",
     "will not",
+    "how i think",
+    "not that",
+    "i guess",
+)
+_DECISIONS_QUESTION_MARKERS = (
+    "make your own",
+    "your own decision",
+    "own decisions",
+    "decision",
 )
 _AGE_QUESTION_MARKERS = ("how old", "what age", "your age", "age are you", "years old")
 _CONSENT_QUESTION_MARKERS = (
@@ -233,6 +242,11 @@ def _is_qualify_yes(utterance: str) -> bool:
 def _is_age_question(question: str) -> bool:
     q = (question or "").strip().lower()
     return any(marker in q for marker in _AGE_QUESTION_MARKERS)
+
+
+def _is_decisions_question(question: str) -> bool:
+    q = (question or "").strip().lower()
+    return any(marker in q for marker in _DECISIONS_QUESTION_MARKERS)
 
 
 def _is_consent_question(question: str) -> bool:
@@ -641,8 +655,19 @@ class ConversationEngine:
                         return self._next_qualifier()
                     if age_result == "no":
                         return self._next_qualifier()
+                    # Bare "I am" / preamble — wait for the number, don't skip the question.
+                    u = utterance.strip().lower().rstrip(".!?")
+                    if u in {"i am", "im", "i m", "i'm"}:
+                        return self._escalate()
                     # "okay" / "go ahead" are consent words — never skip age for them.
                     return self._escalate()
+
+                if _is_decisions_question(current_q):
+                    # Stale age from the prior question must not advance decisions.
+                    if _extract_age_years(utterance) is not None:
+                        return self._escalate()
+                    if _has_qualify_negation(utterance):
+                        return self._escalate()
 
                 # Part A/B / yes-no qualifies: answer the script before any KB
                 # ("Yes, I have" must not hit "already have benefits").
