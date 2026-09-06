@@ -108,6 +108,25 @@ _STT_GREETING_FIXES = {
 }
 
 
+def _is_bare_yes_stt(text: str) -> bool:
+    """True for short yes/okay — not 'Yes, I have' / 'Yes, I do' elaborations."""
+    t = (text or "").strip().lower().rstrip(".!?")
+    return t in ("yes", "yeah", "yep", "sure", "ok", "okay", "go ahead", "correct")
+
+
+def _is_yes_elaboration(text: str) -> bool:
+    """Whisper often expands bare yes into 'Yes, I have' / 'Yes, I do'."""
+    t = (text or "").strip().lower().rstrip(".!?")
+    if _is_bare_yes_stt(t):
+        return False
+    if not t.startswith(("yes", "yeah", "yep", "sure")):
+        return False
+    return any(
+        marker in t
+        for marker in (" have", " i've", " i got", " i do", " i make", " already")
+    )
+
+
 def _normalize_caller_stt(text: str) -> str:
     key = text.strip().lower().rstrip(".")
     return _STT_GREETING_FIXES.get(key, text)
@@ -539,6 +558,11 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return new_s
         if not new_s:
             return prev_s
+        # Keep bare yes — Whisper often expands it to "Yes, I have" / "Yes, I do".
+        if _is_bare_yes_stt(prev_s) and _is_yes_elaboration(new_s):
+            return prev_s
+        if _is_bare_yes_stt(new_s) and _is_yes_elaboration(prev_s):
+            return new_s
         pl, nl = prev_s.lower(), new_s.lower()
         if nl in pl:
             return prev_s
@@ -631,10 +655,27 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 trace_call(f"=== STT late-flush (turn open): {cleaned[:80]!r} ===")
             return
         # Queue each distinct utterance — do not overwrite earlier answers.
+        # Exception: Whisper often rewrites "Yes." → "Yes, I have." — keep bare yes
+        # so Part A / decisions advance on a real short answer.
         if self._pending_caller_texts:
-            last = self._pending_caller_texts[-1].lower()
-            if cleaned.lower() in last or last in cleaned.lower():
-                if len(cleaned) > len(self._pending_caller_texts[-1]):
+            last = self._pending_caller_texts[-1]
+            last_l = last.lower().rstrip(".!?")
+            cleaned_l = cleaned.lower().rstrip(".!?")
+            if cleaned_l in last_l or last_l in cleaned_l:
+                if _is_bare_yes_stt(last) and _is_yes_elaboration(cleaned):
+                    logger.info(
+                        "STT kept bare yes — ignoring elaboration: "
+                        f"{cleaned[:64]!r}"
+                    )
+                    if self._telephony:
+                        from .call_trace import trace_call
+
+                        trace_call(
+                            f"=== STT kept bare yes (ignored elaboration "
+                            f"{cleaned[:48]!r}) ==="
+                        )
+                    return
+                if len(cleaned) > len(last):
                     self._pending_caller_texts[-1] = cleaned
                 logger.info(
                     "STT heard caller while bot speaking — queued: "
@@ -660,8 +701,11 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if _extract_age_years(item) is not None:
             return 4
         t = item.strip().lower().rstrip(".!?")
-        if t in ("yes", "yeah", "yep", "sure", "ok", "okay", "go ahead", "correct"):
+        if _is_bare_yes_stt(t):
             return 3
+        # Prefer bare yes over "Yes, I have" / "Yes, I do" elaborations.
+        if _is_yes_elaboration(item):
+            return 2
         if _is_consent(item):
             return 2
         if t in ("hello", "hi", "hey", "you there", "are you there"):

@@ -45,15 +45,39 @@ def test_no_barge_in_for_thank_you():
     assert not should_telephony_barge_in("Thank you.", engine)
 
 
-def test_collapse_prefers_yes_over_what():
+def test_queue_keeps_bare_yes_over_elaboration():
+    """Whisper 'Yes.' then 'Yes, I have.' must not upgrade the queued answer."""
+    from app.config import ScriptConfig
+    from app.conversation import ConversationEngine
+    from app.pipeline import FronterProcessor
+    from app.speech_renderer import CallState
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare benefits.",
+        qualifying_questions=["Do you have Medicare Part A and Part B?", "How old are you?"],
+    )
+    engine = ConversationEngine(script=script)
+    engine.open()
+    engine.handle("ok")  # on Part A
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc._call.state = CallState.SPEAKING
+    proc._queue_pending_caller_text("Yes.")
+    proc._queue_pending_caller_text("Yes, I have.")
+    assert len(proc._pending_caller_texts) == 1
+    assert proc._pending_caller_texts[0].lower().rstrip(".!") == "yes"
+    chosen = proc._collapse_caller_queue()
+    assert chosen.lower().rstrip(".!") == "yes"
+
+
+def test_collapse_prefers_bare_yes_over_yes_i_have():
     from app.pipeline import FronterProcessor
 
     engine = _medicare_engine()
     proc = FronterProcessor(engine, None, "6666", telephony=True)
-    proc._pending_caller_texts = ["Yes.", "What?", "Yeah."]
+    proc._pending_caller_texts = ["Yes, I have.", "Yes."]
     chosen = proc._collapse_caller_queue()
-    assert chosen.lower().rstrip(".!") in {"yes", "yeah"}
-    assert proc._pending_caller_texts == []
+    assert chosen.lower().rstrip(".!") == "yes"
 
 
 def test_collapse_prefers_age_over_hello():
