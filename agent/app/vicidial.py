@@ -8,9 +8,20 @@ seam to validate against the target BPO's ViciDial during onboarding.
 from __future__ import annotations
 
 import httpx
+import re
 from loguru import logger
 
 from .config import settings
+
+_VD_CALL_ID_RE = re.compile(r"\b([VY][A-Za-z0-9-]{11,})\b")
+
+
+def looks_like_vicidial_call_id(value: str) -> bool:
+    """ViciDial remote-agent call IDs start with V or Y (~20 chars)."""
+    token = (value or "").strip()
+    if len(token) < 12:
+        return False
+    return token[0] in ("V", "Y") and token[1:].replace("-", "").isalnum()
 
 
 class ViciDialClient:
@@ -36,6 +47,74 @@ class ViciDialClient:
         resp.raise_for_status()
         logger.debug(f"ViciDial agent_api {params.get('function')}: {resp.text.strip()}")
         return resp.text.strip()
+
+    async def _non_agent_api(self, params: dict) -> str:
+        url = f"{self.base_url}/vicidial/non_agent_api.php"
+        base = {
+            "source": "ai-fronter",
+            "user": self.api_user,
+            "pass": self.api_pass,
+        }
+        resp = await self._client.get(url, params={**base, **params})
+        resp.raise_for_status()
+        logger.debug(f"ViciDial non_agent_api {params.get('function')}: {resp.text.strip()[:200]}")
+        return resp.text.strip()
+
+    @staticmethod
+    def _extract_call_id_from_api_text(text: str, agent_user: str | None = None) -> str | None:
+        """Pull V/Y call id from Agent or Non-Agent API CSV/text."""
+        if not text or text.strip().upper().startswith("ERROR:"):
+            return None
+        if agent_user:
+            for line in text.splitlines():
+                if agent_user not in line:
+                    continue
+                for match in _VD_CALL_ID_RE.finditer(line):
+                    token = match.group(1)
+                    if looks_like_vicidial_call_id(token):
+                        return token
+        for match in _VD_CALL_ID_RE.finditer(text):
+            token = match.group(1)
+            if looks_like_vicidial_call_id(token):
+                return token
+        return None
+
+    async def lookup_active_call_id(self, agent_user: str) -> str | None:
+        """Resolve remote-agent call ID for ra_call_control (live_agents.callerid)."""
+        if not self.base_url or not self.api_user or not self.api_pass:
+            return None
+        agent_user = (agent_user or "").strip()
+        if not agent_user:
+            return None
+        probes: list[tuple[str, dict]] = [
+            (
+                "logged_in_agents",
+                {
+                    "function": "logged_in_agents",
+                    "stage": "csv",
+                    "header": "YES",
+                    "user_groups": "-ALL-",
+                },
+            ),
+            (
+                "st_get_agent_active_lead",
+                {"function": "st_get_agent_active_lead", "agent_user": agent_user, "value": agent_user},
+            ),
+        ]
+        for label, params in probes:
+            try:
+                if label == "logged_in_agents":
+                    result = await self._non_agent_api(params)
+                else:
+                    result = await self._agent_api(params)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"ViciDial {label} lookup failed: {exc}")
+                continue
+            call_id = self._extract_call_id_from_api_text(result, agent_user=agent_user)
+            if call_id:
+                logger.info(f"ViciDial call ID from {label}: {call_id}")
+                return call_id
+        return None
 
     async def warm_transfer(
         self,

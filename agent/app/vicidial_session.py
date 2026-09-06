@@ -311,6 +311,8 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
     idle_watchdog_task: asyncio.Task | None = None
     greeting_watchdog_task: asyncio.Task | None = None
     greeting_kick_task: asyncio.Task | None = None
+    call_id_poll_task: asyncio.Task | None = None
+    greeting_kick_task: asyncio.Task | None = None
     active_call = None
     end_reason: str | None = None
     fronter = None
@@ -509,6 +511,23 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             )
             _event("=== direct telephony reply media enabled (same WS path as greeting) ===")
 
+        if fronter is not None and not vicidial_call_id and vici is not None:
+
+            async def _poll_call_id() -> None:
+                nonlocal vicidial_call_id
+                for _ in range(60):
+                    if shutdown.done or fronter._vicidial_call_id:
+                        return
+                    cid = await vici.lookup_active_call_id(ctx.agent_user)
+                    if cid:
+                        fronter._vicidial_call_id = cid
+                        vicidial_call_id = cid
+                        _event(f"=== ViciDial call id from API (mid-call): {cid} ===")
+                        return
+                    await asyncio.sleep(0.5)
+
+            call_id_poll_task = asyncio.create_task(_poll_call_id())
+
         async def _send_greeting_pcm(*, mark_opened: bool, label: str) -> bool:
             if shutdown.done or fronter is None or fronter._opened:
                 return False
@@ -642,6 +661,8 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             greeting_watchdog_task.cancel()
         if greeting_kick_task is not None:
             greeting_kick_task.cancel()
+        if call_id_poll_task is not None:
+            call_id_poll_task.cancel()
         if session_key:
             async with _session_lock:
                 _active_sessions.discard(session_key)

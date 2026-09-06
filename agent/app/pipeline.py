@@ -1028,6 +1028,19 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         digits = "".join(ch for ch in token if ch.isdigit())
         return digits if len(digits) >= 3 else None
 
+    async def _resolve_vicidial_call_id(self) -> str | None:
+        call_id = (self._vicidial_call_id or "").strip() or None
+        if call_id or self._vici is None:
+            return call_id
+        resolved = await self._vici.lookup_active_call_id(self._agent_user)
+        if resolved:
+            self._vicidial_call_id = resolved
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(f"=== ViciDial call id resolved via API: {resolved} ===")
+        return self._vicidial_call_id
+
     async def _execute_transfer(self) -> None:
         if self._vici is None:
             logger.warning("Transfer skipped — no ViciDial client (check Integrations / .env)")
@@ -1039,23 +1052,24 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             or settings.vicidial_transfer_preset
         )
 
-        if self._vicidial_call_id:
+        call_id = await self._resolve_vicidial_call_id()
+        if call_id:
             extension = self._transfer_extension(closer)
             if extension:
                 logger.info(
                     f"FSM -> remote-agent EXTENSIONTRANSFER ext={extension} "
-                    f"call_id={self._vicidial_call_id}"
+                    f"call_id={call_id}"
                 )
                 if self._telephony:
                     from .call_trace import trace_call
 
                     trace_call(
                         f"=== INGROUPTRANSFER skipped (using EXTENSIONTRANSFER "
-                        f"ext={extension} call_id={self._vicidial_call_id}) ==="
+                        f"ext={extension} call_id={call_id}) ==="
                     )
                 result = await self._vici.remote_agent_transfer(
                     self._agent_user,
-                    self._vicidial_call_id,
+                    call_id,
                     extension=extension,
                     status="XFER",
                 )
@@ -1063,18 +1077,18 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 ingroup = preset or "DEFAULTINGROUP"
                 logger.info(
                     f"FSM -> remote-agent INGROUPTRANSFER ingroup={ingroup} "
-                    f"call_id={self._vicidial_call_id}"
+                    f"call_id={call_id}"
                 )
                 if self._telephony:
                     from .call_trace import trace_call
 
                     trace_call(
                         f"=== INGROUPTRANSFER ingroup={ingroup} "
-                        f"call_id={self._vicidial_call_id} ==="
+                        f"call_id={call_id} ==="
                     )
                 result = await self._vici.remote_agent_transfer(
                     self._agent_user,
-                    self._vicidial_call_id,
+                    call_id,
                     ingroup=ingroup,
                     status="XFER",
                 )
