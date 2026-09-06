@@ -1198,22 +1198,27 @@ def _script_cache_lines(script: ScriptConfig, *, telephony: bool = False) -> lis
         max_words = settings.telephony_utterance_max_words
     engine = ConversationEngine(script=script)
     consent_q = engine._pitch_consent_question()
-    # Telnyx-era: pitch body only; Part A/B is a separate qualify turn.
+    # Live `_deliver_pitch` speaks statement + Part A/B in one turn.
     pitch_body, pitch_embedded = engine._pitch_statement_and_first_question()
     from .conversation import _ensure_part_a_first, _looks_like_medicare_script, _PART_A_QUESTION
 
     medicare = _looks_like_medicare_script(script)
     questions = _ensure_part_a_first(list(script.qualifying_questions), medicare=medicare)
-    if pitch_embedded and not any(
-        pitch_embedded.lower()[:28] in q.lower() or q.lower()[:28] in pitch_embedded.lower()
-        for q in questions
-    ):
-        questions = _ensure_part_a_first([pitch_embedded, *questions], medicare=medicare)
+    if pitch_embedded and not questions:
+        questions = [pitch_embedded]
+    joined_pitch = pitch_body
+    if questions:
+        first = questions[0]
+        if not first.endswith("?"):
+            first = f"{first}?"
+        if first.lower() not in (pitch_body or "").lower():
+            joined_pitch = f"{(pitch_body or '').rstrip(' .!?')}. {first}".strip()
 
     lines = [
         script.greeting,
         script.pitch,
-        pitch_body or script.pitch,
+        joined_pitch,
+        pitch_body,
         engine._consent_prompt(),
         engine._short_prompt,
         *questions,
