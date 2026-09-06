@@ -15,6 +15,7 @@ import { createClient, isSupabaseConfigured, supabaseConfigHelp } from "@/lib/su
 import type { CampaignRow, CampaignStatus, KnowledgeEntry, ScriptJson } from "@/lib/types/database";
 import { DEFAULT_KNOWLEDGE_BASE } from "@/lib/types/database";
 import { readJsonResponse } from "@/lib/fetch-json";
+import { formatSupabaseError } from "@/lib/errors";
 
 export function CampaignEditorForm({ id }: { id: string }) {
   const router = useRouter();
@@ -68,6 +69,11 @@ export function CampaignEditorForm({ id }: { id: string }) {
           .single();
 
         if (campaignError) throw campaignError;
+        if (!campaign) {
+          throw new Error(
+            "Campaign not found for this account. Go back to Campaigns and open one from the list, or create a new campaign.",
+          );
+        }
 
         const row = campaign as CampaignRow;
         const script = row.script_json as ScriptJson;
@@ -97,7 +103,14 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
         setBotCount(count ?? 0);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not load campaign.");
+        const code = (err as { code?: string } | null)?.code;
+        if (code === "PGRST116") {
+          setError(
+            "Campaign not found for this account (wrong org or deleted). Open Campaigns and pick one from your list, or create a new campaign.",
+          );
+        } else {
+          setError(formatSupabaseError(err, "Could not load campaign."));
+        }
       } finally {
         setLoading(false);
       }
