@@ -202,6 +202,38 @@ def test_echo_drops_thank_you_and_you_can():
     assert not _is_meaningful_caller_text("hi")
 
 
+def test_bare_yes_not_echo_dropped_during_part_a_tail():
+    """Bare yes during post-playback echo tail must survive on Part A."""
+    import time
+
+    from app.config import ScriptConfig
+    from app.conversation import ConversationEngine
+    from app.pipeline import FronterProcessor
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=[
+            "Do you have Medicare Part A and Part B?",
+            "How old are you?",
+        ],
+    )
+    engine = ConversationEngine(script=script)
+    engine.open()
+    engine.handle("I'm fine")  # joined pitch + Part A
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc._bot_audio_until = time.monotonic() + 1.0  # simulate echo tail
+    assert not proc._should_drop_stt_as_echo("Yes.")
+    assert not proc._should_drop_stt_as_echo("Yes, I have.")
+    engine.handle("yes")  # now on age ask
+    proc2 = FronterProcessor(engine, None, "6666", telephony=True)
+    proc2._bot_audio_until = time.monotonic() + 1.0
+    assert proc2._should_drop_stt_as_echo("Yes.")
+
+
 def test_merge_age_fragments():
     from app.pipeline import FronterProcessor
 

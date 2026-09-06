@@ -316,6 +316,19 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     def script_pitch_hint(self) -> str:
         return (self._engine.script.pitch or "") + " " + (self._engine.script.greeting or "")
 
+    def _expects_yes_no_qualify_answer(self) -> bool:
+        """True when the FSM is waiting for yes/no (Part A, decisions, consent) — not age."""
+        from .conversation import State, _is_age_question
+
+        if self._engine.state != State.QUALIFY:
+            return False
+        if not self._engine._pitch_confirmed:
+            return True
+        if self._engine._qualify_idx <= 0:
+            return False
+        current = self._engine._active_questions()[self._engine._qualify_idx - 1]
+        return not _is_age_question(current)
+
     def _should_drop_stt_as_echo(self, text: str) -> bool:
         """Drop bot-loopback / Whisper phantoms so fake 'Thank you' never advances the script."""
         if not self._telephony:
@@ -336,8 +349,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             # Age preamble fragments ("I am" / "I'm") — wait for the number.
             if t in {"i am", "im", "i m", "i'm"} or t.endswith(" years old"):
                 return False
-            # Mid-playback "yes"/"okay"/"hello" are usually echo or impatience.
-            # Real answers are accepted after the turn opens.
+            # Part A / decisions / consent: bare "yes" is the real answer — callers
+            # often reply as the bot finishes; dropping it caused silence until
+            # they said "yes I have" after the echo window expired.
+            if self._expects_yes_no_qualify_answer():
+                if _is_bare_yes_stt(text) or _is_yes_elaboration(text):
+                    return False
+            # Mid-playback short acks on age asks — usually echo or impatience.
             if len(t.split()) <= 4 and not _is_cant_hear(text):
                 return True
         return False
@@ -493,6 +511,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         silent and STT queued mid-utterance dumped later as a rapid qualify burst.
         """
         self._touch_activity()
+        # Playback is done — do not echo-drop queued yes/answers in the 0.55s tail.
+        self._bot_audio_until = 0.0
         # After AGE asks only: drop bare mid-playback yes/okay so they don't
         # skip the number. On Part A / decisions, bare "yes" IS the answer —
         # keep it (discarding caused silence until caller said "yes I have").
