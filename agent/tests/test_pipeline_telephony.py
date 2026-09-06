@@ -78,6 +78,59 @@ def test_pending_early_ack_keeps_followup():
     assert not proc._pending_is_early_ack_only()
 
 
+def test_bare_yes_kept_after_part_a_ask():
+    """Bare 'yes' after Part A must not be treated as discardable early-ack."""
+    from app.config import ScriptConfig
+    from app.conversation import ConversationEngine
+    from app.pipeline import FronterProcessor
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=[
+            "Do you have Medicare Part A and Part B?",
+            "How old are you?",
+        ],
+    )
+    engine = ConversationEngine(script=script)
+    engine.open()
+    engine.handle("I'm fine")  # joined pitch + Part A; qualify_idx=1
+    assert engine._pitch_confirmed and engine._qualify_idx == 1
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc._pending_caller_texts = ["Yes."]
+    assert not proc._pending_is_early_ack_only()
+    proc._pending_caller_texts = ["Yes, I have."]
+    assert not proc._pending_is_early_ack_only()
+
+
+def test_bare_yes_is_early_ack_on_age_ask():
+    from app.config import ScriptConfig
+    from app.conversation import ConversationEngine
+    from app.pipeline import FronterProcessor
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare benefits.",
+        qualifying_questions=[
+            "Do you have Medicare Part A and Part B?",
+            "How old are you?",
+            "Do you make your own decisions?",
+        ],
+    )
+    engine = ConversationEngine(script=script)
+    engine.open()
+    engine.handle("ok")
+    engine.handle("yes")  # Part A → age
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc._pending_caller_texts = ["Yes."]
+    assert proc._pending_is_early_ack_only()
+    proc._pending_caller_texts = ["I am 72."]
+    assert not proc._pending_is_early_ack_only()
+
+
 def test_echo_drops_thank_you_and_you_can():
     from app.pipeline import (
         FronterProcessor,

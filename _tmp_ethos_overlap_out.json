@@ -1,0 +1,1438 @@
+{
+  "snapshot": {
+    "base_head": 50907550,
+    "ethos_from": 50720000,
+    "ethos_to": 50907550,
+    "umia_from": 50480000,
+    "umia_to": 50907550,
+    "plasma_from": 22640000,
+    "plasma_to": 22680000,
+    "ethos_sale": "0xee7b81cf84b705b1ef2991a174154eb3b432d93c",
+    "umia_auction": "0x2ddafa49cdd62864ab2e2aad66cc294cc7ef4a9b",
+    "plasma_vault": "0xd1074e0ae85610ddba0147e29ebe0d8e5873a000"
+  },
+  "counts": {
+    "ethos_bidplaced_logs": 2545,
+    "ethos_commit_inc_logs": 2545,
+    "ethos_unique_wallets": 1569,
+    "ethos_unique_entities": 1560,
+    "ethos_committed_usd": 8683152.867767,
+    "umia_logs": 751,
+    "umia_unique_owners": 678,
+    "umia_last_bid_usd": 6194754.322363,
+    "plasma_mint_logs": 1163,
+    "plasma_unique_depositors": 1110,
+    "plasma_minted_usd": 500002025.937665,
+    "overlap_plasma_ethos": 22,
+    "overlap_umia_ethos": 45,
+    "overlap_plasma_umia": 15,
+    "overlap_triple": 4,
+    "overlap_plasma_ethos_usd": 438573.757255,
+    "overlap_umia_ethos_ethos_usd": 528175.378788,
+    "overlap_umia_ethos_umia_usd": 173241.01219,
+    "overlap_plasma_ethos_plasma_usd": 2223372.961653
+  },
+  "plasma_ethos": [
+    {
+      "address": "0x7ac34681f6aaeb691e150c43ee494177c0e2c183",
+      "plasma_usd": 540000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 100000.0,
+      "ethos_tx": "0x4b75f05b921dc2851c2486eec5de3b62e1c0bc1917d49e51b49cdf5951949f83",
+      "umia_tx": null,
+      "plasma_tx": "0xaf22d164f567f85276b83525e88d11439e6235e0aaf79537b9271dc0626ecc6e"
+    },
+    {
+      "address": "0x722e895a12d2a11be99ed69dbc1fedbb9f3cd8fe",
+      "plasma_usd": 211524.160503,
+      "umia_usd": 0.0,
+      "ethos_usd": 100000.0,
+      "ethos_tx": "0xa87b611a189d56e2f00547f0f95adea8858e2cb881a242dce48e86718a80a32c",
+      "umia_tx": null,
+      "plasma_tx": "0x7ea1ace788c5448d5c1012d9711ec30bbaa933dae0d1b82d10813f81901f890d"
+    },
+    {
+      "address": "0x1bfc7b12b950a88371947eafe123126ea3d5314a",
+      "plasma_usd": 221038.35089,
+      "umia_usd": 0.0,
+      "ethos_usd": 99201.686418,
+      "ethos_tx": "0x24a8bfa799f5b7dec63582b7761fc629c4f1ecfacf6b7fca88785aacf1411ecb",
+      "umia_tx": null,
+      "plasma_tx": "0x84e8c23a00174ef04fcc3f793efbbba8cd497cf2572f3d34986cda86e2c960f8"
+    },
+    {
+      "address": "0x854f1269b659a727a2268ab86ff77cfb30bfb358",
+      "plasma_usd": 250000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 60000.0,
+      "ethos_tx": "0x48834a5177ef936beef300f8f4d25867810847715446e8d5d473d266f3ef4f99",
+      "umia_tx": "0x73e05177525aa1d6d7efc38c2dcd3271677d9c8b0eaf8c9cd977f298efe0de49",
+      "plasma_tx": "0x83d8152a57d10b21c73af6eddff349ca91bba61e55ea8453ce17dfe047dd543b"
+    },
+    {
+      "address": "0x74d611c7fbf8bfe0737e0cd3f7a032246bd8a6d3",
+      "plasma_usd": 654432.08292,
+      "umia_usd": 0.0,
+      "ethos_usd": 25000.0,
+      "ethos_tx": "0x6d1ef1887f5a370cc2d14fa147ddb83cb9e752101950a8d9ef03079791c3c9eb",
+      "umia_tx": null,
+      "plasma_tx": "0x80de3e565fdaa0b132039cc5b68a2dea1461f0e7a56e8fbe104a6302d1ec2855"
+    },
+    {
+      "address": "0xf291b752351a19e81f7b8a40790d2bdbb53a957d",
+      "plasma_usd": 100000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 20000.0,
+      "ethos_tx": "0x5e355f989ad9b2237e9649a9fcba4a86de0e89a32434c6f6e8488a728f97617c",
+      "umia_tx": "0x619546eab69bdcdd35cc583344a540ffec2153d334ba4167b2c32790c4ade263",
+      "plasma_tx": "0x62c9bb1d882c15e91e73ed1dae47eebfc26f24932118fa125bc9278be95c9a49"
+    },
+    {
+      "address": "0x29eb182b934780bb25c4656268df4c919225e707",
+      "plasma_usd": 40814.53394,
+      "umia_usd": 0.0,
+      "ethos_usd": 15000.000001,
+      "ethos_tx": "0x88a48008495c92a09aba2d06fe14410d24dd3c82446e09152a01f906028be943",
+      "umia_tx": null,
+      "plasma_tx": "0xf04a11606ee5e06ea5ef82f570fa48e32fcd8b2d510830617660b0a0e5c6e1dc"
+    },
+    {
+      "address": "0xd9c13d1badc0fe49b9eecb41299832ac42d08972",
+      "plasma_usd": 7756.535657,
+      "umia_usd": 5000.0,
+      "ethos_usd": 5000.0,
+      "ethos_tx": "0x8e412ac620907cdf8b202657102bb9ef57aa33ecabb57a081c8f9dc965a3b5d7",
+      "umia_tx": "0xbeb9c98c5c6e4d77d6322e6e075bc290a615a0c910bb652fe657092473b45b00",
+      "plasma_tx": "0x494b632286bf74857193b40f2eecfb195206bc9a944455d7e408d2d56fcc97ca"
+    },
+    {
+      "address": "0xa89ea4c7828bb5a8b8845865e62561a267e279af",
+      "plasma_usd": 4048.566395,
+      "umia_usd": 0.0,
+      "ethos_usd": 3000.0,
+      "ethos_tx": "0xeccae81f0e8507ff5fd8cbc298b97e5b0fdabcc1a0e680be2e22655b7578f038",
+      "umia_tx": null,
+      "plasma_tx": "0xe5d11da483c1be0a522e3f2d7f821ad9dd9caebab00e068d909ae149302a2963"
+    },
+    {
+      "address": "0xfcd9685ba0da2fec1829c91c6aad1e91c2ddeed5",
+      "plasma_usd": 2250.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 1979.0,
+      "ethos_tx": "0x302eff4117e922461761b005b4446ad7d8dcb62b7bd2bfd65868c28298b5e329",
+      "umia_tx": null,
+      "plasma_tx": "0x7cce698e3173752a088cc0c5c53706a01084a46549f84a732eae42610665f5cc"
+    },
+    {
+      "address": "0xf46ff12cb56a7671f3bd3c0d435db06b68482bfd",
+      "plasma_usd": 10000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 1501.03018,
+      "ethos_tx": "0xcf77ca0c39b93787692857e2b27f32f559c9bc15212c18bb4981cb0ab4bc994f",
+      "umia_tx": null,
+      "plasma_tx": "0x75a207a64b17a4a5660ff37e4721f377712243d908fa2d4611450a118ddf2141"
+    },
+    {
+      "address": "0x68292357e9b0b35e08861ccdb53290bdb92999c5",
+      "plasma_usd": 20000.0,
+      "umia_usd": 2000.0,
+      "ethos_usd": 1500.0,
+      "ethos_tx": "0x13f50b22d2807ec29fc55d53b9891aec883bff6392c8a2edb57c30f0e7bf3d4d",
+      "umia_tx": "0x159067f937eb0c05b1a975915247fcac16803022672d816c741c1f5a6331c940",
+      "plasma_tx": "0x91ece9f90ad3d535468325c92312a5f4ab2ac0faefa6a0c876949b31b17201a5"
+    },
+    {
+      "address": "0x053e6294400a9268e35df445624f58087c7f388f",
+      "plasma_usd": 5102.98292,
+      "umia_usd": 0.0,
+      "ethos_usd": 1235.337991,
+      "ethos_tx": "0x1f78bee1f99dabea945958b94691b083c5363eafa4e5c285e46e1fa4f8e71ccc",
+      "umia_tx": null,
+      "plasma_tx": "0x19e161662ab7e491bb7da1ea8878018bfe8b23bcfc1995857e22c590f4294c80"
+    },
+    {
+      "address": "0x7f8e3f0fa7eea2df907c04eb5696e3a0666a56d2",
+      "plasma_usd": 20000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 1000.0,
+      "ethos_tx": "0x2866d86c785b2e86608bd626c95179fd79fdc975b36dd33a6a0dbd01247821ee",
+      "umia_tx": null,
+      "plasma_tx": "0x720e7eb44d10f1d54b1bcb9c1fe3536abc3e854306437385ef900f4e24dba251"
+    },
+    {
+      "address": "0x27f4128205122af0ce0b87190d7986814969c494",
+      "plasma_usd": 5000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 1000.0,
+      "ethos_tx": "0xb7e9cb7c969688a2aa01fe0b16e3f198980a7cc0fd5619dd936b8f9e53f83e0c",
+      "umia_tx": null,
+      "plasma_tx": "0x47b54c96df0d781a55729428e10441b9fdbf1876a066f788b1ee5f364743559a"
+    },
+    {
+      "address": "0x5e5beba51c68defe05738f0b6774de9b1b18bae4",
+      "plasma_usd": 14000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 996.0,
+      "ethos_tx": "0x349de10ea2a533484918f900caae282aaa5bb427a0d95e604e80cab361a137f5",
+      "umia_tx": null,
+      "plasma_tx": "0x8db3dc21c1b098c335cb794e155b030951f6a95e038920a4138c1ffdbd88a546"
+    },
+    {
+      "address": "0xddb9ab1421e6f1d864c01ba63fb05b183d5ea4d4",
+      "plasma_usd": 1904.477355,
+      "umia_usd": 0.0,
+      "ethos_usd": 600.0,
+      "ethos_tx": "0xe88fb35a7d82e10881b6fdc64e7570ede781876f0f2a0702e1023c466e22d910",
+      "umia_tx": null,
+      "plasma_tx": "0xaf2844bd3a137e550f4cc93342f65f53e1306a04b020c8712e49a98959e1e7e0"
+    },
+    {
+      "address": "0xaab4670ed9ddaca6008cd47a8b9f378f7d7d9b3c",
+      "plasma_usd": 3000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 600.0,
+      "ethos_tx": "0x74ef8dae760b7ddbc9b5f6e4301ce07a30daaf61143da79f48c76006f1597369",
+      "umia_tx": null,
+      "plasma_tx": "0x623f8b3f94b7e0e11caca4814f68d1d86eabf6894a7ea2d2a32a330a6aa44c20"
+    },
+    {
+      "address": "0x8ea69d04c0c505d72199bfff991283bff3db194a",
+      "plasma_usd": 100001.271073,
+      "umia_usd": 0.0,
+      "ethos_usd": 400.0,
+      "ethos_tx": "0xa2339a0effd8c55082a0b2036a27da5335332981831a6eff29c8ba73f0bd44cd",
+      "umia_tx": null,
+      "plasma_tx": "0xef72ce52d329f5446f78c033d065bc44ed080b9523536a3ee661252c82675bc5"
+    },
+    {
+      "address": "0x5f063c79b351a5ba3e6ef46a1d3be1a0224af1d3",
+      "plasma_usd": 10000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 300.0,
+      "ethos_tx": "0xa161acd7f5c9a0a0e2979773d04d7ebe5edf4409c01d18181e5b6a0f2a62a3b3",
+      "umia_tx": null,
+      "plasma_tx": "0x70ae4d84ee9dc58076d36851639c8ca239050da6c69cfd4869ed6f9596040f07"
+    },
+    {
+      "address": "0x91de559f1322b823dd2400263777c2df23bd9e66",
+      "plasma_usd": 2000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 160.702665,
+      "ethos_tx": "0x51eda99dfc0f866ee2515a0b7f4652ae6d8e705004e4578f1f90b21111e9e92a",
+      "umia_tx": null,
+      "plasma_tx": "0x512c9a09d9ec74b6f2a4c7f1464246be33d000b75da52e254933b3ea71676a28"
+    },
+    {
+      "address": "0xb7397f064686405abfe472fd48e6ff51d9e5e105",
+      "plasma_usd": 500.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 100.0,
+      "ethos_tx": "0x3230ee81775378176edfb803a65c88cc7e480224e409fb6c1f7aef99eec6391c",
+      "umia_tx": null,
+      "plasma_tx": "0x3e5b13cc92fa7539b015f10dcbe66e54c2e7f3d678372bf8495c6105ac767119"
+    }
+  ],
+  "umia_ethos": [
+    {
+      "address": "0xc672604d798d8cbd0cf2cc654099f82bd02647ab",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 100000.834892,
+      "ethos_tx": "0x32fc07809ade8dea5f2496397a39a22230bde51ad7d2cd9d69550248400faf6f",
+      "umia_tx": "0xc7b1aaef10363188f353de622d0fcfbf32d03958dc569abe09c6d061f81945d6",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xd4b4cab5cf150f46448a8b312cf4d96521953c5f",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 100000.0,
+      "ethos_tx": "0xe7fa2baef7acfe2cf225076dca86df87203a93633e2ff76593c3ddb825b3f40c",
+      "umia_tx": "0x2e292e2fec96f64a20f9ecd75a988603eeab249077b7ba773b8d46e54c39460f",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x854f1269b659a727a2268ab86ff77cfb30bfb358",
+      "plasma_usd": 250000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 60000.0,
+      "ethos_tx": "0x48834a5177ef936beef300f8f4d25867810847715446e8d5d473d266f3ef4f99",
+      "umia_tx": "0x73e05177525aa1d6d7efc38c2dcd3271677d9c8b0eaf8c9cd977f298efe0de49",
+      "plasma_tx": "0x83d8152a57d10b21c73af6eddff349ca91bba61e55ea8453ce17dfe047dd543b"
+    },
+    {
+      "address": "0x10771bf07bbd769578bd197eb58441fad17f8a3f",
+      "plasma_usd": 0.0,
+      "umia_usd": 1500.0,
+      "ethos_usd": 31000.0,
+      "ethos_tx": "0xce9d075296e3f0c73f9e31ef6362486dde652080336c0ec3e951ef78e3a76cb6",
+      "umia_tx": "0x196f4da216b1d67381b1713237a361516943408d20e3251d56500fa2b4a319ad",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x76337b85c89bb576bf9ca773ebf40a2b057d39fd",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 27159.535043,
+      "ethos_tx": "0xea6555bad620b8c5892a060eeededc6f50c454f6b6714085f995a39ab000b653",
+      "umia_tx": "0x1a5517aa771999b4126e09de3549140963087182b4dbf43603bbd7d7a6d578e8",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x3a1fac42ed88d7fd345fc21c24cb757dafabaed3",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 21085.000022,
+      "ethos_tx": "0xa300c66084322eb63d6353cc92e905dd6bc31a4eee8480694fe1d88f8c232deb",
+      "umia_tx": "0xe21fb5e0bfcc5fbc326c7435ed183df23002ab0d8612b4bb16634b211013ec71",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xf291b752351a19e81f7b8a40790d2bdbb53a957d",
+      "plasma_usd": 100000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 20000.0,
+      "ethos_tx": "0x5e355f989ad9b2237e9649a9fcba4a86de0e89a32434c6f6e8488a728f97617c",
+      "umia_tx": "0x619546eab69bdcdd35cc583344a540ffec2153d334ba4167b2c32790c4ade263",
+      "plasma_tx": "0x62c9bb1d882c15e91e73ed1dae47eebfc26f24932118fa125bc9278be95c9a49"
+    },
+    {
+      "address": "0x8eb596f1dca53b2b92a994f96ef067e0af5e0756",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 19499.800024,
+      "ethos_tx": "0xb35d510d4ec4d412ea567e3f3415b75ee1eeda991c5b3eecfbb342c495ef88cc",
+      "umia_tx": "0x06a0f9275b48f70d9690659fa49f472157180e0ab969feb9427d1f1420cad23a",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xd6ec2b8873f5c401027706ce56d8fedc15658332",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 16000.0,
+      "ethos_tx": "0x2e82bf51048fa55135871222841e5082e12db5d392a30c6e33f678e05fa54fe3",
+      "umia_tx": "0xd2e653c79764f6c9fd1f71938a725d8a0c0d0e3d193ac16481255381dbcca840",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xcae64c052b312b48ad871ad4c6a182d25acf985f",
+      "plasma_usd": 0.0,
+      "umia_usd": 2270.819086,
+      "ethos_usd": 15000.0,
+      "ethos_tx": "0x0db401c2a8a469b6d8b0d488dff81700422d8290db8e018b52ffb4f4cf5b35aa",
+      "umia_tx": "0x50e56487d3385bdf192f15c3bd49a3646ef4d03d4930e69046396db465a40cff",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xc43f1111b9c6ae7b4da84943b467fbc427988463",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 14999.550139,
+      "ethos_tx": "0x8c0f7a934a483237c1d32431aca21f31f7bf7077edaa7bfe4e9198d2264bd553",
+      "umia_tx": "0xa94355a83f793a15a742a39aa07cb15c32391eeb74821329addd759dbc62b41b",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x87133c5241773339987e2c613995e6824e612ce1",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 10000.0,
+      "ethos_tx": "0x2654be3aaa80323a5239d03ebedd0734a3261f8cc4099d9c8701628b54cc87c4",
+      "umia_tx": "0x1f4712e4f3476650549ce892d7987485ffb1c97e79ca575ba8caee6878d875a3",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x2026001855172dc690233021e51a3cd1b54aa5ff",
+      "plasma_usd": 0.0,
+      "umia_usd": 4131.1009,
+      "ethos_usd": 6368.232422,
+      "ethos_tx": "0x45586c3351260b201f5b2a35772da3669ff07d629cd9a3fb6683c727431e1a87",
+      "umia_tx": "0x5fd46723cf33f27d3792eba7d8d67683b2b07cb1fce141813a60cf6bf5e50eef",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x17acc17cf9770155024d92e1d41f29bf482a1ded",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 6109.0,
+      "ethos_tx": "0x0e5ec32f337c88e15a86e6109b1c1047f9e39ca6b8200b679097e92ca7256000",
+      "umia_tx": "0x7ea703235ed852625c0431e54a8968563a2e9076fdcc6f75154dd5233fc3fedf",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x6457c8f9ac66797f1044dc1adb71d422f272723b",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 5200.112104,
+      "ethos_tx": "0xc42509ce77fa0cf8e7c332a10c086b81ef41eb0f3fd2706a38314c54efa51066",
+      "umia_tx": "0x4d4c59c41dd26de1f90ecdde224e67e31fbd8279fda5ff404f71534016e1d931",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x3f9d71a1c67964b3f587812044ca89ede93ef979",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 5070.0,
+      "ethos_tx": "0x9b0a05f4d2b8ad8bfdf523aca19c088f77103a0238d4e23604b01b31f632b1e2",
+      "umia_tx": "0x55a7aa7577420b4f669f52eb9686f729fba9d73b2e32aec7cd011d8c81a8320f",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x40527b1c0e6f780d4597e7ae8efdce434653e7c0",
+      "plasma_usd": 0.0,
+      "umia_usd": 2000.0,
+      "ethos_usd": 5053.777355,
+      "ethos_tx": "0xc3e1ff7869acbc3c839670837e7d5062c8231d3b9cbd0c8f155e76381da3a5d0",
+      "umia_tx": "0x73ba232cd6d8f56b7d6b753d24e40d7dfbd1a89be8063862934ac0fdfbcf7a0f",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x39ee684997feb358bb95df6babbbf5de0b994e75",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 5000.800058,
+      "ethos_tx": "0x6e46f25b5df48298eb2ff7e834dccea3339bd4724f627fedcf12e2dd469a20d0",
+      "umia_tx": "0x1195757a66b6aee38337e31e0ac917f84ca9a2b8f4a1e61ac56d1b4bf0546864",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x9491e87c281cc15fe1edcae5953cfb00b0f8d5c7",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 5000.0,
+      "ethos_tx": "0xaafaebcb1beb16fbe6fbcee203a65ca9f943be63a2e33275beaad1091adacbf3",
+      "umia_tx": "0x5d2b6fd32909c03b73b491fc90954127422e17b25db60d50289068d9e8b9f786",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x753d6c5c07964026fe5e5ee980dfc9df2bd48ad2",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 5000.0,
+      "ethos_tx": "0xdf38796699c04e6c42f81797683282d1347a9f3b6b0f16c6b19ac3f8b5d5c98c",
+      "umia_tx": "0x6b7022b79649de69d923bdfb771f4a4ee1620780890ff82fb697031c8c2d7913",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xa882fb71aa1967a6a8aa11375f8abd5fee5bdd6a",
+      "plasma_usd": 0.0,
+      "umia_usd": 15000.0,
+      "ethos_usd": 5000.0,
+      "ethos_tx": "0x5e812dc424d33b5eefb0f4cd39899c7044ba383888348f565c029445bb617a69",
+      "umia_tx": "0x9159adbddf7955f03ff2afc1ce59092407912e3d8d0595fd0c250dad9a6a8261",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xd9c13d1badc0fe49b9eecb41299832ac42d08972",
+      "plasma_usd": 7756.535657,
+      "umia_usd": 5000.0,
+      "ethos_usd": 5000.0,
+      "ethos_tx": "0x8e412ac620907cdf8b202657102bb9ef57aa33ecabb57a081c8f9dc965a3b5d7",
+      "umia_tx": "0xbeb9c98c5c6e4d77d6322e6e075bc290a615a0c910bb652fe657092473b45b00",
+      "plasma_tx": "0x494b632286bf74857193b40f2eecfb195206bc9a944455d7e408d2d56fcc97ca"
+    },
+    {
+      "address": "0x9a85709e9d9badc12d1703401edc5e0c706081e9",
+      "plasma_usd": 0.0,
+      "umia_usd": 1012.373803,
+      "ethos_usd": 4301.398613,
+      "ethos_tx": "0x6df3c8f7f1790ee33f46852ad29cf872faee00561bc07c69a75fd4b349771952",
+      "umia_tx": "0x014e69af5c24c9fdb43c434bc27ed905247e1b633bfdf923fd3f476b0ef71048",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x2c17d83a4a644e7af16e8dce5624746e01deb2b6",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 4149.0,
+      "ethos_tx": "0x2370eac3510bca881bc1f7038a887db3145b947c1391091d065946f8c4d8606c",
+      "umia_tx": "0x53b6a1b0ba278a22b1cf68e5f7597e962f97ed6e8ebf79058c6e8f72236b8dda",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x992fa1f4459042e59734c4e38bec152ff119ecdb",
+      "plasma_usd": 0.0,
+      "umia_usd": 4000.0,
+      "ethos_usd": 3500.0,
+      "ethos_tx": "0xaa2552ff590bd146cd38b150a137cf8a86b4b4e7aacdc09cf06761ad0fda701f",
+      "umia_tx": "0xab6a341699d7ea14f1902e0d33ab914a6aa4d9c41e7e8f05f65fa55e499e072b",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xc57b23767f08ad5cf42bfffb0c3134b64f3e96ab",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 3000.921799,
+      "ethos_tx": "0x93493e03d05d0e646047703b9c59e8d5811ab1ac15f2cdbb9eb3b86b0512d259",
+      "umia_tx": "0xb8739dd915e5de1b1cff3b89bcbbd084580691c2150dd72504319a01449a58c3",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x8df7474554cbca528d33a7ee0a908bfe666ff06b",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 2700.0,
+      "ethos_tx": "0x40a3d2bcf40c264ea86fd5dd241eca9635da786d01a5c343f1c67db67c6f6f0c",
+      "umia_tx": "0xaca2f44cffcd891128d9d8c35c2c22ff62642562706b8faaae4b82d0ae191b76",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x2a994b6e25fa87b2f0f2cf66326ee9bc27fc7b88",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 2447.0,
+      "ethos_tx": "0x1c53bde59ee63220298fe67f802423c9f9201b84732aa3094d455835bcf333df",
+      "umia_tx": "0xa825c4576baca5782cc6e9641e9d258a8b6a3433f024256cbb030d92b2524abc",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x2eeaa7534aa31545e98319ed72827da53264775f",
+      "plasma_usd": 0.0,
+      "umia_usd": 1000.0,
+      "ethos_usd": 2001.0,
+      "ethos_tx": "0x52f3b578916675e7b75ed0451a80e4e56141d576c793a1825de1bae69240177a",
+      "umia_tx": "0x5dbf23a960649879ea809c0c581dd97db2d451b52220043d41e53fc2135a9c1e",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xd51eebba61387d0150b8b5b708cd04bfe5a9c970",
+      "plasma_usd": 0.0,
+      "umia_usd": 2000.0,
+      "ethos_usd": 2000.0,
+      "ethos_tx": "0xa39d1d04ccd98eed5d44dd27ef02b7dd3544274db13ac1d28b962ecc8a3cb80b",
+      "umia_tx": "0xf081054d14e6b55ae117ba638408df31faac886f27311394d1ebf10f32f1a8dd",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x054fdbb83ed7484fbe4f11a534e13131b6ee29e9",
+      "plasma_usd": 0.0,
+      "umia_usd": 1300.0,
+      "ethos_usd": 2000.0,
+      "ethos_tx": "0x8a965cf2e3247335cc9b188a90f6e7fc4da3a17f995c4972a639c591084bc137",
+      "umia_tx": "0x81665cdcb77595a4cb3173f44c2979629732108bad4d7fdedd586f9b528a57cc",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x54930496d2a12b7513c28d61348348d33a9fd2d1",
+      "plasma_usd": 0.0,
+      "umia_usd": 1068.615595,
+      "ethos_usd": 1621.54649,
+      "ethos_tx": "0xad581a6e3d489880b2373513026da28bd257e54710327f4b9bd03dce9948583e",
+      "umia_tx": "0x66803ad2af1091324e414da247f5ba4227a4dc1c3498b7f3753c20c140028458",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x536013de0231ca20098bfcfa54c1eb9716283eec",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 1600.0,
+      "ethos_tx": "0x66761976a8e0467e8e40e452bfa510d50ecdef820a169d0d588f9b27ac71a21b",
+      "umia_tx": "0x4cbb5c16736681cd507d860b377a7f48a280aa66ae6a7fd6c74d8ab72d46dbd2",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x68292357e9b0b35e08861ccdb53290bdb92999c5",
+      "plasma_usd": 20000.0,
+      "umia_usd": 2000.0,
+      "ethos_usd": 1500.0,
+      "ethos_tx": "0x13f50b22d2807ec29fc55d53b9891aec883bff6392c8a2edb57c30f0e7bf3d4d",
+      "umia_tx": "0x159067f937eb0c05b1a975915247fcac16803022672d816c741c1f5a6331c940",
+      "plasma_tx": "0x91ece9f90ad3d535468325c92312a5f4ab2ac0faefa6a0c876949b31b17201a5"
+    },
+    {
+      "address": "0x2c44586dd63e5b70be47f20e7c83b1c2d45c3100",
+      "plasma_usd": 0.0,
+      "umia_usd": 1340.437894,
+      "ethos_usd": 1500.0,
+      "ethos_tx": "0x40e0e2b11dcadcf42be1925ebd531fa101dd7ac4cc23b10cc36db92ed016e26c",
+      "umia_tx": "0x15ff0cb2b48deee8833af149b17e77719b36b0d6fae91701373430c55b716f79",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xd6dd3aba44b7d2e19da6f7970b4cda4cd4854818",
+      "plasma_usd": 0.0,
+      "umia_usd": 2626.212953,
+      "ethos_usd": 1250.8,
+      "ethos_tx": "0x3f92d2cd64395e056ff5cab183e0f4417545e7012dee8a4804b51765d17d75bf",
+      "umia_tx": "0xc7271b3b5852f1b963d9088359b5b62c12efe714bffa99eb2a7d40662d799701",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x1db9a85974e719c42c0e3136a26093b2cd79e7c5",
+      "plasma_usd": 0.0,
+      "umia_usd": 1000.0,
+      "ethos_usd": 1250.0001,
+      "ethos_tx": "0x53ec0fe7d378f66a3ff78f16ccfb7c927d5f5184b887e45d538fcb565d264f30",
+      "umia_tx": "0x0cc3ac80a481223514d3d98b3c3f0f4c9606f9086f133ff99cf02243f95ddfef",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x5d5118a5bacbbb93846b1b69182e3ecf64c4be2c",
+      "plasma_usd": 0.0,
+      "umia_usd": 900.0,
+      "ethos_usd": 1199.0,
+      "ethos_tx": "0xb6dd8b0e21a60142fb10719b259c5beec7ce455be61007423bda367ada2d4d64",
+      "umia_tx": "0xe14ed027a57d54a2d10b0427461b6d2987e8aaf542c49f773b93428b238bf122",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x98cc9fd8b9af3ed207d977400626d95e38200bf1",
+      "plasma_usd": 0.0,
+      "umia_usd": 3569.059673,
+      "ethos_usd": 1003.457559,
+      "ethos_tx": "0x5011ed70bd419f41251cf6a54361a4bab8ca5049805b6589c80c1e3451c3a8e6",
+      "umia_tx": "0x2c5037443bac53b7dcab4de55c70289879b4890f1b6c2ceb9364443224295754",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xf30989185ba5fdbd8db64f03e4d1dcd9e965f7b5",
+      "plasma_usd": 0.0,
+      "umia_usd": 2000.0,
+      "ethos_usd": 1000.0,
+      "ethos_tx": "0x8ece0f52fc61d7d7b1db4755f7d4aeabb1927a8127357e7202f0d66e958f5686",
+      "umia_tx": "0xb9f4d1f1d09bcee0e0e47b76088e2fe9d395e285eadaf6321ad2558cf1164a8b",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xefdf4f603b25e679bccfd9ff420d26ca8a236c7f",
+      "plasma_usd": 0.0,
+      "umia_usd": 1509.010706,
+      "ethos_usd": 1000.0,
+      "ethos_tx": "0xd07c93ea8da6f5afbc7084e564ded23df5bb7a83d6ed2219265c43f2c18c5673",
+      "umia_tx": "0xf4cba3bc02f2ce39263e7ff079ca3a466bb0ad94be893ec321b15fa582d3ed32",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x4cc09c07712f28e204f6eab8049cc1f6b18946dc",
+      "plasma_usd": 0.0,
+      "umia_usd": 2914.32158,
+      "ethos_usd": 503.612168,
+      "ethos_tx": "0x7be100d1b2bd8e67027ebdc4d09f25c49012df4bd406106f562de7065efd2f47",
+      "umia_tx": "0xdad273a0798bc5379f320ba3950c69508d869640f6b2bdd1487ca8323e9544dc",
+      "plasma_tx": null
+    },
+    {
+      "address": "0x2bc23879c98bcac56dc8f8d378890191e7681d54",
+      "plasma_usd": 0.0,
+      "umia_usd": 1100.0,
+      "ethos_usd": 500.0,
+      "ethos_tx": "0x162baae837d50935e88dba666de855e91c51fd4f4951a9484169526bc08d56c0",
+      "umia_tx": "0xe9d6fe3d3082db978494065af1756777e87a76f362ee50b8b89cf48ff476347b",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xddbbf36f271c39f8cefce44236753ec3284d33b9",
+      "plasma_usd": 0.0,
+      "umia_usd": 1001.06,
+      "ethos_usd": 500.0,
+      "ethos_tx": "0x2889f14168f9b1cc80308fd8fe22095170bdf8c15c9b07f6e017136fc412c8ae",
+      "umia_tx": "0xa24d79f175b4c77ab444643a9610053e75bda835d43796e16b31a355bc8ff1fc",
+      "plasma_tx": null
+    },
+    {
+      "address": "0xe498e919dc961700c8d0f4a507344467a49609fa",
+      "plasma_usd": 0.0,
+      "umia_usd": 7998.0,
+      "ethos_usd": 101.0,
+      "ethos_tx": "0x6b222ef0be152d013923d4bf3368ea71b4e3fae2f7e87add438fdbec959d0804",
+      "umia_tx": "0x5d42bd31414cee4517a941762f3316c1d423668151e31e86f07a0e549123955b",
+      "plasma_tx": null
+    }
+  ],
+  "plasma_umia": [
+    {
+      "address": "0x4a9d37a7182b16ba1385153a9a895ebf1fe71448",
+      "plasma_usd": 2300994.5,
+      "umia_usd": 5000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x09389f54bcef377e2d93cf2a7a6dbe8e4b710aabbbf7f7e13f8b3b77a45d9d9c",
+      "plasma_tx": "0xffc5e3784abda4d82d4cc6537a992548b083954e72c85e8c2a555bc19460bef5"
+    },
+    {
+      "address": "0x33893d58f01e83b8b43fa8fcab85c0fa26c8d3ee",
+      "plasma_usd": 1000005.379784,
+      "umia_usd": 5000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xf16aa2e0ba99b5612013893b2e0a574bc6273f8b14c050ed77381639f6d8af6b",
+      "plasma_tx": "0x4b8ebbed9839829f66dd3418a363863e90a8acfdf838a2f1ec8170c14c56d1ea"
+    },
+    {
+      "address": "0x64809bdf6622856382c27a7cc73e8c8106d33c33",
+      "plasma_usd": 500000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x14c2bb2d035e1b83b5ddb5578062f61164e3f590840dacc90623ee727ee22cce",
+      "plasma_tx": "0x8f23b8320d3460b876491dad99edf737f5b017f8feb8ec7869b9058544feeaa6"
+    },
+    {
+      "address": "0x1d61da21d477d38d2b4b7e31b9a3e1ee0a5f319b",
+      "plasma_usd": 330000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xe49b2d4e402b63a774bf3ec9b641e6460a4c4b6b2ec9faaec6054898b8c36949",
+      "plasma_tx": "0xc47b856028b0c0c4d3b3976559e2457c87fddf1deaf8474dab0de5d119f4e459"
+    },
+    {
+      "address": "0x854f1269b659a727a2268ab86ff77cfb30bfb358",
+      "plasma_usd": 250000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 60000.0,
+      "ethos_tx": "0x48834a5177ef936beef300f8f4d25867810847715446e8d5d473d266f3ef4f99",
+      "umia_tx": "0x73e05177525aa1d6d7efc38c2dcd3271677d9c8b0eaf8c9cd977f298efe0de49",
+      "plasma_tx": "0x83d8152a57d10b21c73af6eddff349ca91bba61e55ea8453ce17dfe047dd543b"
+    },
+    {
+      "address": "0xe751d56c31dc1b16595a2cdfc94388687e26a674",
+      "plasma_usd": 106598.633066,
+      "umia_usd": 5000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x99a781021180c600ebe47d826ee23c82cab8701c8c64a46b0aa4c348bfd8c6b1",
+      "plasma_tx": "0xae4bcae5bd1105b479d63bcaedd9cb4791fa1326502b837493ce36694c22192e"
+    },
+    {
+      "address": "0x144313a16dc284187e963848cb494a8b544e7a58",
+      "plasma_usd": 100000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x56b868afc6d903ccd087e0d05891106cccbe60fa15db35bd775e01e977e01351",
+      "plasma_tx": "0xdae9dd716905e77465a610f126fba26b3aa92bcacae2b92b505ff0d5073d34d2"
+    },
+    {
+      "address": "0xf291b752351a19e81f7b8a40790d2bdbb53a957d",
+      "plasma_usd": 100000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 20000.0,
+      "ethos_tx": "0x5e355f989ad9b2237e9649a9fcba4a86de0e89a32434c6f6e8488a728f97617c",
+      "umia_tx": "0x619546eab69bdcdd35cc583344a540ffec2153d334ba4167b2c32790c4ade263",
+      "plasma_tx": "0x62c9bb1d882c15e91e73ed1dae47eebfc26f24932118fa125bc9278be95c9a49"
+    },
+    {
+      "address": "0xb2f9bbc5db84a95b598cab0c464cf92d584d8900",
+      "plasma_usd": 74166.303001,
+      "umia_usd": 5000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x34fbf69fca19f7028c287da28c7f03aa3491e2a286138ea84f4a53b4909693ed",
+      "plasma_tx": "0x600ca3fd8940e8b8b057dbea26d29ba966349736d16d837af163209a4d475161"
+    },
+    {
+      "address": "0x64df7af696e0977771a0e1e1b1a8dd22ded3cf4b",
+      "plasma_usd": 40000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x0e3e12098e3715a7a824b2664ed10c34a1d48c67dcd2db2356f573f1b4303f4c",
+      "plasma_tx": "0x982de42d853822c657ec70630719af1277bf62366c603ae3f24b4c16b6c60a22"
+    },
+    {
+      "address": "0xf8992a1f4e302460bd49a1646ee315d810235212",
+      "plasma_usd": 20612.528389,
+      "umia_usd": 5000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x92fd5eff83c3907dafbf714d1bf193daeccc77f5e1547e45a9cceec029868908",
+      "plasma_tx": "0xd0cc8bf1c17cb6c7d2087e58f483f9ac5b89e73d7f2877cf814e554aa9461696"
+    },
+    {
+      "address": "0x68292357e9b0b35e08861ccdb53290bdb92999c5",
+      "plasma_usd": 20000.0,
+      "umia_usd": 2000.0,
+      "ethos_usd": 1500.0,
+      "ethos_tx": "0x13f50b22d2807ec29fc55d53b9891aec883bff6392c8a2edb57c30f0e7bf3d4d",
+      "umia_tx": "0x159067f937eb0c05b1a975915247fcac16803022672d816c741c1f5a6331c940",
+      "plasma_tx": "0x91ece9f90ad3d535468325c92312a5f4ab2ac0faefa6a0c876949b31b17201a5"
+    },
+    {
+      "address": "0xd9c13d1badc0fe49b9eecb41299832ac42d08972",
+      "plasma_usd": 7756.535657,
+      "umia_usd": 5000.0,
+      "ethos_usd": 5000.0,
+      "ethos_tx": "0x8e412ac620907cdf8b202657102bb9ef57aa33ecabb57a081c8f9dc965a3b5d7",
+      "umia_tx": "0xbeb9c98c5c6e4d77d6322e6e075bc290a615a0c910bb652fe657092473b45b00",
+      "plasma_tx": "0x494b632286bf74857193b40f2eecfb195206bc9a944455d7e408d2d56fcc97ca"
+    },
+    {
+      "address": "0x42626409c93d8ab1c7bd69f2b5aa9f8d07ffed72",
+      "plasma_usd": 3957.900041,
+      "umia_usd": 5000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x8421679cb1f853972698ad84b8cae46937468e800ffb0d89d4f3897fb5712354",
+      "plasma_tx": "0x5cba9edef1c490bde0212af431cce791268ebd2f322fac4b4855b0705d91de0b"
+    },
+    {
+      "address": "0x81e0246a9dfc80779a36b89dcb15dad86bfe7ca5",
+      "plasma_usd": 92.958223,
+      "umia_usd": 382.196887,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xc6b51ac7f1a06f86efb9d77247473c61f13a4c975309f8a7cc4d7442455207e4",
+      "plasma_tx": "0xe054147b52ceeebb2848072039b296e09aaab634ad51a12c32e36202c3c22833"
+    }
+  ],
+  "triple": [
+    {
+      "address": "0x854f1269b659a727a2268ab86ff77cfb30bfb358",
+      "plasma_usd": 250000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 60000.0,
+      "ethos_tx": "0x48834a5177ef936beef300f8f4d25867810847715446e8d5d473d266f3ef4f99",
+      "umia_tx": "0x73e05177525aa1d6d7efc38c2dcd3271677d9c8b0eaf8c9cd977f298efe0de49",
+      "plasma_tx": "0x83d8152a57d10b21c73af6eddff349ca91bba61e55ea8453ce17dfe047dd543b"
+    },
+    {
+      "address": "0xf291b752351a19e81f7b8a40790d2bdbb53a957d",
+      "plasma_usd": 100000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 20000.0,
+      "ethos_tx": "0x5e355f989ad9b2237e9649a9fcba4a86de0e89a32434c6f6e8488a728f97617c",
+      "umia_tx": "0x619546eab69bdcdd35cc583344a540ffec2153d334ba4167b2c32790c4ade263",
+      "plasma_tx": "0x62c9bb1d882c15e91e73ed1dae47eebfc26f24932118fa125bc9278be95c9a49"
+    },
+    {
+      "address": "0xd9c13d1badc0fe49b9eecb41299832ac42d08972",
+      "plasma_usd": 7756.535657,
+      "umia_usd": 5000.0,
+      "ethos_usd": 5000.0,
+      "ethos_tx": "0x8e412ac620907cdf8b202657102bb9ef57aa33ecabb57a081c8f9dc965a3b5d7",
+      "umia_tx": "0xbeb9c98c5c6e4d77d6322e6e075bc290a615a0c910bb652fe657092473b45b00",
+      "plasma_tx": "0x494b632286bf74857193b40f2eecfb195206bc9a944455d7e408d2d56fcc97ca"
+    },
+    {
+      "address": "0x68292357e9b0b35e08861ccdb53290bdb92999c5",
+      "plasma_usd": 20000.0,
+      "umia_usd": 2000.0,
+      "ethos_usd": 1500.0,
+      "ethos_tx": "0x13f50b22d2807ec29fc55d53b9891aec883bff6392c8a2edb57c30f0e7bf3d4d",
+      "umia_tx": "0x159067f937eb0c05b1a975915247fcac16803022672d816c741c1f5a6331c940",
+      "plasma_tx": "0x91ece9f90ad3d535468325c92312a5f4ab2ac0faefa6a0c876949b31b17201a5"
+    }
+  ],
+  "plasma_top": [
+    {
+      "address": "0x790c42d632502949e72ab0981c2f0d2021141023",
+      "plasma_usd": 49999381.5,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0x4ef1d51d035a3522c0d082ff92d171e7fbccbc109f91c9c8483e131470469501",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x65e423596c75d70c8f40538f4e69d0ea1f01aca0",
+      "plasma_usd": 33500000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0x9b1f7b40426ff5e0b82626fdcea1bbefd03c405ff39721da4ee7dda29501f5c3",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x225864ad63ba66272cd6be3e65476a2eba48c215",
+      "plasma_usd": 23925070.018135,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0x3ce09a3d596bd690d6dfc82de65c571060b0fb92079d578532292861858f4214",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x2193a7b32fbf841db107958da6b1ce7c39503b9e",
+      "plasma_usd": 19999998.187052,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0x402e6a83313ce9c6ada468d2991b455e0248c2986af1fc1caba122837d6e60c5",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x8f1d4c62ae8598131b6062dc684e81ab390890bc",
+      "plasma_usd": 15151310.3408,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0x39f8f0da2323db2de311bbac8747ab766c1e7ee66d18ab1ae78995795c9bc3e2",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x643eee3ba339cd2e6ce7cf9aa59f039a66f779af",
+      "plasma_usd": 15000000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0x78fcfb6d9f16ab1c6ce366a77ba5f365bcfdae0992fa78c6798892902b20db7d",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0xb4fb31e7b1471a8e52dd1e962a281a732ead59c1",
+      "plasma_usd": 12499999.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0x08b2864f6875c6ed2398ede222d509fbfcd71ddf0c1e5fe90e414d89662b6124",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x15271757b398cd1d3d7cca05c4f7b0c159afa7c2",
+      "plasma_usd": 10169658.58,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0xa56a6dd2eb11d12fcee94f657ce51be9f49e7a4b9781fce2f463ae1d91e3f4dc",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x8484fbedae4e9b2e26df44b92cd5f81b71c8150e",
+      "plasma_usd": 10040349.993667,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0x5b736d20a30d10b6b6862e55940c0f391e593e2ae2f2ad376c044db977ccd4c0",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x997448a54a55684f8961af14990807cb04c2f916",
+      "plasma_usd": 10000091.5,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0x5e6e2448027fea4e00cc24ae806e9788862a2b7037038ef24b35675065962d10",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0xb1b33cee80c2fbdb975a62d1afcb64db1d574b85",
+      "plasma_usd": 10000000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0xabf2698edb1c8fe5a09d1861324d1c88365c16058b7a5db41e4fc79213b55daa",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x089563d1f7e3d20791d3f4224bae908952332c21",
+      "plasma_usd": 8000000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0xea1f18661c51fdc65e43d6c9b2fc2c670042ed0b569d99ee4dde528bb19d5f62",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x47a761bb9e970ac93cb571c4614c4ca643714e4f",
+      "plasma_usd": 7997000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0xaa3d87e0ac4210d2b2b06f5810b403a456a3214d7472ae89e6d0eb046aaebeb1",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0xbb226555fbb98850273b10b0cf55ad2f99966d20",
+      "plasma_usd": 7128817.205186,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0xb1407ed9e20181610813e166334665de94a02300f5ba067862f47304a4f6127f",
+      "in_ethos": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x503c03c94ff7f681b47b3978324d472832b635c6",
+      "plasma_usd": 7100000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": null,
+      "plasma_tx": "0xcf9b150d8014fb6a0fb79c3b4403291c55c2b76fa2b06dc04d4e40ecbeefdc88",
+      "in_ethos": false,
+      "in_umia": false
+    }
+  ],
+  "umia_top": [
+    {
+      "address": "0x5c0fcba97b0e63472663ee3ec23cb895cc96061f",
+      "plasma_usd": 0.0,
+      "umia_usd": 1200000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xda8c90202dec83f027fb2731c7d5f5d953279bfb08a8d59f0237d3e3d145a7da",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0x84c648c452e24cef85d4c5fbafe6cee4fd0bf9b3",
+      "plasma_usd": 0.0,
+      "umia_usd": 1000000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xaaaf03c703a681f57dc69fcff0a2b84707bae9324c42aba2232d94833099fef0",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0xe09726ff25f5001f37b15049f54116cb83d7d0fe",
+      "plasma_usd": 0.0,
+      "umia_usd": 150000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xaa4d4ae2cb8dedffad18f758d560c8673b142f48e63cd145e3753e3125498928",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0xaf0fdd39e5d92499b0ed9f68693da99c0ec1e92e",
+      "plasma_usd": 0.0,
+      "umia_usd": 125000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x5fb1cd41ab7af3ca214e1a45545a6a1e3d3a5c8f8dcfb9b6302924ae73cfd203",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0x9e987b8d387cb0bedefd9497b207e648144838cb",
+      "plasma_usd": 0.0,
+      "umia_usd": 100000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xe5d235f6037bda21fd59ae315947c01f9a04a35de6a49a587056870bb9878e26",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0x910d4abab5b2c84c09c253237b4a2231a27df173",
+      "plasma_usd": 0.0,
+      "umia_usd": 100000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x7e53f210d0eb2e9c79f19765d8ac1c7065352129f5f847fec1cc59c10bb2267a",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0x40b1e5818b449db3a7bb0fe482b5784f77fcd2c0",
+      "plasma_usd": 0.0,
+      "umia_usd": 60000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x4428c61e2107e85fa62711795f445a247ba57625d6a9352475af36fc1e12733f",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0x1c12d1f38f094cab50139aa253311fc77d2fb3b7",
+      "plasma_usd": 0.0,
+      "umia_usd": 55000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xbf14ce761440fdb9411740adff00b0ff58240abada192891255851230161b31a",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0x84d12c462c8e149e797368f8abd1296cea824ea9",
+      "plasma_usd": 0.0,
+      "umia_usd": 50000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xc53fd3b3c76101c7e3a349624147e29f569a80411299ee1cf43ce17da5b7c14c",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0x11d3e1c7f5906a50184d012ce2bdc1af2d515584",
+      "plasma_usd": 0.0,
+      "umia_usd": 50000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xcb289dda1ae43edd36734478c97d75233d25072cce96d7cd6dae242742e0b124",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0xb3b0658f238d6eb6b77e8f8b390e242208766241",
+      "plasma_usd": 0.0,
+      "umia_usd": 50000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x67fe45d016ac9d49127b5f6a81cf59cda0510e94ffced2efb912365152ca1f77",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0x9da1d5d852b1123352f4a078502201a44180f07d",
+      "plasma_usd": 0.0,
+      "umia_usd": 50000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x790f91dc2409a2a0b7791f8831a5c327453a8a36cdc4921cf8886c75f98504a5",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0x232fc7c631c69efa09b0043b3d82f4461f34e66e",
+      "plasma_usd": 0.0,
+      "umia_usd": 50000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0x0d13ca9ea7eedeefa524ff7bd0e91f7ee851897c0943226f595a72ab444f4bf8",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0x267b319ad923c86ed4d02b8c30471317cdb325cf",
+      "plasma_usd": 0.0,
+      "umia_usd": 50000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xffd9c6a45281dc0c80b260ac5fcecfa379e6cd7d4525c0b59c49b4c1f824c98e",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    },
+    {
+      "address": "0x5e740fce5e48237db5fc2646e25c20e96d72a197",
+      "plasma_usd": 0.0,
+      "umia_usd": 50000.0,
+      "ethos_usd": 0.0,
+      "ethos_tx": null,
+      "umia_tx": "0xbac5a9123fca6306a501a70b69c549affcd67146256e216dadfa4656bf042270",
+      "plasma_tx": null,
+      "in_ethos": false,
+      "in_plasma": false
+    }
+  ],
+  "ethos_top": [
+    {
+      "address": "0x0748594c6f6eda1bfa6a69675a518fa88ac0fc37",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 250069.0,
+      "ethos_tx": "0xd9ac7ed431a5738920c4481a2dc5fd043ec49a0fade014042bb85541d23c9915",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0xef9c453671d1143b73c659abee12e25824d8cd10",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 225000.0,
+      "ethos_tx": "0x8fd146919c4f40ca547f137f7c7d58b7a7d7c14aeb532b83c28d255f46e2a26f",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x2e3c95e73c6c0320c9895c921d39a392f0e6c5d9",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 215000.0,
+      "ethos_tx": "0xb17ff15bc399f4fbd1462ce9ea7fee7948155ab2a35a188b26917d6ccad0fd35",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x435789dc049163a07ef08450e8fc822094fa09d9",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 200000.0,
+      "ethos_tx": "0x2e4b4c0f775a2ae7ce8dc9110dfe1d313a4bd2cad72ac4aa7b33d44dee4e84b2",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0xbcd9872978ebbdfa71d081d1631672412fc07375",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 200000.0,
+      "ethos_tx": "0xfcdae8b0582f904c50de3a384c6edd7da49eb92122a5fc4e4155e62cfe6fa06b",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x73be99a9feb67c2789657f324bf807e9d37a39f8",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 199865.569287,
+      "ethos_tx": "0xba5a1e9d4649a717f8ae19e0d6a63b7694f579e388a41ec10d939e4a7e4cb520",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x5586d438be5920143c0f9b179835778fa81a544a",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 150000.0,
+      "ethos_tx": "0x410df2a9001a6e0594f5ccfb58cdf7af5a9047473747a6e9c677f292a2878bf1",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x759924e31d789ec9cbea3c598953c9f4375140af",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 120000.0,
+      "ethos_tx": "0x459045a5d6f739acb78ced445cde951e0b16ad6063db046ffda7011a6d6615ff",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x17826e6fbdff13b2ab252d7d9ce27c90b918e8a1",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 119200.0,
+      "ethos_tx": "0x57008522c4c8ff1358173bd752f88cdd33148b38d2f68535322fd5baa32b73e0",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0xb2580c5e3d49f9dc13508bc6cbc312619442c28c",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 103333.0,
+      "ethos_tx": "0xf97abb6d65cd54eb49a82476580fdc613ad39edfd79429613c045a17e49a449b",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x6b47f61b563a5faa745ad8cf7417e8a99c8118e0",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 101010.0,
+      "ethos_tx": "0xf500b3a80c2f9c182b5d30932535b7a1c669dcc6b89b661f609ed19672c52991",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x8c9b445cd44c8d45295c0352a8e55cce538eb6c9",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 100069.0,
+      "ethos_tx": "0x1b1819d40f076aa934df7d1dfd7a2057435a3ed6e96b2af2e921ddbf11019ae7",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0xc672604d798d8cbd0cf2cc654099f82bd02647ab",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 100000.834892,
+      "ethos_tx": "0x32fc07809ade8dea5f2496397a39a22230bde51ad7d2cd9d69550248400faf6f",
+      "umia_tx": "0xc7b1aaef10363188f353de622d0fcfbf32d03958dc569abe09c6d061f81945d6",
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": true
+    },
+    {
+      "address": "0xc72d57b880a988d120141f09328f7daef527a8b0",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 100000.0,
+      "ethos_tx": "0xad5ac071a9f316f97c10acb51a17d8799ed23e25bb3b5516b1b491a178b7705e",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0xd4b4cab5cf150f46448a8b312cf4d96521953c5f",
+      "plasma_usd": 0.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 100000.0,
+      "ethos_tx": "0xe7fa2baef7acfe2cf225076dca86df87203a93633e2ff76593c3ddb825b3f40c",
+      "umia_tx": "0x2e292e2fec96f64a20f9ecd75a988603eeab249077b7ba773b8d46e54c39460f",
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": true
+    },
+    {
+      "address": "0x722e895a12d2a11be99ed69dbc1fedbb9f3cd8fe",
+      "plasma_usd": 211524.160503,
+      "umia_usd": 0.0,
+      "ethos_usd": 100000.0,
+      "ethos_tx": "0xa87b611a189d56e2f00547f0f95adea8858e2cb881a242dce48e86718a80a32c",
+      "umia_tx": null,
+      "plasma_tx": "0x7ea1ace788c5448d5c1012d9711ec30bbaa933dae0d1b82d10813f81901f890d",
+      "in_plasma": true,
+      "in_umia": false
+    },
+    {
+      "address": "0x7ac34681f6aaeb691e150c43ee494177c0e2c183",
+      "plasma_usd": 540000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 100000.0,
+      "ethos_tx": "0x4b75f05b921dc2851c2486eec5de3b62e1c0bc1917d49e51b49cdf5951949f83",
+      "umia_tx": null,
+      "plasma_tx": "0xaf22d164f567f85276b83525e88d11439e6235e0aaf79537b9271dc0626ecc6e",
+      "in_plasma": true,
+      "in_umia": false
+    },
+    {
+      "address": "0xb1e5d3e6721a921ca4eae5778b961baeff01633d",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 100000.0,
+      "ethos_tx": "0x810bd8b9121bc9f09ed3375a8d446c4b4b36d7913216f48b9c467f7ba6f8940a",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    },
+    {
+      "address": "0x1bfc7b12b950a88371947eafe123126ea3d5314a",
+      "plasma_usd": 221038.35089,
+      "umia_usd": 0.0,
+      "ethos_usd": 99201.686418,
+      "ethos_tx": "0x24a8bfa799f5b7dec63582b7761fc629c4f1ecfacf6b7fca88785aacf1411ecb",
+      "umia_tx": null,
+      "plasma_tx": "0x84e8c23a00174ef04fcc3f793efbbba8cd497cf2572f3d34986cda86e2c960f8",
+      "in_plasma": true,
+      "in_umia": false
+    },
+    {
+      "address": "0x12b6d12a6b5d23804c94ec1e40e0df5e91bd0cc0",
+      "plasma_usd": 0.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 95000.007356,
+      "ethos_tx": "0x2bf06c81626d7f6da7199802d899d5cd9de41c61970d612823491bf3df7c6236",
+      "umia_tx": null,
+      "plasma_tx": null,
+      "in_plasma": false,
+      "in_umia": false
+    }
+  ],
+  "plasma_ge_100k_in_ethos": [
+    {
+      "address": "0x74d611c7fbf8bfe0737e0cd3f7a032246bd8a6d3",
+      "plasma_usd": 654432.08292,
+      "umia_usd": 0.0,
+      "ethos_usd": 25000.0,
+      "ethos_tx": "0x6d1ef1887f5a370cc2d14fa147ddb83cb9e752101950a8d9ef03079791c3c9eb",
+      "umia_tx": null,
+      "plasma_tx": "0x80de3e565fdaa0b132039cc5b68a2dea1461f0e7a56e8fbe104a6302d1ec2855"
+    },
+    {
+      "address": "0x7ac34681f6aaeb691e150c43ee494177c0e2c183",
+      "plasma_usd": 540000.0,
+      "umia_usd": 0.0,
+      "ethos_usd": 100000.0,
+      "ethos_tx": "0x4b75f05b921dc2851c2486eec5de3b62e1c0bc1917d49e51b49cdf5951949f83",
+      "umia_tx": null,
+      "plasma_tx": "0xaf22d164f567f85276b83525e88d11439e6235e0aaf79537b9271dc0626ecc6e"
+    },
+    {
+      "address": "0x854f1269b659a727a2268ab86ff77cfb30bfb358",
+      "plasma_usd": 250000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 60000.0,
+      "ethos_tx": "0x48834a5177ef936beef300f8f4d25867810847715446e8d5d473d266f3ef4f99",
+      "umia_tx": "0x73e05177525aa1d6d7efc38c2dcd3271677d9c8b0eaf8c9cd977f298efe0de49",
+      "plasma_tx": "0x83d8152a57d10b21c73af6eddff349ca91bba61e55ea8453ce17dfe047dd543b"
+    },
+    {
+      "address": "0x1bfc7b12b950a88371947eafe123126ea3d5314a",
+      "plasma_usd": 221038.35089,
+      "umia_usd": 0.0,
+      "ethos_usd": 99201.686418,
+      "ethos_tx": "0x24a8bfa799f5b7dec63582b7761fc629c4f1ecfacf6b7fca88785aacf1411ecb",
+      "umia_tx": null,
+      "plasma_tx": "0x84e8c23a00174ef04fcc3f793efbbba8cd497cf2572f3d34986cda86e2c960f8"
+    },
+    {
+      "address": "0x722e895a12d2a11be99ed69dbc1fedbb9f3cd8fe",
+      "plasma_usd": 211524.160503,
+      "umia_usd": 0.0,
+      "ethos_usd": 100000.0,
+      "ethos_tx": "0xa87b611a189d56e2f00547f0f95adea8858e2cb881a242dce48e86718a80a32c",
+      "umia_tx": null,
+      "plasma_tx": "0x7ea1ace788c5448d5c1012d9711ec30bbaa933dae0d1b82d10813f81901f890d"
+    },
+    {
+      "address": "0x8ea69d04c0c505d72199bfff991283bff3db194a",
+      "plasma_usd": 100001.271073,
+      "umia_usd": 0.0,
+      "ethos_usd": 400.0,
+      "ethos_tx": "0xa2339a0effd8c55082a0b2036a27da5335332981831a6eff29c8ba73f0bd44cd",
+      "umia_tx": null,
+      "plasma_tx": "0xef72ce52d329f5446f78c033d065bc44ed080b9523536a3ee661252c82675bc5"
+    },
+    {
+      "address": "0xf291b752351a19e81f7b8a40790d2bdbb53a957d",
+      "plasma_usd": 100000.0,
+      "umia_usd": 5000.0,
+      "ethos_usd": 20000.0,
+      "ethos_tx": "0x5e355f989ad9b2237e9649a9fcba4a86de0e89a32434c6f6e8488a728f97617c",
+      "umia_tx": "0x619546eab69bdcdd35cc583344a540ffec2153d334ba4167b2c32790c4ade263",
+      "plasma_tx": "0x62c9bb1d882c15e91e73ed1dae47eebfc26f24932118fa125bc9278be95c9a49"
+    }
+  ]
+}

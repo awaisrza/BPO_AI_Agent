@@ -399,9 +399,19 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 await self.push_frame(TTSSpeakFrame(reply))
                 return
 
-            # Short qualify asks: discard mid-synth "yes"/"okay" after play so they
-            # do not auto-answer the question the caller never heard.
-            self._discard_early_ack_after_play = len(reply.split()) <= 14
+            # Age asks only: discard mid-synth bare yes so it doesn't skip the number.
+            # Part A / decisions expect bare yes — never discard those.
+            from .conversation import State, _is_age_question
+
+            self._discard_early_ack_after_play = False
+            if (
+                self._engine.state == State.QUALIFY
+                and self._engine._pitch_confirmed
+                and self._engine._qualify_idx > 0
+                and len(reply.split()) <= 14
+            ):
+                current = self._engine._active_questions()[self._engine._qualify_idx - 1]
+                self._discard_early_ack_after_play = _is_age_question(current)
 
             self._call.begin_bot_reply(1)
             self._touch_activity()
@@ -454,9 +464,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         silent and STT queued mid-utterance dumped later as a rapid qualify burst.
         """
         self._touch_activity()
-        # After short qualify asks, drop bare mid-playback yes/okay/hello so they
-        # don't auto-answer a question the caller hasn't heard. Keep "Yes, I do"
-        # / age numbers (not early-ack-only).
+        # After AGE asks only: drop bare mid-playback yes/okay so they don't
+        # skip the number. On Part A / decisions, bare "yes" IS the answer —
+        # keep it (discarding caused silence until caller said "yes I have").
         if self._discard_early_ack_after_play and self._pending_is_early_ack_only():
             dropped = len(self._pending_caller_texts)
             self._pending_caller_texts.clear()
@@ -465,7 +475,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 from .call_trace import trace_call
 
                 trace_call(
-                    f"=== discarded {dropped} early-ack STT after qualify ask "
+                    f"=== discarded {dropped} early-ack STT after age ask "
                     "(waiting for real answer) ==="
                 )
         else:
@@ -661,11 +671,26 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         return 0
 
     def _pending_is_early_ack_only(self) -> bool:
-        """True when queued STT is only yes/okay/hello — not an age answer or real question."""
-        from .conversation import _extract_age_years
+        """True when queued STT is only yes/okay/hello — not an age answer or real question.
+
+        On yes/no qualify (Part A, decisions), bare "yes" is the real answer — return
+        False so playback does not discard it. Only age asks treat bare yes as noise.
+        """
+        from .conversation import State, _extract_age_years, _is_age_question
 
         if not self._pending_caller_texts:
             return False
+
+        # Part A / decisions / other yes-no: keep bare yes for the FSM.
+        if (
+            self._engine.state == State.QUALIFY
+            and self._engine._pitch_confirmed
+            and self._engine._qualify_idx > 0
+        ):
+            current = self._engine._active_questions()[self._engine._qualify_idx - 1]
+            if not _is_age_question(current):
+                return False
+
         for item in self._pending_caller_texts:
             if _is_cant_hear(item):
                 continue  # treat as noise — still play the scripted follow-up
