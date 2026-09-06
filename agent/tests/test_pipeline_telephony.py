@@ -40,6 +40,29 @@ def test_no_barge_in_for_short_yes():
     assert not should_telephony_barge_in("Yeah.", engine)
 
 
+def test_barge_in_for_yes_on_part_a():
+    from app.config import ScriptConfig
+    from app.conversation import ConversationEngine
+    from app.pipeline import should_telephony_barge_in
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare benefits.",
+        qualifying_questions=[
+            "Do you have Medicare Part A and Part B?",
+            "How old are you?",
+            "Do you make your own decisions?",
+        ],
+    )
+    engine = ConversationEngine(script=script)
+    engine.open()
+    engine.handle("I'm fine")
+    assert should_telephony_barge_in("Yes.", engine)
+    engine.handle("yes")
+    engine.handle("I am 82")
+    assert should_telephony_barge_in("Yes, I do.", engine)
+
+
 def test_no_barge_in_for_thank_you():
     engine = _medicare_engine()
     assert not should_telephony_barge_in("Thank you.", engine)

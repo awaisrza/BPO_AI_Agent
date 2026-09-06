@@ -425,7 +425,7 @@ def _lookup_vicidial_call_id(agent_user: str) -> str:
         "ORDER BY last_update_time DESC LIMIT 1;"
     )
     # AudioSocket can connect slightly before live_agents.callerid is written.
-    attempts = int(os.getenv("AI_FRONTER_VD_CALL_ID_LOOKUP_TRIES", "8") or "8")
+    attempts = int(os.getenv("AI_FRONTER_VD_CALL_ID_LOOKUP_TRIES", "20") or "20")
     for attempt in range(1, max(1, attempts) + 1):
         try:
             import subprocess
@@ -467,7 +467,7 @@ def _lookup_vicidial_call_id(agent_user: str) -> str:
         except Exception as exc:  # noqa: BLE001
             _log(f"ViciDial call ID lookup failed: {exc}")
             break
-        time.sleep(0.15)
+        time.sleep(0.25)
     return ""
 
 

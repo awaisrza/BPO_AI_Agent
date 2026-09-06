@@ -252,11 +252,29 @@ def _is_likely_bot_echo(text: str, bot_reply: str) -> bool:
     return False
 
 
+def engine_expects_yes_no_qualify_answer(engine: ConversationEngine) -> bool:
+    """True when FSM waits for yes/no (Part A, decisions, consent) — not age."""
+    from .conversation import State, _is_age_question
+
+    if engine.state != State.QUALIFY:
+        return False
+    if not engine._pitch_confirmed:
+        return True
+    if engine._qualify_idx <= 0:
+        return False
+    current = engine._active_questions()[engine._qualify_idx - 1]
+    return not _is_age_question(current)
+
+
 def should_telephony_barge_in(text: str, engine: ConversationEngine) -> bool:
     """Stop bot playback on PSTN when the caller asks a real question (KB or off-script)."""
     normalized = _normalize_caller_stt(text)
     if not _is_meaningful_caller_text(normalized):
         return False
+    # Part A / decisions / consent: accept yes mid-playback (long pitch or qualify Q).
+    if engine_expects_yes_no_qualify_answer(engine):
+        if _is_bare_yes_stt(normalized) or _is_yes_elaboration(normalized):
+            return True
     if _looks_like_question(normalized):
         return True
     return bool(engine._kb_only_answer(normalized))
@@ -305,6 +323,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._bot_audio_until: float = 0.0
         self._discard_early_ack_after_play = False
         self._direct_playback_cancel = asyncio.Event()
+        self._playback_fallback_task: asyncio.Task | None = None
 
     def _bot_reference_text(self) -> str:
         parts = [
@@ -319,16 +338,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
     def _expects_yes_no_qualify_answer(self) -> bool:
         """True when the FSM is waiting for yes/no (Part A, decisions, consent) — not age."""
-        from .conversation import State, _is_age_question
-
-        if self._engine.state != State.QUALIFY:
-            return False
-        if not self._engine._pitch_confirmed:
-            return True
-        if self._engine._qualify_idx <= 0:
-            return False
-        current = self._engine._active_questions()[self._engine._qualify_idx - 1]
-        return not _is_age_question(current)
+        return engine_expects_yes_no_qualify_answer(self._engine)
 
     def _maybe_stop_playback_for_qualify_yes(self, text: str) -> None:
         """Stop long joined pitch+Part A when caller says yes mid-playback."""
@@ -463,6 +473,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 if PIPECAT_AVAILABLE:
                     await self.push_frame(RtpKeepaliveStopFrame())
                 await self.push_frame(TTSSpeakFrame(reply))
+                self._schedule_pipeline_tts_playback_fallback(reply)
                 return
 
             # Age asks only: discard mid-synth bare yes so it doesn't skip the number.
@@ -511,11 +522,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     f"{reply[:72]!r} ==="
                 )
                 await self.push_frame(TTSSpeakFrame(reply))
+                self._schedule_pipeline_tts_playback_fallback(reply)
                 return
 
             await self._complete_direct_bot_playback()
             return
         await self.push_frame(TTSSpeakFrame(reply))
+        if self._telephony:
+            self._schedule_pipeline_tts_playback_fallback(reply)
 
     def _touch_activity(self) -> None:
         self.last_activity_monotonic = time.monotonic()
@@ -527,12 +541,37 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if self._telephony and PIPECAT_AVAILABLE:
             await self.push_frame(RtpKeepaliveStartFrame())
 
+    def _cancel_playback_fallback_task(self) -> None:
+        if self._playback_fallback_task and not self._playback_fallback_task.done():
+            self._playback_fallback_task.cancel()
+        self._playback_fallback_task = None
+
+    def _schedule_pipeline_tts_playback_fallback(self, reply: str) -> None:
+        """BSSF often never reaches this processor — flush queued yes after est. duration."""
+        if not PIPECAT_AVAILABLE:
+            return
+        self._cancel_playback_fallback_task()
+        words = max(1, len((reply or "").split()))
+        est_s = max(1.8, words * 0.38 + 0.55)
+
+        async def _fallback() -> None:
+            try:
+                await asyncio.sleep(est_s)
+                if self._call.can_accept_caller():
+                    return
+                await self._complete_direct_bot_playback()
+            except asyncio.CancelledError:
+                pass
+
+        self._playback_fallback_task = asyncio.create_task(_fallback())
+
     async def _complete_direct_bot_playback(self) -> None:
         """End direct bulk PCM the same way pipeline TTS ends (local BSSF handling).
 
         push_frame(BSSF, DOWNSTREAM) never reaches this processor — follow-ups stayed
         silent and STT queued mid-utterance dumped later as a rapid qualify burst.
         """
+        self._cancel_playback_fallback_task()
         self._touch_activity()
         # Playback is done — do not echo-drop queued yes/answers in the 0.55s tail.
         self._bot_audio_until = 0.0
@@ -606,12 +645,19 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         logger.info(f"Telephony barge-in — answering caller: {text[:64]!r}")
         self._cancel_flush_task()
         self._followup_reply = None
+        self._direct_playback_cancel.set()
         self._call.on_interruption()
         await self.push_frame(InterruptionFrame(), direction)
         await asyncio.sleep(0.05)
         self._call.finish_bot_playback()
         await self._start_telephony_keepalive()
-        await self._handle_caller(_normalize_caller_stt(text))
+        merged = text.strip()
+        if self._pending_caller_texts:
+            self._pending_caller_texts.append(merged)
+            collapsed = self._collapse_caller_queue()
+            if collapsed:
+                merged = collapsed
+        await self._handle_caller(_normalize_caller_stt(merged))
 
     def _maybe_barge_in_for_caller(self, text: str) -> bool:
         return self._telephony and should_telephony_barge_in(text, self._engine)
@@ -950,12 +996,15 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._followup_reply = followup or None
         if followup:
             logger.info(f"BOT follow-up queued: {followup[:64]!r}")
+        transfer_now = turn.action == Action.TRANSFER
+        if transfer_now and self._telephony and not self._mic_test:
+            await self._execute_transfer()
         await self._speak_bot_text(turn.reply)
 
-        if turn.action == Action.TRANSFER:
+        if transfer_now:
             if self._mic_test:
                 logger.info("MIC TEST -> qualified lead (warm transfer simulated)")
-            else:
+            elif not self._telephony:
                 await self._execute_transfer()
             if not self._telephony_phone_test:
                 await self.push_frame(EndFrame())
