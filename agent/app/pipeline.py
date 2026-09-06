@@ -517,11 +517,22 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 f"=== bot playback complete (direct) pending={len(self._pending_caller_texts)} "
                 f"followup={bool(self._followup_reply)} ==="
             )
-        if not PIPECAT_AVAILABLE:
+        # Always release the caller turn and flush queued yes/answers here.
+        # Relying only on BSSF left bare "yes" stuck after Part A / decisions.
+        if not self._call.can_accept_caller():
             self._call.finish_bot_playback()
-            self._move_pending_to_buffer()
-            if self._caller_buffer.strip():
-                self._schedule_caller_flush()
+        self._move_pending_to_buffer()
+        if self._caller_buffer.strip():
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(
+                    f"=== flushing queued caller after playback: "
+                    f"{self._caller_buffer[:80]!r} ==="
+                )
+            await self._flush_caller_buffer()
+            return
+        if not PIPECAT_AVAILABLE:
             return
         from pipecat.frames.frames import BotStoppedSpeakingFrame
         from pipecat.processors.frame_processor import FrameDirection
@@ -563,16 +574,19 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         return self._telephony and should_telephony_barge_in(text, self._engine)
 
     def _coerce_qualify_yes_stt(self, text: str) -> str:
-        """On Part A / decisions, collapse Whisper 'Yes, I have/do' to bare Yes."""
+        """Collapse Whisper 'Yes, I have/do' to bare Yes on pitch-ack / Part A / decisions."""
         from .conversation import State, _is_age_question
 
         if not text.strip():
             return text
-        if not (
-            self._engine.state == State.QUALIFY
-            and self._engine._pitch_confirmed
-            and self._engine._qualify_idx > 0
-        ):
+        if self._engine.state != State.QUALIFY:
+            return text
+        # Pre-consent (after pitch body): yes elaborations still count as consent.
+        if not self._engine._pitch_confirmed:
+            if _is_yes_elaboration(text):
+                return "Yes"
+            return text
+        if self._engine._qualify_idx <= 0:
             return text
         current = self._engine._active_questions()[self._engine._qualify_idx - 1]
         if _is_age_question(current):
@@ -692,9 +706,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             last_l = last.lower().rstrip(".!?")
             cleaned_l = cleaned.lower().rstrip(".!?")
             if cleaned_l in last_l or last_l in cleaned_l:
-                if _is_bare_yes_stt(last) and (
-                    _is_yes_elaboration(cleaned) or _is_bare_yes_stt(cleaned)
-                ):
+                # Only ignore real elaborations ("Yes, I have") — not duplicate bare yes
+                # (those still need a single queued Yes that will flush after playback).
+                if _is_bare_yes_stt(last) and _is_yes_elaboration(cleaned):
                     logger.info(
                         "STT kept bare yes — ignoring elaboration: "
                         f"{cleaned[:64]!r}"
@@ -706,6 +720,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                             f"=== STT kept bare yes (ignored elaboration "
                             f"{cleaned[:48]!r}) ==="
                         )
+                    return
+                if _is_bare_yes_stt(last) and _is_bare_yes_stt(cleaned):
+                    # Duplicate yes while bot speaking — keep one.
                     return
                 if _is_bare_yes_stt(cleaned) and _is_yes_elaboration(last):
                     # Prefer bare yes over a prior elaboration already queued.

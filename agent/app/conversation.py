@@ -562,21 +562,12 @@ class ConversationEngine:
                 questions.insert(0, embedded)
 
         questions = _ensure_part_a_first(questions, medicare=medicare)
-        # Statement pitch: speak lead + Part A/B (Q1) in ONE turn so STT cannot
-        # delay/skip the qualify ask (follow-up path was getting stolen by Okay/Hello).
+        # Telnyx-era: pitch body ONLY — wait for caller yes, then Part A via _next_qualifier.
+        # Joining pitch+Part A made bare "yes" unreliable (queued mid-pitch, then stuck).
         self._questions = questions
-        self._pitch_confirmed = True
-        if questions:
-            first = questions[0]
-            if not first.endswith("?"):
-                first = f"{first}?"
-            self._qualify_idx = 1
-            if first.lower() not in body.lower():
-                lead = body.rstrip(" .!?")
-                return self._speak_new(f"{lead}. {first}".strip())
-            return self._speak_new(body if body else first)
+        self._pitch_confirmed = False
         self._qualify_idx = 0
-        return self._speak_new(body)
+        return self._speak_new(body or self.script.pitch)
 
     def _objection_reply(self, utterance: str) -> str:
         if self.answer_offscript is not None:

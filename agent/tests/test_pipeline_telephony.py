@@ -57,8 +57,10 @@ def test_coerce_yes_i_have_on_part_a():
     )
     engine = ConversationEngine(script=script)
     engine.open()
-    engine.handle("ok")
+    engine.handle("ok")  # pitch ack pending (pre-consent)
     proc = FronterProcessor(engine, None, "6666", telephony=True)
+    assert proc._coerce_qualify_yes_stt("Yes, I have.") == "Yes"
+    engine.handle("yes")  # → Part A
     assert proc._coerce_qualify_yes_stt("Yes, I have.") == "Yes"
     assert proc._coerce_qualify_yes_stt("Yes.") == "Yes."
 
@@ -77,6 +79,7 @@ def test_queue_coerces_yes_i_have_to_bare_yes():
     engine = ConversationEngine(script=script)
     engine.open()
     engine.handle("ok")
+    engine.handle("yes")  # pitch → Part A
     proc = FronterProcessor(engine, None, "6666", telephony=True)
     proc._call.state = CallState.SPEAKING
     proc._queue_pending_caller_text("Yes.")
@@ -138,7 +141,8 @@ def test_bare_yes_kept_after_part_a_ask():
     )
     engine = ConversationEngine(script=script)
     engine.open()
-    engine.handle("I'm fine")  # joined pitch + Part A; qualify_idx=1
+    engine.handle("I'm fine")  # pitch only
+    engine.handle("Yes")  # → Part A
     assert engine._pitch_confirmed and engine._qualify_idx == 1
     proc = FronterProcessor(engine, None, "6666", telephony=True)
     proc._pending_caller_texts = ["Yes."]
@@ -164,6 +168,7 @@ def test_bare_yes_is_early_ack_on_age_ask():
     engine = ConversationEngine(script=script)
     engine.open()
     engine.handle("ok")
+    engine.handle("yes")  # pitch → Part A
     engine.handle("yes")  # Part A → age
     proc = FronterProcessor(engine, None, "6666", telephony=True)
     proc._pending_caller_texts = ["Yes."]
