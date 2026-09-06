@@ -45,8 +45,25 @@ def test_no_barge_in_for_thank_you():
     assert not should_telephony_barge_in("Thank you.", engine)
 
 
-def test_queue_keeps_bare_yes_over_elaboration():
-    """Whisper 'Yes.' then 'Yes, I have.' must not upgrade the queued answer."""
+def test_coerce_yes_i_have_on_part_a():
+    from app.config import ScriptConfig
+    from app.conversation import ConversationEngine
+    from app.pipeline import FronterProcessor
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare benefits.",
+        qualifying_questions=["Do you have Medicare Part A and Part B?", "How old are you?"],
+    )
+    engine = ConversationEngine(script=script)
+    engine.open()
+    engine.handle("ok")
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    assert proc._coerce_qualify_yes_stt("Yes, I have.") == "Yes"
+    assert proc._coerce_qualify_yes_stt("Yes.") == "Yes."
+
+
+def test_queue_coerces_yes_i_have_to_bare_yes():
     from app.config import ScriptConfig
     from app.conversation import ConversationEngine
     from app.pipeline import FronterProcessor
@@ -59,7 +76,7 @@ def test_queue_keeps_bare_yes_over_elaboration():
     )
     engine = ConversationEngine(script=script)
     engine.open()
-    engine.handle("ok")  # on Part A
+    engine.handle("ok")
     proc = FronterProcessor(engine, None, "6666", telephony=True)
     proc._call.state = CallState.SPEAKING
     proc._queue_pending_caller_text("Yes.")

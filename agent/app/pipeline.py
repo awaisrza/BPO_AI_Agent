@@ -121,10 +121,20 @@ def _is_yes_elaboration(text: str) -> bool:
         return False
     if not t.startswith(("yes", "yeah", "yep", "sure")):
         return False
+    # Match 'have' / 'i do' even with odd comma spacing from Whisper.
+    compact = t.replace(",", " ")
     return any(
-        marker in t
-        for marker in (" have", " i've", " i got", " i do", " i make", " already")
-    )
+        marker in compact
+        for marker in (
+            " have",
+            " i have",
+            " i've",
+            " i got",
+            " i do",
+            " i make",
+            " already",
+        )
+    ) or compact.endswith(" have")
 
 
 def _normalize_caller_stt(text: str) -> str:
@@ -552,6 +562,25 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     def _maybe_barge_in_for_caller(self, text: str) -> bool:
         return self._telephony and should_telephony_barge_in(text, self._engine)
 
+    def _coerce_qualify_yes_stt(self, text: str) -> str:
+        """On Part A / decisions, collapse Whisper 'Yes, I have/do' to bare Yes."""
+        from .conversation import State, _is_age_question
+
+        if not text.strip():
+            return text
+        if not (
+            self._engine.state == State.QUALIFY
+            and self._engine._pitch_confirmed
+            and self._engine._qualify_idx > 0
+        ):
+            return text
+        current = self._engine._active_questions()[self._engine._qualify_idx - 1]
+        if _is_age_question(current):
+            return text
+        if _is_yes_elaboration(text):
+            return "Yes"
+        return text
+
     def _merge_transcripts(self, prev: str, new: str) -> str:
         prev_s, new_s = prev.strip(), new.strip()
         if not prev_s:
@@ -583,6 +612,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         return f"{prev_s} {new_s}"
 
     def _buffer_caller_text(self, text: str) -> None:
+        text = self._coerce_qualify_yes_stt(text)
         if not text.strip():
             return
         self._caller_buffer = self._merge_transcripts(self._caller_buffer, text)
@@ -634,7 +664,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     def _queue_pending_caller_text(self, text: str) -> None:
         if not _is_meaningful_caller_text(text):
             return
-        cleaned = text.strip()
+        cleaned = self._coerce_qualify_yes_stt(text.strip())
         if not cleaned:
             return
         if self._should_drop_stt_as_echo(cleaned):
@@ -662,7 +692,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             last_l = last.lower().rstrip(".!?")
             cleaned_l = cleaned.lower().rstrip(".!?")
             if cleaned_l in last_l or last_l in cleaned_l:
-                if _is_bare_yes_stt(last) and _is_yes_elaboration(cleaned):
+                if _is_bare_yes_stt(last) and (
+                    _is_yes_elaboration(cleaned) or _is_bare_yes_stt(cleaned)
+                ):
                     logger.info(
                         "STT kept bare yes — ignoring elaboration: "
                         f"{cleaned[:64]!r}"
@@ -673,6 +705,17 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                         trace_call(
                             f"=== STT kept bare yes (ignored elaboration "
                             f"{cleaned[:48]!r}) ==="
+                        )
+                    return
+                if _is_bare_yes_stt(cleaned) and _is_yes_elaboration(last):
+                    # Prefer bare yes over a prior elaboration already queued.
+                    self._pending_caller_texts[-1] = cleaned
+                    if self._telephony:
+                        from .call_trace import trace_call
+
+                        trace_call(
+                            f"=== STT replaced elaboration with bare yes: "
+                            f"{cleaned[:48]!r} ==="
                         )
                     return
                 if len(cleaned) > len(last):
@@ -691,6 +734,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             from .call_trace import trace_call
 
             trace_call(f"=== STT queued (bot speaking): {cleaned[:80]!r} ===")
+            if text.strip() != cleaned:
+                trace_call(
+                    f"=== STT coerced qualify yes: {text.strip()[:48]!r} → {cleaned!r} ==="
+                )
 
     def _utterance_priority(self, item: str) -> int:
         # Prefer real answers (age / yes) over "What?" / "Hello?" when several STT fragments queued.
@@ -802,10 +849,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         next_text = self._collapse_caller_queue()
         if not next_text:
             return
-        self._caller_buffer = next_text
+        # Never overwrite a buffered bare yes with a later elaboration fragment.
+        if self._caller_buffer.strip():
+            self._caller_buffer = self._merge_transcripts(self._caller_buffer, next_text)
+        else:
+            self._caller_buffer = next_text
 
     async def _handle_caller(self, text: str) -> None:
-        text = _normalize_caller_stt(text)
+        text = self._coerce_qualify_yes_stt(_normalize_caller_stt(text))
         self._call.close_user_turn()
         self._call.on_processing()
         await self._start_telephony_keepalive()
