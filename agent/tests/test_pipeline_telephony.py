@@ -234,6 +234,33 @@ def test_bare_yes_not_echo_dropped_during_part_a_tail():
     assert proc2._should_drop_stt_as_echo("Yes.")
 
 
+def test_early_yes_stops_playback_during_part_a():
+    from app.config import ScriptConfig
+    from app.conversation import ConversationEngine
+    from app.pipeline import FronterProcessor
+    from app.speech_renderer import CallState
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=[
+            "Do you have Medicare Part A and Part B?",
+            "How old are you?",
+        ],
+    )
+    engine = ConversationEngine(script=script)
+    engine.open()
+    engine.handle("I'm fine")
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc._call.state = CallState.PROCESSING
+    assert not proc._direct_playback_cancel.is_set()
+    proc._queue_pending_caller_text("Yes.")
+    assert proc._direct_playback_cancel.is_set()
+
+
 def test_merge_age_fragments():
     from app.pipeline import FronterProcessor
 

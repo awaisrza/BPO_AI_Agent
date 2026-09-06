@@ -304,6 +304,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._telephony_direct_media = False
         self._bot_audio_until: float = 0.0
         self._discard_early_ack_after_play = False
+        self._direct_playback_cancel = asyncio.Event()
 
     def _bot_reference_text(self) -> str:
         parts = [
@@ -328,6 +329,21 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return False
         current = self._engine._active_questions()[self._engine._qualify_idx - 1]
         return not _is_age_question(current)
+
+    def _maybe_stop_playback_for_qualify_yes(self, text: str) -> None:
+        """Stop long joined pitch+Part A when caller says yes mid-playback."""
+        if not (
+            self._expects_yes_no_qualify_answer()
+            and (_is_bare_yes_stt(text) or _is_yes_elaboration(text))
+        ):
+            return
+        self._direct_playback_cancel.set()
+        if self._telephony:
+            from .call_trace import trace_call
+
+            trace_call(
+                f"=== early yes on qualify — stopping bot playback ({text[:48]!r}) ==="
+            )
 
     def _should_drop_stt_as_echo(self, text: str) -> bool:
         """Drop bot-loopback / Whisper phantoms so fake 'Thank you' never advances the script."""
@@ -402,6 +418,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             # while STT queued, then a qualify burst on BSSF.
             self._call.on_processing()
             self._touch_activity()
+            self._direct_playback_cancel.clear()
 
             chunks = render_speech_telephony(
                 reply, max_words=settings.telephony_utterance_max_words
@@ -413,6 +430,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             prepared: list[tuple[str, bytes]] = []
             for chunk in chunks:
+                if self._direct_playback_cancel.is_set():
+                    break
                 line = chunk.text.strip()
                 if not line:
                     continue
@@ -467,6 +486,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             sent_any = False
             for line, pcm in prepared:
+                if self._direct_playback_cancel.is_set():
+                    break
                 duration_ms = await send_direct_bulk_pcm(
                     self._telephony_send_json,
                     pcm,
@@ -479,10 +500,12 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     continue
                 self._mark_bot_audio_window(duration_ms)
                 await asyncio.sleep(duration_ms / 1000.0)
+                if self._direct_playback_cancel.is_set():
+                    break
                 trace_call(f"=== direct reply sent (~{duration_ms}ms): {line[:72]!r} ===")
                 sent_any = True
 
-            if not sent_any:
+            if not sent_any and not self._direct_playback_cancel.is_set():
                 trace_call(
                     f"=== WARNING: direct PCM send failed — pipeline TTS: "
                     f"{reply[:72]!r} ==="
@@ -754,6 +777,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                             f"=== STT replaced elaboration with bare yes: "
                             f"{cleaned[:48]!r} ==="
                         )
+                    self._maybe_stop_playback_for_qualify_yes(cleaned)
                     return
                 if len(cleaned) > len(last):
                     self._pending_caller_texts[-1] = cleaned
@@ -775,6 +799,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 trace_call(
                     f"=== STT coerced qualify yes: {text.strip()[:48]!r} → {cleaned!r} ==="
                 )
+        self._maybe_stop_playback_for_qualify_yes(cleaned)
 
     def _utterance_priority(self, item: str) -> int:
         # Prefer real answers (age / yes) over "What?" / "Hello?" when several STT fragments queued.
