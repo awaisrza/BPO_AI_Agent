@@ -324,6 +324,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._discard_early_ack_after_play = False
         self._direct_playback_cancel = asyncio.Event()
         self._playback_fallback_task: asyncio.Task | None = None
+        self._greeting_pcm_sent = False
+        self._greeting_playing = False
 
     def _bot_reference_text(self) -> str:
         parts = [
@@ -623,6 +625,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
     async def on_direct_greeting_complete(self) -> None:
         """Opening line played via direct bulk PCM — match normal TTS end-of-playback."""
+        self._greeting_playing = False
         logger.info("Direct bulk greeting finished — releasing caller turn")
         # Drop STT captured during the greeting (echo of our own voice) so we do not
         # jump straight into the pitch without hearing the caller.
@@ -964,6 +967,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._caller_buffer = next_text
 
     async def _handle_caller(self, text: str) -> None:
+        if self._greeting_playing:
+            logger.info(f"STT held during greeting playback: {text[:64]!r}")
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(f"=== STT held (greeting playing): {text[:80]!r} ===")
+            return
         text = self._coerce_qualify_yes_stt(_normalize_caller_stt(text))
         self._call.close_user_turn()
         self._call.on_processing()
@@ -1141,6 +1151,12 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
 
         if isinstance(frame, StartFrame):
+            # ViciDial plays greeting via direct bulk PCM — pipeline TTS here overlaps
+            # with that path and callers hear greeting + pitch at once.
+            if self._telephony and self._telephony_direct_media:
+                self._call.state = CallState.LISTENING
+                await self.push_frame(frame, direction)
+                return
             if not self._opened:
                 self._opened = True
                 self._call.state = CallState.LISTENING

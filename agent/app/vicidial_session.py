@@ -529,15 +529,19 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             call_id_poll_task = asyncio.create_task(_poll_call_id())
 
         async def _send_greeting_pcm(*, mark_opened: bool, label: str) -> bool:
-            if shutdown.done or fronter is None or fronter._opened:
+            if shutdown.done or fronter is None:
                 return False
-
-            opening = fronter._engine.open()
-            # Claim before send so StartFrame cannot race a second TTSSpeakFrame.
+            if fronter._greeting_pcm_sent:
+                return False
+            # Claim before any await — StartFrame must not also queue pipeline TTS.
+            fronter._greeting_pcm_sent = True
+            fronter._greeting_playing = True
             if mark_opened:
                 fronter._opened = True
                 fronter._touch_activity()
                 fronter._call.begin_bot_reply(1)
+
+            opening = fronter._engine.open()
 
             tts_src = tts_for_cleanup or next(
                 (p for p in pipeline.processors if getattr(p, "_cache", None) is not None),
@@ -553,6 +557,8 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                     greeting_single_chunk=settings.telephony_greeting_single_chunk,
                 )
             if not pcm:
+                fronter._greeting_pcm_sent = False
+                fronter._greeting_playing = False
                 if mark_opened:
                     fronter._opened = False
                     fronter._call.finish_bot_playback()
@@ -592,7 +598,7 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             """Backup if immediate greeting did not run (StartFrame still stuck)."""
             try:
                 await asyncio.sleep(_GREETING_KICK_DELAY_S)
-                if shutdown.done or fronter is None or fronter._opened:
+                if shutdown.done or fronter is None or fronter._greeting_pcm_sent:
                     return
                 _event(
                     f"=== StartFrame delayed >{_GREETING_KICK_DELAY_S:.0f}s — kicking greeting ==="
