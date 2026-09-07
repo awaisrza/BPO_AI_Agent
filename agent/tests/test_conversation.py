@@ -186,6 +186,27 @@ def test_greeting_ack_does_not_advance_qualify():
     assert turn.reply == "Do you own your home?"
 
 
+def test_pitch_blocked_until_greeting_playback_done():
+    from app.conversation import ConversationEngine, State
+    from app.config import ScriptConfig
+
+    e = ConversationEngine(
+        script=ScriptConfig(
+            greeting="Hi, how are you?",
+            pitch="Medicare benefits review.",
+            qualifying_questions=["Do you have Part A and B?"],
+        )
+    )
+    e.begin_telephony_greeting()
+    e.open()
+    assert e.state == State.PITCH
+    held = e.handle("Okay.")
+    assert held.reply == ""
+    e.mark_greeting_playback_done()
+    pitch = e.handle("I'm fine.")
+    assert "Medicare" in pitch.reply or "Part A" in pitch.reply
+
+
 def test_loose_positive_does_not_skip_qualifiers():
     e = make_engine()
     e.open()

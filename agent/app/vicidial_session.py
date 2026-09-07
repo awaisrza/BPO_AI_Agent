@@ -536,6 +536,7 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             # Claim before any await — StartFrame must not also queue pipeline TTS.
             fronter._greeting_pcm_sent = True
             fronter._greeting_playing = True
+            fronter._engine.begin_telephony_greeting()
             if mark_opened:
                 fronter._opened = True
                 fronter._touch_activity()

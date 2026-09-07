@@ -359,6 +359,8 @@ class ConversationEngine:
     _unclear_at_qualify: int = 0
     _answered_kb_pre_consent: bool = False
     _pending_followup: str = ""
+    # Telephony: False until direct greeting PCM finishes — blocks pitch on echo STT.
+    _greeting_playback_done: bool = True
     _short_prompt: str = "Just a quick yes or no — do you have a moment?"
     # Active qualify list for this call (may prepend Part A stripped from pitch).
     _questions: list[str] = field(default_factory=list)
@@ -373,6 +375,14 @@ class ConversationEngine:
         line = (text or "").strip()
         if line:
             self._pending_followup = line
+
+    def mark_greeting_playback_done(self) -> None:
+        """Call after greeting audio finishes (ViciDial direct PCM)."""
+        self._greeting_playback_done = True
+
+    def begin_telephony_greeting(self) -> None:
+        """Reset greeting gate before playing opening line on PSTN."""
+        self._greeting_playback_done = False
 
     def _active_questions(self) -> list[str]:
         return self._questions or list(self.script.qualifying_questions)
@@ -619,6 +629,8 @@ class ConversationEngine:
         is_question = intent == Intent.QUESTION or bool(self._kb_only_answer(utterance))
 
         if self.state == State.PITCH:
+            if not self._greeting_playback_done:
+                return Turn("", Action.SPEAK)
             if is_question:
                 if self._pitch_kb_answers >= self._max_pitch_kb_answers:
                     return self._deliver_pitch()

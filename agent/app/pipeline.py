@@ -411,6 +411,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         reply = (text or "").strip()
         if not reply:
             return
+        if self._greeting_playing:
+            logger.info("Skipping bot speak during greeting playback")
+            return
         if (
             self._telephony_direct_media
             and self._telephony_send_json is not None
@@ -432,9 +435,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._touch_activity()
             self._direct_playback_cancel.clear()
 
-            chunks = render_speech_telephony(
-                reply, max_words=settings.telephony_utterance_max_words
-            )
+            if settings.telephony_single_utterance:
+                from .speech_renderer import SpeechChunk
+
+                chunks = [SpeechChunk(text=reply, pause_after_ms=0)]
+            else:
+                chunks = render_speech_telephony(
+                    reply, max_words=settings.telephony_utterance_max_words
+                )
             if not chunks:
                 from .speech_renderer import SpeechChunk
 
@@ -498,6 +506,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 await self.push_frame(RtpKeepaliveStopFrame())
 
             sent_any = False
+            if settings.telephony_single_utterance and len(prepared) > 1:
+                combined_pcm = b"".join(pcm for _, pcm in prepared)
+                prepared = [(reply, combined_pcm)]
             for line, pcm in prepared:
                 if self._direct_playback_cancel.is_set():
                     break
@@ -626,6 +637,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     async def on_direct_greeting_complete(self) -> None:
         """Opening line played via direct bulk PCM — match normal TTS end-of-playback."""
         self._greeting_playing = False
+        self._engine.mark_greeting_playback_done()
         logger.info("Direct bulk greeting finished — releasing caller turn")
         # Drop STT captured during the greeting (echo of our own voice) so we do not
         # jump straight into the pitch without hearing the caller.
@@ -996,6 +1008,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 return
 
         turn = self._engine.handle(text)
+        if not (turn.reply or "").strip() and turn.action == Action.SPEAK:
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(
+                    f"=== FSM held (waiting for greeting): {text[:80]!r} ==="
+                )
+            return
         spoken = render_speech(turn.reply)
         logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")
         if self._telephony:
