@@ -350,11 +350,11 @@ def _send_telnyx_handshake(
 
 
 def _looks_like_vicidial_call_id(value: str) -> bool:
-    """ViciDial remote-agent call IDs start with V or Y and are ~20 chars."""
+    """ViciDial call IDs start with M, V, or Y and are ~20 chars."""
     token = (value or "").strip()
     if len(token) < 12:
         return False
-    return token[0] in ("V", "Y") and token[1:].replace("-", "").isalnum()
+    return token[0] in ("M", "V", "Y") and token[1:].replace("-", "").isalnum()
 
 
 def _read_vicidial_call_id_file(agent_user: str) -> str:

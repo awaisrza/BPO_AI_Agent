@@ -1049,6 +1049,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 from .call_trace import trace_call
 
                 trace_call(f"=== ViciDial call id resolved via API: {resolved} ===")
+        elif self._telephony:
+            from .call_trace import trace_call
+
+            trace_call(
+                "=== WARNING: vicidial_call_id API lookup failed — "
+                "check dashboard ViciDial URL/creds and API user level 7+ ==="
+            )
         return self._vicidial_call_id
 
     async def _execute_transfer(self) -> None:

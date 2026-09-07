@@ -72,7 +72,7 @@ def _looks_like_vicidial_call_id(value: str) -> bool:
     token = (value or "").strip()
     if len(token) < 12:
         return False
-    return token[0] in ("V", "Y") and token[1:].replace("-", "").isalnum()
+    return token[0] in ("M", "V", "Y") and token[1:].replace("-", "").isalnum()
 
 
 def _extract_vicidial_call_id(cd: dict[str, Any]) -> str | None:
