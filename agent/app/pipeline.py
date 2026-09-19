@@ -345,6 +345,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._greeting_playing = False
         self._synth_guard_task: asyncio.Task | None = None
         self._joined_pitch_pcm: tuple[str, bytes] | None = None
+        self._pitch_pcm_ready = asyncio.Event()
+        self._prefetch_lock = asyncio.Lock()
 
     def _bot_reference_text(self) -> str:
         parts = [
@@ -557,36 +559,65 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         return prepared
 
     async def prefetch_joined_pitch_pcm(self) -> None:
-        """Pre-synthesize joined pitch+Part A while caller listens after greeting."""
+        """Pre-synthesize joined pitch+Part A (background; do not block greeting)."""
         if self._telephony_tts is None:
             return
-        preview = self._engine.joined_pitch_reply_preview().strip()
-        if not preview:
+        if self._joined_pitch_pcm:
+            self._pitch_pcm_ready.set()
             return
+        async with self._prefetch_lock:
+            if self._joined_pitch_pcm:
+                self._pitch_pcm_ready.set()
+                return
+            preview = self._engine.joined_pitch_reply_preview().strip()
+            if not preview:
+                return
+            if self._telephony:
+                from .call_trace import trace_call
 
-        try:
-            prepared = await asyncio.to_thread(
-                self._build_direct_pcm_prepared, preview
-            )
-            if not prepared:
+                trace_call("=== pre-warm joined pitch begin ===")
+            try:
+                prepared = await asyncio.to_thread(
+                    self._build_direct_pcm_prepared, preview
+                )
+                if not prepared:
+                    if self._telephony:
+                        from .call_trace import trace_call
+
+                        trace_call(
+                            "=== WARNING: pre-warm joined pitch produced no PCM ==="
+                        )
+                    return
+                pcm = b"".join(chunk for _, chunk in prepared)
+                self._joined_pitch_pcm = (preview, pcm)
+                self._pitch_pcm_ready.set()
                 if self._telephony:
                     from .call_trace import trace_call
 
                     trace_call(
-                        "=== WARNING: pre-warm joined pitch produced no PCM ==="
+                        f"=== pre-warmed joined pitch PCM ({len(preview)} chars, "
+                        f"{len(pcm)} bytes) ==="
                     )
-                return
-            pcm = b"".join(chunk for _, chunk in prepared)
-            self._joined_pitch_pcm = (preview, pcm)
+            except Exception as exc:
+                logger.warning(f"Joined pitch pre-warm failed: {exc}")
+
+    async def _wait_for_joined_pitch_pcm(self, reply: str, *, timeout_s: float = 12.0) -> None:
+        preview = self._engine.joined_pitch_reply_preview().strip()
+        if reply.strip() != preview or self._joined_pitch_pcm:
+            return
+        if not self._pitch_pcm_ready.is_set():
+            asyncio.create_task(self.prefetch_joined_pitch_pcm())
+        try:
+            await asyncio.wait_for(self._pitch_pcm_ready.wait(), timeout=timeout_s)
+        except asyncio.TimeoutError:
             if self._telephony:
                 from .call_trace import trace_call
 
                 trace_call(
-                    f"=== pre-warmed joined pitch PCM ({len(preview)} chars, "
-                    f"{len(pcm)} bytes) ==="
+                    f"=== WARNING: joined pitch PCM not ready after {timeout_s:.0f}s "
+                    "— synthesizing on speak ==="
                 )
-        except Exception as exc:
-            logger.warning(f"Joined pitch pre-warm failed: {exc}")
+            await self.prefetch_joined_pitch_pcm()
 
     async def _speak_bot_text(self, text: str) -> bool:
         """Play bot reply — direct bulk PCM on ViciDial, else pipeline TTS."""
@@ -613,6 +644,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._call.on_processing()
             self._touch_activity()
             self._direct_playback_cancel.clear()
+            await self._wait_for_joined_pitch_pcm(reply)
             stored = self._joined_pitch_pcm
             if stored and stored[0].strip() == reply.strip():
                 prepared = [(reply, stored[1])]
@@ -862,15 +894,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             trace_call(
                 f"=== greeting done — discarded {dropped} echo STT fragment(s); waiting for caller ==="
             )
-        try:
-            await asyncio.wait_for(self.prefetch_joined_pitch_pcm(), timeout=25.0)
-        except asyncio.TimeoutError:
-            if self._telephony:
-                from .call_trace import trace_call
+        if self._telephony:
+            from .call_trace import trace_call
 
-                trace_call(
-                    "=== WARNING: joined pitch pre-warm timed out (25s) ==="
-                )
+            trace_call("=== greeting done — opening caller turn (keepalive on) ===")
+        await self._start_telephony_keepalive(direct_silence=True)
+        if not self._joined_pitch_pcm:
+            asyncio.create_task(self.prefetch_joined_pitch_pcm())
         await self._complete_direct_bot_playback()
 
     async def _interrupt_and_handle_caller(self, text: str, direction) -> None:  # type: ignore[no-untyped-def]
