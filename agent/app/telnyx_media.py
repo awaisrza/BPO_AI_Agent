@@ -195,6 +195,28 @@ def _synthesize_greeting_line(line: str) -> bytes | None:
     return _synthesize_line(line, tts=None)
 
 
+async def send_direct_silence_keepalive(
+    send_json: SendJson,
+    *,
+    duration_ms: int = 1200,
+    sample_rate: int = TELEPHONY_PIPELINE_RATE,
+    encoding: str = "PCMU",
+) -> None:
+    """One bulk silence message so the bridge does not drop the call after direct PCM."""
+    from .speech_renderer import silence_pcm
+
+    pcm = silence_pcm(max(200, duration_ms), sample_rate)
+    if not pcm:
+        return
+    await send_direct_bulk_pcm(
+        send_json,
+        pcm,
+        sample_rate=sample_rate,
+        encoding=encoding,
+        pace=False,
+    )
+
+
 async def send_direct_bulk_pcm(
     send_json: SendJson,
     pcm: bytes,

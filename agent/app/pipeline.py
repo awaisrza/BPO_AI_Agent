@@ -626,9 +626,27 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     def _call_live(self) -> bool:
         return self._is_call_active is None or self._is_call_active()
 
-    async def _start_telephony_keepalive(self) -> None:
+    async def _start_telephony_keepalive(self, *, direct_silence: bool = False) -> None:
         if self._telephony and PIPECAT_AVAILABLE:
             await self.push_frame(RtpKeepaliveStartFrame())
+        if (
+            direct_silence
+            and self._telephony_direct_media
+            and self._telephony_send_json is not None
+        ):
+            from .telnyx_media import send_direct_silence_keepalive
+
+            try:
+                await send_direct_silence_keepalive(
+                    self._telephony_send_json,
+                    encoding=self._telephony_encoding,
+                )
+                if self._telephony:
+                    from .call_trace import trace_call
+
+                    trace_call("=== telephony direct silence keepalive sent ===")
+            except Exception as exc:
+                logger.warning(f"Direct silence keepalive failed: {exc}")
 
     def _cancel_playback_fallback_task(self) -> None:
         if self._playback_fallback_task and not self._playback_fallback_task.done():
@@ -680,7 +698,6 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 )
         else:
             self._discard_early_ack_after_play = False
-        await self._start_telephony_keepalive()
         if self._telephony:
             from .call_trace import trace_call
 
@@ -692,6 +709,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         # Relying only on BSSF left bare "yes" stuck after Part A / decisions.
         if not self._call.can_accept_caller():
             self._call.finish_bot_playback()
+        await self._start_telephony_keepalive(direct_silence=True)
         self._move_pending_to_buffer()
         buf = self._caller_buffer.strip()
         self._schedule_post_playback_listen(buffer_text=buf)
@@ -1278,7 +1296,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             # ViciDial plays greeting via direct bulk PCM — pipeline TTS here overlaps
             # with that path and callers hear greeting + pitch at once.
             if self._telephony and self._telephony_direct_media:
-                self._call.state = CallState.LISTENING
+                # Do not clobber SPEAKING while greeting PCM is on the wire.
+                if not self._greeting_playing and self._call.state == CallState.IDLE:
+                    self._call.on_listening()
                 await self.push_frame(frame, direction)
                 return
             if not self._opened:
