@@ -163,6 +163,23 @@ class Settings(BaseModel):
             os.getenv("TELEPHONY_GREETING_STARTUP_TIMEOUT_S", "30") or "30"
         )
     )
+    # Turn-taking latency (seconds) — lower = snappier; too low brings back echo/false STT.
+    telephony_post_playback_listen_s: float = Field(
+        default_factory=lambda: float(
+            os.getenv("TELEPHONY_POST_PLAYBACK_LISTEN_S", "0.22") or "0.22"
+        )
+    )
+    telephony_caller_flush_delay_s: float = Field(
+        default_factory=lambda: float(
+            os.getenv("TELEPHONY_CALLER_FLUSH_DELAY_S", "0.10") or "0.10"
+        )
+    )
+    telephony_vad_stop_secs: float = Field(
+        default_factory=lambda: float(os.getenv("TELEPHONY_VAD_STOP_SECS", "0.38") or "0.38")
+    )
+    telephony_echo_tail_s: float = Field(
+        default_factory=lambda: float(os.getenv("TELEPHONY_ECHO_TAIL_S", "0.42") or "0.42")
+    )
 
     vicidial_base_url: str = Field(default_factory=lambda: os.getenv("VICIDIAL_BASE_URL", ""))
     vicidial_user: str = Field(default_factory=lambda: os.getenv("VICIDIAL_API_USER", ""))

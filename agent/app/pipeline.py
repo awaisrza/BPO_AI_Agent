@@ -324,11 +324,15 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._followup_reply: str | None = None
         self._caller_buffer: str = ""
         self._flush_task: asyncio.Task | None = None
-        # Short flush after VAD end; slightly longer so full PSTN answers land in one segment.
-        self._caller_flush_delay_s = 0.22 if (telephony or telephony_phone_test) else 0.75
+        if telephony or telephony_phone_test:
+            self._caller_flush_delay_s = settings.telephony_caller_flush_delay_s
+            self._caller_post_playback_listen_s = settings.telephony_post_playback_listen_s
+        else:
+            self._caller_flush_delay_s = 0.75
+            self._caller_post_playback_listen_s = 0.0
         self.last_activity_monotonic: float = time.monotonic()
         self._caller_listen_until: float = 0.0
-        self._caller_post_playback_listen_s = 0.45 if telephony else 0.0
+        self._caller_answered_during_playback = False
         self._telephony_send_json: Callable[[str], Awaitable[None]] | None = None
         self._telephony_tts: object | None = None
         self._telephony_encoding: str = "PCMU"
@@ -403,12 +407,42 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
     def _mark_bot_audio_window(self, duration_ms: int = 0) -> None:
         # Hold off STT briefly after speech so line echo is not treated as the caller.
-        tail_s = 0.55
+        tail_s = settings.telephony_echo_tail_s if self._telephony else 0.55
         self._bot_audio_until = time.monotonic() + max(0, duration_ms) / 1000.0 + tail_s
 
-    async def _wait_caller_listen_window(self) -> None:
+    def _snappy_caller_answer(self, text: str) -> bool:
+        """Answers that should not sit behind a long post-bot listen pause."""
+        from .conversation import _extract_age_years
+
+        t = (text or "").strip()
+        if not t:
+            return False
+        if _is_bare_yes_stt(t) or _is_yes_elaboration(t):
+            return True
+        if _extract_age_years(t) is not None:
+            return True
+        if _looks_like_question(t):
+            return True
+        return False
+
+    def _schedule_post_playback_listen(self, *, buffer_text: str = "") -> None:
+        """Dead air after bot speech — shorter when the caller already spoke."""
+        base = self._caller_post_playback_listen_s
+        if self._caller_answered_during_playback:
+            listen_s = min(base, 0.06)
+        elif buffer_text.strip() and self._snappy_caller_answer(buffer_text):
+            listen_s = min(base, 0.10)
+        else:
+            listen_s = base
+        self._caller_listen_until = time.monotonic() + listen_s
+
+    async def _wait_caller_listen_window(self, text: str = "") -> None:
         """Brief pause after bot speech so PSTN echo does not flush as the caller."""
         if not self._telephony or self._caller_post_playback_listen_s <= 0:
+            return
+        if text.strip() and self._snappy_caller_answer(text):
+            return
+        if self._caller_answered_during_playback:
             return
         wait = self._caller_listen_until - time.monotonic()
         if wait > 0:
@@ -455,6 +489,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             logger.info("Skipping bot speak during greeting playback")
             return
         self._caller_listen_until = 0.0
+        self._caller_answered_during_playback = False
         if (
             self._telephony_direct_media
             and self._telephony_send_json is not None
@@ -657,19 +692,19 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         # Relying only on BSSF left bare "yes" stuck after Part A / decisions.
         if not self._call.can_accept_caller():
             self._call.finish_bot_playback()
-        self._caller_listen_until = (
-            time.monotonic() + self._caller_post_playback_listen_s
-        )
         self._move_pending_to_buffer()
-        if self._caller_buffer.strip():
+        buf = self._caller_buffer.strip()
+        self._schedule_post_playback_listen(buffer_text=buf)
+        if buf:
             if self._telephony:
                 from .call_trace import trace_call
 
+                wait_s = max(0.0, self._caller_listen_until - time.monotonic())
                 trace_call(
-                    f"=== listening for caller ({self._caller_post_playback_listen_s:.2f}s) "
-                    f"before flush: {self._caller_buffer[:80]!r} ==="
+                    f"=== listening for caller ({wait_s:.2f}s) "
+                    f"before flush: {buf[:80]!r} ==="
                 )
-            await self._wait_caller_listen_window()
+            await self._wait_caller_listen_window(buf)
             if self._telephony:
                 from .call_trace import trace_call
 
@@ -822,9 +857,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             if self._caller_buffer.strip():
                 self._schedule_caller_flush()
             return
-        await self._wait_caller_listen_window()
         text = self._caller_buffer.strip()
         self._caller_buffer = ""
+        await self._wait_caller_listen_window(text)
         if not _is_meaningful_caller_text(text):
             logger.info(f"Ignoring low-confidence STT fragment: {text!r}")
             return
@@ -1028,6 +1063,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     def _move_pending_to_buffer(self) -> None:
         if not self._pending_caller_texts:
             return
+        self._caller_answered_during_playback = True
         next_text = self._collapse_caller_queue()
         if not next_text:
             return
@@ -1046,6 +1082,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 trace_call(f"=== STT held (greeting playing): {text[:80]!r} ===")
             return
         text = self._coerce_qualify_yes_stt(_normalize_caller_stt(text))
+        self._caller_answered_during_playback = False
         self._call.close_user_turn()
         self._call.on_processing()
         await self._start_telephony_keepalive()
@@ -1531,11 +1568,11 @@ def _require_api_keys() -> None:
 
 def _telephony_vad_params() -> VADParams:
     """PSTN audio is quieter and noisier than a laptop mic — relax Silero thresholds."""
+    stop = max(0.22, min(0.65, settings.telephony_vad_stop_secs))
     return VADParams(
         confidence=0.35,
-        start_secs=0.15,
-        # Let callers finish short yes/no and age answers before ending the utterance.
-        stop_secs=0.5,
+        start_secs=0.13,
+        stop_secs=stop,
         # 0.25 was too high for AudioSocket/ulaw — VAD never fired, so no STT/CALLER.
         min_volume=0.08,
     )
