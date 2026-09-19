@@ -588,14 +588,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         except Exception as exc:
             logger.warning(f"Joined pitch pre-warm failed: {exc}")
 
-    async def _speak_bot_text(self, text: str) -> None:
+    async def _speak_bot_text(self, text: str) -> bool:
         """Play bot reply — direct bulk PCM on ViciDial, else pipeline TTS."""
         reply = (text or "").strip()
         if not reply:
-            return
+            return False
         if self._greeting_playing:
             logger.info("Skipping bot speak during greeting playback")
-            return
+            return False
         self._caller_listen_until = 0.0
         self._caller_answered_during_playback = False
         if (
@@ -604,7 +604,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             and self._telephony_tts is not None
         ):
             from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
-            from .telnyx_media import send_direct_bulk_pcm
+            from .telnyx_media import iter_bulk_pcm_segments, send_direct_bulk_pcm
             from .call_trace import trace_call
 
             # Stay PROCESSING while synthesizing — do NOT enter SPEAKING until
@@ -631,7 +631,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             if self._direct_playback_cancel.is_set():
                 trace_call("=== WARNING: direct speak cancelled before send ===")
-                return
+                return False
 
             if not prepared:
                 trace_call(
@@ -644,7 +644,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     await self.push_frame(RtpKeepaliveStopFrame())
                 await self.push_frame(TTSSpeakFrame(reply))
                 self._schedule_pipeline_tts_playback_fallback(reply)
-                return
+                return False
 
             # Age asks only: discard mid-synth bare yes so it doesn't skip the number.
             # Part A / decisions expect bare yes — never discard those.
@@ -669,25 +669,38 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             if settings.telephony_single_utterance and len(prepared) > 1:
                 combined_pcm = b"".join(pcm for _, pcm in prepared)
                 prepared = [(reply, combined_pcm)]
+            total_duration_ms = 0
             for line, pcm in prepared:
                 if self._direct_playback_cancel.is_set():
                     break
-                duration_ms = await send_direct_bulk_pcm(
-                    self._telephony_send_json,
-                    pcm,
-                    sample_rate=TELEPHONY_PIPELINE_RATE,
-                    encoding=self._telephony_encoding,
-                    pace=False,
+                segments = iter_bulk_pcm_segments(
+                    pcm, sample_rate=TELEPHONY_PIPELINE_RATE
                 )
-                if duration_ms <= 0:
-                    trace_call(f"=== WARNING: direct reply 0ms: {line[:72]!r} ===")
-                    continue
-                self._mark_bot_audio_window(duration_ms)
-                await asyncio.sleep(duration_ms / 1000.0)
-                if self._direct_playback_cancel.is_set():
-                    break
-                trace_call(f"=== direct reply sent (~{duration_ms}ms): {line[:72]!r} ===")
-                sent_any = True
+                for seg_idx, segment in enumerate(segments):
+                    if self._direct_playback_cancel.is_set():
+                        break
+                    duration_ms = await send_direct_bulk_pcm(
+                        self._telephony_send_json,
+                        segment,
+                        sample_rate=TELEPHONY_PIPELINE_RATE,
+                        encoding=self._telephony_encoding,
+                        pace=False,
+                    )
+                    if duration_ms <= 0:
+                        trace_call(
+                            f"=== WARNING: direct reply 0ms (seg {seg_idx}): "
+                            f"{line[:72]!r} ==="
+                        )
+                        continue
+                    total_duration_ms += duration_ms
+                    trace_call(
+                        f"=== direct reply sent (~{duration_ms}ms, seg {seg_idx + 1}/"
+                        f"{len(segments)}): {line[:72]!r} ==="
+                    )
+                    sent_any = True
+
+            if sent_any and total_duration_ms > 0:
+                self._mark_bot_audio_window(total_duration_ms)
 
             if not sent_any and not self._direct_playback_cancel.is_set():
                 trace_call(
@@ -696,13 +709,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 )
                 await self.push_frame(TTSSpeakFrame(reply))
                 self._schedule_pipeline_tts_playback_fallback(reply)
-                return
+                return False
 
             await self._complete_direct_bot_playback()
-            return
+            return True
         await self.push_frame(TTSSpeakFrame(reply))
         if self._telephony:
             self._schedule_pipeline_tts_playback_fallback(reply)
+        return True
 
     def _touch_activity(self) -> None:
         self.last_activity_monotonic = time.monotonic()
@@ -848,8 +862,16 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             trace_call(
                 f"=== greeting done — discarded {dropped} echo STT fragment(s); waiting for caller ==="
             )
+        try:
+            await asyncio.wait_for(self.prefetch_joined_pitch_pcm(), timeout=25.0)
+        except asyncio.TimeoutError:
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(
+                    "=== WARNING: joined pitch pre-warm timed out (25s) ==="
+                )
         await self._complete_direct_bot_playback()
-        asyncio.create_task(self.prefetch_joined_pitch_pcm())
 
     async def _interrupt_and_handle_caller(self, text: str, direction) -> None:  # type: ignore[no-untyped-def]
         """Stop current TTS and answer the caller immediately (telephony KB/questions)."""
@@ -1227,11 +1249,17 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         transfer_now = turn.action == Action.TRANSFER
         if transfer_now and self._telephony and not self._mic_test:
             await self._execute_transfer()
-        await self._speak_bot_text(turn.reply)
+        played = await self._speak_bot_text(turn.reply)
         if self._telephony and (turn.reply or "").strip():
             from .call_trace import trace_call
 
-            trace_call(f"=== BOT: {(turn.reply or '')[:240]!r} ===")
+            if played:
+                trace_call(f"=== BOT (audio sent): {(turn.reply or '')[:240]!r} ===")
+            else:
+                trace_call(
+                    f"=== WARNING: BOT text NOT played on phone: "
+                    f"{(turn.reply or '')[:240]!r} ==="
+                )
 
         if transfer_now:
             if self._mic_test:

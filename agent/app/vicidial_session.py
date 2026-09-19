@@ -510,6 +510,7 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 encoding=bulk_encoding,
             )
             _event("=== direct telephony reply media enabled (same WS path as greeting) ===")
+            asyncio.create_task(fronter.prefetch_joined_pitch_pcm())
 
         if fronter is not None and not vicidial_call_id and vici is not None:
 

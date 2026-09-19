@@ -93,6 +93,22 @@ def _playback_duration_ms(pcm: bytes, *, sample_rate: int, wire_rate: int) -> in
     return len(pcm) * 1000 // (wire_rate * 2)
 
 
+def iter_bulk_pcm_segments(
+    pcm: bytes,
+    *,
+    sample_rate: int,
+    max_duration_ms: int = 3500,
+) -> list[bytes]:
+    """Split long utterances so each WS media message stays bridge-friendly."""
+    if not pcm:
+        return []
+    bytes_per_ms = max(1, sample_rate * 2 // 1000)
+    max_bytes = max(32_000, bytes_per_ms * max_duration_ms)
+    if len(pcm) <= max_bytes:
+        return [pcm]
+    return [pcm[i : i + max_bytes] for i in range(0, len(pcm), max_bytes)]
+
+
 
 def lookup_pcm_in_tts_cache(tts: object | None, line: str) -> bytes | None:
     """Find pre-warmed PCM for a full bot line (joined pitch, greeting, etc.)."""
@@ -263,6 +279,11 @@ async def send_direct_bulk_pcm(
         wire_rate=wire_rate,
     )
     if not msg:
+        from .call_trace import trace_call
+
+        trace_call(
+            f"=== WARNING: direct bulk PCM encode failed ({len(pcm)} bytes) ==="
+        )
         return 0
     await send_json(msg)
     duration_ms = _playback_duration_ms(
