@@ -20,7 +20,14 @@ except Exception:  # pragma: no cover
 class PooledWhisperSTTService(SegmentedSTTService):
     """Segmented STT without loading Whisper locally — calls inference pool HTTP API."""
 
-    def __init__(self, *, no_speech_prob: float = 0.65, sample_rate: int = 16000, **kwargs):
+    def __init__(
+        self,
+        *,
+        no_speech_prob: float = 0.65,
+        sample_rate: int = 16000,
+        telephony: bool = False,
+        **kwargs,
+    ):
         from pipecat.services.whisper.stt import WhisperSTTService
         from pipecat.transcriptions.language import Language
 
@@ -35,16 +42,21 @@ class PooledWhisperSTTService(SegmentedSTTService):
             **kwargs,
         )
         self._no_speech_prob = no_speech_prob
+        self._telephony = telephony
         self._client = get_inference_client()
         logger.info(
             f"STT: pooled Whisper via {self._client._base} "
-            f"(no_speech_prob={no_speech_prob})"
+            f"(no_speech_prob={no_speech_prob}, telephony={telephony})"
         )
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_processing_metrics()
         try:
-            text = await self._client.transcribe(audio, no_speech_prob=self._no_speech_prob)
+            text = await self._client.transcribe(
+                audio,
+                no_speech_prob=self._no_speech_prob,
+                telephony=self._telephony,
+            )
         except Exception as exc:
             logger.error(f"Pooled STT error: {exc}")
             from .call_trace import trace_call

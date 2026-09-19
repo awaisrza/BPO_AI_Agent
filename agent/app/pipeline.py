@@ -27,6 +27,7 @@ from .config import settings, ScriptConfig
 from .conversation import (
     Action,
     ConversationEngine,
+    Turn,
     _is_consent,
     _is_qualify_yes,
     _looks_like_question,
@@ -159,7 +160,7 @@ def _is_cant_hear(text: str) -> bool:
 
 
 def _is_meaningful_caller_text(text: str) -> bool:
-    t = text.strip().lower()
+    t = text.strip().lower().rstrip(".!?")
     if len(t) < 2:
         return False
     if t in _STT_IGNORE:
@@ -188,6 +189,16 @@ _WHISPER_PHANTOM_UTTERANCES = frozenset(
         "a",
         "uh",
         "um",
+        "bye",
+        "bye.",
+        "goodbye",
+        "goodbye.",
+        "alexa",
+        "i m here baby",
+        "i'm here baby",
+        "im here baby",
+        "i use camera",
+        "okay okay",
     }
 )
 
@@ -313,9 +324,11 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._followup_reply: str | None = None
         self._caller_buffer: str = ""
         self._flush_task: asyncio.Task | None = None
-        # Short flush: VAD already ended the utterance; long delay pads first reply.
-        self._caller_flush_delay_s = 0.12 if (telephony or telephony_phone_test) else 0.75
+        # Short flush after VAD end; slightly longer so full PSTN answers land in one segment.
+        self._caller_flush_delay_s = 0.22 if (telephony or telephony_phone_test) else 0.75
         self.last_activity_monotonic: float = time.monotonic()
+        self._caller_listen_until: float = 0.0
+        self._caller_post_playback_listen_s = 0.45 if telephony else 0.0
         self._telephony_send_json: Callable[[str], Awaitable[None]] | None = None
         self._telephony_tts: object | None = None
         self._telephony_encoding: str = "PCMU"
@@ -393,6 +406,33 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         tail_s = 0.55
         self._bot_audio_until = time.monotonic() + max(0, duration_ms) / 1000.0 + tail_s
 
+    async def _wait_caller_listen_window(self) -> None:
+        """Brief pause after bot speech so PSTN echo does not flush as the caller."""
+        if not self._telephony or self._caller_post_playback_listen_s <= 0:
+            return
+        wait = self._caller_listen_until - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+
+    def _apply_telephony_followup_policy(
+        self, turn: Turn, followup: str | None
+    ) -> tuple[Turn, str | None]:
+        """On ViciDial direct PCM, never chain KB/objection follow-ups without listening."""
+        if not self._telephony_direct_media or not (followup or "").strip():
+            return turn, followup
+        from .conversation import State
+
+        reply = (turn.reply or "").strip()
+        fu = followup.strip()
+        if fu.lower() in reply.lower():
+            return turn, None
+        # Pre-consent pitch: merge trailing consent question into one utterance.
+        if self._engine.state == State.QUALIFY and not self._engine._pitch_confirmed:
+            merged = f"{reply.rstrip('.!?')}. {fu}".strip()
+            return Turn(merged, turn.action), None
+        logger.info(f"BOT follow-up deferred (listen first): {fu[:64]!r}")
+        return turn, None
+
     def set_direct_telephony_media(
         self,
         *,
@@ -414,6 +454,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if self._greeting_playing:
             logger.info("Skipping bot speak during greeting playback")
             return
+        self._caller_listen_until = 0.0
         if (
             self._telephony_direct_media
             and self._telephony_send_json is not None
@@ -616,8 +657,19 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         # Relying only on BSSF left bare "yes" stuck after Part A / decisions.
         if not self._call.can_accept_caller():
             self._call.finish_bot_playback()
+        self._caller_listen_until = (
+            time.monotonic() + self._caller_post_playback_listen_s
+        )
         self._move_pending_to_buffer()
         if self._caller_buffer.strip():
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(
+                    f"=== listening for caller ({self._caller_post_playback_listen_s:.2f}s) "
+                    f"before flush: {self._caller_buffer[:80]!r} ==="
+                )
+            await self._wait_caller_listen_window()
             if self._telephony:
                 from .call_trace import trace_call
 
@@ -627,6 +679,12 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 )
             await self._flush_caller_buffer()
             return
+        if self._followup_reply and self._telephony_direct_media:
+            logger.info(
+                f"Dropping auto follow-up on telephony direct: "
+                f"{self._followup_reply[:64]!r}"
+            )
+            self._followup_reply = None
         if not PIPECAT_AVAILABLE:
             return
         from pipecat.frames.frames import BotStoppedSpeakingFrame
@@ -764,6 +822,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             if self._caller_buffer.strip():
                 self._schedule_caller_flush()
             return
+        await self._wait_caller_listen_window()
         text = self._caller_buffer.strip()
         self._caller_buffer = ""
         if not _is_meaningful_caller_text(text):
@@ -1023,6 +1082,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             trace_call(f"=== BOT: {(turn.reply or '')[:240]!r} ===")
         followup = self._engine.take_pending_followup()
+        turn, followup = self._apply_telephony_followup_policy(turn, followup)
         self._followup_reply = followup or None
         if followup:
             logger.info(f"BOT follow-up queued: {followup[:64]!r}")
@@ -1229,16 +1289,23 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 await self.push_frame(frame, direction)
                 return
             if self._followup_reply:
-                followup = self._followup_reply
-                self._followup_reply = None
-                spoken = render_speech(followup)
-                logger.info(
-                    f"BOT follow-up: {' | '.join(c.text for c in spoken) or followup}"
-                )
-                self._call.on_processing()
-                await self._speak_bot_text(followup)
-                await self.push_frame(frame, direction)
-                return
+                if self._telephony_direct_media:
+                    logger.info(
+                        "Dropping auto follow-up on telephony direct — "
+                        f"listening for caller: {self._followup_reply[:64]!r}"
+                    )
+                    self._followup_reply = None
+                else:
+                    followup = self._followup_reply
+                    self._followup_reply = None
+                    spoken = render_speech(followup)
+                    logger.info(
+                        f"BOT follow-up: {' | '.join(c.text for c in spoken) or followup}"
+                    )
+                    self._call.on_processing()
+                    await self._speak_bot_text(followup)
+                    await self.push_frame(frame, direction)
+                    return
             if not self._call.can_accept_caller():
                 self._call.finish_bot_playback()
             if self._call.can_accept_caller():
@@ -1466,9 +1533,9 @@ def _telephony_vad_params() -> VADParams:
     """PSTN audio is quieter and noisier than a laptop mic — relax Silero thresholds."""
     return VADParams(
         confidence=0.35,
-        start_secs=0.12,
-        # End utterance sooner for faster first reply (bridge keeps the call up now).
-        stop_secs=0.28,
+        start_secs=0.15,
+        # Let callers finish short yes/no and age answers before ending the utterance.
+        stop_secs=0.5,
         # 0.25 was too high for AudioSocket/ulaw — VAD never fired, so no STT/CALLER.
         min_volume=0.08,
     )
@@ -1484,11 +1551,14 @@ def _build_vad(*, telephony: bool = False) -> VADProcessor:
 
 def _build_stt(*, telephony: bool = False):
     if _is_local_gpu_backend():
-        no_speech_prob = 0.55 if telephony else 0.4
+        no_speech_prob = 0.5 if telephony else 0.4
         if _inference_pool_enabled():
             from .pooled_stt import PooledWhisperSTTService
 
-            return PooledWhisperSTTService(no_speech_prob=no_speech_prob)
+            return PooledWhisperSTTService(
+                no_speech_prob=no_speech_prob,
+                telephony=telephony,
+            )
 
         from pipecat.services.whisper.stt import WhisperSTTService
         from pipecat.transcriptions.language import Language

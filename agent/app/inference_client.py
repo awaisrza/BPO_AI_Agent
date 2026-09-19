@@ -102,8 +102,17 @@ class InferenceClient:
             resp.raise_for_status()
             return resp.content
 
-    def transcribe_sync(self, wav_bytes: bytes, *, no_speech_prob: float) -> str:
-        params = {"no_speech_prob": str(no_speech_prob)}
+    def transcribe_sync(
+        self,
+        wav_bytes: bytes,
+        *,
+        no_speech_prob: float,
+        telephony: bool = False,
+    ) -> str:
+        params = {
+            "no_speech_prob": str(no_speech_prob),
+            "telephony": "true" if telephony else "false",
+        }
         with httpx.Client(timeout=self._timeout) as client:
             resp = client.post(
                 f"{self._base}/v1/stt",
@@ -132,8 +141,17 @@ class InferenceClient:
             resp.raise_for_status()
             return resp.content
 
-    async def transcribe(self, wav_bytes: bytes, *, no_speech_prob: float) -> str:
-        params = {"no_speech_prob": str(no_speech_prob)}
+    async def transcribe(
+        self,
+        wav_bytes: bytes,
+        *,
+        no_speech_prob: float,
+        telephony: bool = False,
+    ) -> str:
+        params = {
+            "no_speech_prob": str(no_speech_prob),
+            "telephony": "true" if telephony else "false",
+        }
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.post(
                 f"{self._base}/v1/stt",

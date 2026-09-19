@@ -103,17 +103,30 @@ def _wav_to_float32(wav_bytes: bytes) -> tuple[np.ndarray, int]:
     return audio, sample_rate
 
 
-async def _transcribe_wav(wav_bytes: bytes, *, no_speech_prob: float) -> str:
+_TELEPHONY_WHISPER_PROMPT = (
+    "Medicare outbound phone call. Caller answers yes, no, okay, their age in years, "
+    "or asks who is calling, why you are calling, or if they already have benefits."
+)
+
+
+async def _transcribe_wav(
+    wav_bytes: bytes,
+    *,
+    no_speech_prob: float,
+    telephony: bool = False,
+) -> str:
     if _state.whisper_model is None:
         raise RuntimeError("Whisper model not loaded")
     audio, _sample_rate = _wav_to_float32(wav_bytes)
 
     def _run() -> str:
-        segments, _info = _state.whisper_model.transcribe(
-            audio,
-            language="en",
-            vad_filter=False,
-        )
+        kwargs: dict[str, object] = {
+            "language": "en",
+            "vad_filter": False,
+        }
+        if telephony:
+            kwargs["initial_prompt"] = _TELEPHONY_WHISPER_PROMPT
+        segments, _info = _state.whisper_model.transcribe(audio, **kwargs)
         text = ""
         for segment in segments:
             if segment.no_speech_prob < no_speech_prob:
@@ -180,6 +193,7 @@ def build_app() -> FastAPI:
     async def stt_endpoint(
         request: Request,
         no_speech_prob: float = Query(default=0.65, ge=0.0, le=1.0),
+        telephony: bool = Query(default=False),
     ) -> dict[str, str]:
         if not _state.loaded:
             raise HTTPException(status_code=503, detail=_state.load_error or "Pool not ready")
@@ -187,7 +201,11 @@ def build_app() -> FastAPI:
         if not wav_bytes:
             raise HTTPException(status_code=400, detail="Empty audio body")
         try:
-            text = await _transcribe_wav(wav_bytes, no_speech_prob=no_speech_prob)
+            text = await _transcribe_wav(
+                wav_bytes,
+                no_speech_prob=no_speech_prob,
+                telephony=telephony,
+            )
         except Exception as exc:
             logger.error(f"Pool STT failed: {exc}")
             raise HTTPException(status_code=500, detail=str(exc)) from exc

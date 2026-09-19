@@ -320,6 +320,19 @@ def _is_greeting_ack_only(utterance: str) -> bool:
     return _matches_phrase(u, _GREETING_ACK)
 
 
+def _is_farewell_only(utterance: str) -> bool:
+    """Echo/phantom 'bye' during greeting — do not advance into the pitch."""
+    u = utterance.strip().lower().rstrip(".!?")
+    return u in {
+        "bye",
+        "goodbye",
+        "bye bye",
+        "see you",
+        "hang up",
+        "gotta go",
+    }
+
+
 def heuristic_classifier(utterance: str, _context: str = "") -> Intent:
     u = utterance.strip().lower()
     if not u:
@@ -630,6 +643,8 @@ class ConversationEngine:
 
         if self.state == State.PITCH:
             if not self._greeting_playback_done:
+                return Turn("", Action.SPEAK)
+            if _is_farewell_only(utterance):
                 return Turn("", Action.SPEAK)
             if is_question:
                 if self._pitch_kb_answers >= self._max_pitch_kb_answers:

@@ -291,3 +291,67 @@ def test_merge_age_fragments():
     proc = FronterProcessor(engine, None, "6666", telephony=True)
     assert proc._merge_transcripts("I am.", "61") == "I am 61"
     assert "92" in proc._merge_transcripts("I am", "92")
+
+
+def test_telephony_defers_qualify_kb_followup():
+    from app.config import ScriptConfig
+    from app.conversation import ConversationEngine
+    from app.pipeline import FronterProcessor
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare benefits.",
+        qualifying_questions=["Do you have Medicare Part A and Part B?", "How old are you?"],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic="Already have",
+                triggers=["already have"],
+                answer="That's great — a lot of folks still qualify for extra savings.",
+            ),
+        ],
+    )
+    engine = ConversationEngine(script=script)
+    engine.open()
+    engine.handle("ok")
+    turn = engine.handle("I already have benefits.")
+    followup = engine.take_pending_followup()
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc.set_direct_telephony_media(send_json=lambda _: None, tts=object())
+    merged_turn, kept = proc._apply_telephony_followup_policy(turn, followup)
+    assert kept is None
+    assert "Part A" not in merged_turn.reply
+
+
+def test_telephony_merges_pre_consent_followup():
+    from app.conversation import Action, State, Turn
+    from app.pipeline import FronterProcessor
+
+    engine = _medicare_engine()
+    engine.state = State.QUALIFY
+    engine._pitch_confirmed = False
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc.set_direct_telephony_media(send_json=lambda _: None, tts=object())
+    turn = Turn("Medicare review.", Action.SPEAK)
+    merged, kept = proc._apply_telephony_followup_policy(
+        turn, "Do you have a moment?"
+    )
+    assert kept is None
+    assert "moment" in merged.reply.lower()
+
+
+def test_farewell_does_not_deliver_pitch():
+    from app.conversation import ConversationEngine, State
+
+    engine = _medicare_engine()
+    engine.open()
+    engine.mark_greeting_playback_done()
+    turn = engine.handle("Bye.")
+    assert turn.reply == ""
+    assert engine.state == State.PITCH
+
+
+def test_meaningful_caller_text_ignores_bye_with_punctuation():
+    from app.pipeline import _is_meaningful_caller_text
+
+    assert not _is_meaningful_caller_text("Bye.")
+    assert not _is_meaningful_caller_text("bye")
