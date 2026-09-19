@@ -343,6 +343,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._playback_fallback_task: asyncio.Task | None = None
         self._greeting_pcm_sent = False
         self._greeting_playing = False
+        self._synth_guard_task: asyncio.Task | None = None
 
     def _bot_reference_text(self) -> str:
         parts = [
@@ -480,6 +481,94 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._telephony_encoding = (encoding or "PCMU").strip() or "PCMU"
         self._telephony_direct_media = True
 
+    def _cancel_synth_guard_task(self) -> None:
+        if self._synth_guard_task and not self._synth_guard_task.done():
+            self._synth_guard_task.cancel()
+        self._synth_guard_task = None
+
+    def _start_synth_guard_task(self) -> None:
+        """Keep outbound RTP on the bridge while sync TTS runs in a worker thread."""
+        if not (
+            self._telephony_direct_media and self._telephony_send_json is not None
+        ):
+            return
+        self._cancel_synth_guard_task()
+        send_json = self._telephony_send_json
+        encoding = self._telephony_encoding
+
+        async def _guard() -> None:
+            from .telnyx_media import send_direct_silence_keepalive
+
+            try:
+                while True:
+                    await send_direct_silence_keepalive(
+                        send_json,
+                        duration_ms=600,
+                        encoding=encoding,
+                    )
+                    await asyncio.sleep(0.45)
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.debug(f"Synth guard keepalive stopped: {exc}")
+
+        self._synth_guard_task = asyncio.create_task(_guard())
+
+    def _build_direct_pcm_prepared(self, reply: str) -> list[tuple[str, bytes]]:
+        from .speech_renderer import SpeechChunk, render_speech_telephony
+        from .telnyx_media import _synthesize_line, greeting_pcm_from_cache
+
+        if settings.telephony_single_utterance:
+            chunks = [SpeechChunk(text=reply, pause_after_ms=0)]
+        else:
+            chunks = render_speech_telephony(
+                reply, max_words=settings.telephony_utterance_max_words
+            )
+        if not chunks:
+            chunks = [SpeechChunk(text=reply, pause_after_ms=0)]
+
+        prepared: list[tuple[str, bytes]] = []
+        for chunk in chunks:
+            line = chunk.text.strip()
+            if not line:
+                continue
+            pcm = greeting_pcm_from_cache(
+                self._telephony_tts,
+                line,
+                telephony_max_words=settings.telephony_utterance_max_words,
+            )
+            if not pcm:
+                pcm = _synthesize_line(line, tts=self._telephony_tts)
+                if pcm is not None:
+                    cache = getattr(self._telephony_tts, "_cache", None)
+                    if isinstance(cache, dict):
+                        cache[line] = pcm
+            if pcm:
+                prepared.append((line, pcm))
+        return prepared
+
+    async def prefetch_joined_pitch_pcm(self) -> None:
+        """Pre-synthesize joined pitch+Part A while caller listens after greeting."""
+        if self._telephony_tts is None:
+            return
+        preview = self._engine.joined_pitch_reply_preview().strip()
+        if not preview:
+            return
+
+        def _warm() -> None:
+            self._build_direct_pcm_prepared(preview)
+
+        try:
+            await asyncio.to_thread(_warm)
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(
+                    f"=== pre-warmed joined pitch PCM ({len(preview)} chars) ==="
+                )
+        except Exception as exc:
+            logger.warning(f"Joined pitch pre-warm failed: {exc}")
+
     async def _speak_bot_text(self, text: str) -> None:
         """Play bot reply — direct bulk PCM on ViciDial, else pipeline TTS."""
         reply = (text or "").strip()
@@ -496,12 +585,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             and self._telephony_tts is not None
         ):
             from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
-            from .speech_renderer import render_speech_telephony
-            from .telnyx_media import (
-                _synthesize_line,
-                greeting_pcm_from_cache,
-                send_direct_bulk_pcm,
-            )
+            from .telnyx_media import send_direct_bulk_pcm
             from .call_trace import trace_call
 
             # Stay PROCESSING while synthesizing — do NOT enter SPEAKING until
@@ -510,44 +594,16 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._call.on_processing()
             self._touch_activity()
             self._direct_playback_cancel.clear()
-
-            if settings.telephony_single_utterance:
-                from .speech_renderer import SpeechChunk
-
-                chunks = [SpeechChunk(text=reply, pause_after_ms=0)]
-            else:
-                chunks = render_speech_telephony(
-                    reply, max_words=settings.telephony_utterance_max_words
+            self._start_synth_guard_task()
+            try:
+                prepared = await asyncio.to_thread(
+                    self._build_direct_pcm_prepared, reply
                 )
-            if not chunks:
-                from .speech_renderer import SpeechChunk
+            finally:
+                self._cancel_synth_guard_task()
 
-                chunks = [SpeechChunk(text=reply, pause_after_ms=0)]
-
-            prepared: list[tuple[str, bytes]] = []
-            for chunk in chunks:
-                if self._direct_playback_cancel.is_set():
-                    break
-                line = chunk.text.strip()
-                if not line:
-                    continue
-                pcm = greeting_pcm_from_cache(
-                    self._telephony_tts,
-                    line,
-                    telephony_max_words=settings.telephony_utterance_max_words,
-                )
-                if not pcm:
-                    pcm = _synthesize_line(line, tts=self._telephony_tts)
-                    if pcm is not None:
-                        cache = getattr(self._telephony_tts, "_cache", None)
-                        if isinstance(cache, dict):
-                            cache[line] = pcm
-                if not pcm:
-                    trace_call(
-                        f"=== WARNING: no PCM for sentence — skipping: {line[:72]!r} ==="
-                    )
-                    continue
-                prepared.append((line, pcm))
+            if self._direct_playback_cancel.is_set():
+                return
 
             if not prepared:
                 trace_call(
@@ -578,10 +634,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             self._call.begin_bot_reply(1)
             self._touch_activity()
-            if PIPECAT_AVAILABLE:
-                await self.push_frame(RtpKeepaliveStopFrame())
 
             sent_any = False
+            if PIPECAT_AVAILABLE:
+                await self.push_frame(RtpKeepaliveStopFrame())
             if settings.telephony_single_utterance and len(prepared) > 1:
                 combined_pcm = b"".join(pcm for _, pcm in prepared)
                 prepared = [(reply, combined_pcm)]
@@ -765,6 +821,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 f"=== greeting done — discarded {dropped} echo STT fragment(s); waiting for caller ==="
             )
         await self._complete_direct_bot_playback()
+        asyncio.create_task(self.prefetch_joined_pitch_pcm())
 
     async def _interrupt_and_handle_caller(self, text: str, direction) -> None:  # type: ignore[no-untyped-def]
         """Stop current TTS and answer the caller immediately (telephony KB/questions)."""
@@ -1127,8 +1184,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 from .call_trace import trace_call
 
                 trace_call(
-                    f"=== FSM held (waiting for greeting): {text[:80]!r} ==="
+                    f"=== FSM held (no bot line): {text[:80]!r} ==="
                 )
+            self._call.finish_bot_playback()
+            await self._start_telephony_keepalive(direct_silence=True)
             return
         spoken = render_speech(turn.reply)
         logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")

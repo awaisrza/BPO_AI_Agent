@@ -529,6 +529,41 @@ class ConversationEngine:
             self._answered_kb_pre_consent = True
         return self._speak_new(answer)
 
+    def joined_pitch_reply_preview(self) -> str:
+        """Text spoken after greeting ack — does not mutate FSM state (for PCM pre-warm)."""
+        body, embedded = self._pitch_statement_and_first_question()
+        medicare = _looks_like_medicare_script(self.script)
+        questions = list(self.script.qualifying_questions)
+
+        if embedded:
+            short_ask = len(embedded.split()) <= 3
+            consent_ask = _is_consent_question(embedded) or short_ask
+            matches_first = bool(
+                questions
+                and (
+                    embedded.lower()[:28] in questions[0].lower()
+                    or questions[0].lower()[:28] in embedded.lower()
+                )
+            )
+            in_qualify = any(
+                embedded.lower()[:28] in q.lower() or q.lower()[:28] in embedded.lower()
+                for q in questions
+            )
+            if consent_ask or matches_first:
+                return body.strip()
+            if not in_qualify:
+                questions.insert(0, embedded)
+
+        questions = _ensure_part_a_first(questions, medicare=medicare)
+        if questions:
+            first = questions[0]
+            if not first.endswith("?"):
+                first = f"{first}?"
+            if first.lower() not in body.lower():
+                return f"{body.rstrip(' .!?')}. {first}".strip()
+            return (body if body else first).strip()
+        return body.strip()
+
     def _pitch_statement_and_first_question(self) -> tuple[str, str]:
         """Split pitch into spoken lead + optional trailing question from the pitch text."""
         pitch = prepare_for_speech(self.script.pitch)
