@@ -344,6 +344,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._greeting_pcm_sent = False
         self._greeting_playing = False
         self._synth_guard_task: asyncio.Task | None = None
+        self._joined_pitch_pcm: tuple[str, bytes] | None = None
 
     def _bot_reference_text(self) -> str:
         parts = [
@@ -516,7 +517,15 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
     def _build_direct_pcm_prepared(self, reply: str) -> list[tuple[str, bytes]]:
         from .speech_renderer import SpeechChunk, render_speech_telephony
-        from .telnyx_media import _synthesize_line, greeting_pcm_from_cache
+        from .telnyx_media import (
+            _synthesize_line,
+            greeting_pcm_from_cache,
+            lookup_pcm_in_tts_cache,
+        )
+
+        whole = lookup_pcm_in_tts_cache(self._telephony_tts, reply)
+        if whole:
+            return [(reply.strip(), whole)]
 
         if settings.telephony_single_utterance:
             chunks = [SpeechChunk(text=reply, pause_after_ms=0)]
@@ -555,16 +564,26 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if not preview:
             return
 
-        def _warm() -> None:
-            self._build_direct_pcm_prepared(preview)
-
         try:
-            await asyncio.to_thread(_warm)
+            prepared = await asyncio.to_thread(
+                self._build_direct_pcm_prepared, preview
+            )
+            if not prepared:
+                if self._telephony:
+                    from .call_trace import trace_call
+
+                    trace_call(
+                        "=== WARNING: pre-warm joined pitch produced no PCM ==="
+                    )
+                return
+            pcm = b"".join(chunk for _, chunk in prepared)
+            self._joined_pitch_pcm = (preview, pcm)
             if self._telephony:
                 from .call_trace import trace_call
 
                 trace_call(
-                    f"=== pre-warmed joined pitch PCM ({len(preview)} chars) ==="
+                    f"=== pre-warmed joined pitch PCM ({len(preview)} chars, "
+                    f"{len(pcm)} bytes) ==="
                 )
         except Exception as exc:
             logger.warning(f"Joined pitch pre-warm failed: {exc}")
@@ -594,21 +613,30 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._call.on_processing()
             self._touch_activity()
             self._direct_playback_cancel.clear()
-            self._start_synth_guard_task()
-            try:
-                prepared = await asyncio.to_thread(
-                    self._build_direct_pcm_prepared, reply
+            stored = self._joined_pitch_pcm
+            if stored and stored[0].strip() == reply.strip():
+                prepared = [(reply, stored[1])]
+                self._joined_pitch_pcm = None
+                trace_call(
+                    f"=== direct speak using pre-warmed PCM ({len(stored[1])} bytes) ==="
                 )
-            finally:
-                self._cancel_synth_guard_task()
+            else:
+                self._start_synth_guard_task()
+                try:
+                    prepared = await asyncio.to_thread(
+                        self._build_direct_pcm_prepared, reply
+                    )
+                finally:
+                    self._cancel_synth_guard_task()
 
             if self._direct_playback_cancel.is_set():
+                trace_call("=== WARNING: direct speak cancelled before send ===")
                 return
 
             if not prepared:
                 trace_call(
-                    f"=== WARNING: no direct PCM for full reply — pipeline TTS: "
-                    f"{reply[:72]!r} ==="
+                    f"=== WARNING: no direct PCM for full reply ({len(reply)} chars) "
+                    f"— pipeline TTS fallback: {reply[:72]!r} ==="
                 )
                 # Keep turn closed until pipeline TTS BSSF (do not complete early).
                 self._call.begin_bot_reply(1)
@@ -1191,10 +1219,6 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             return
         spoken = render_speech(turn.reply)
         logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")
-        if self._telephony:
-            from .call_trace import trace_call
-
-            trace_call(f"=== BOT: {(turn.reply or '')[:240]!r} ===")
         followup = self._engine.take_pending_followup()
         turn, followup = self._apply_telephony_followup_policy(turn, followup)
         self._followup_reply = followup or None
@@ -1204,6 +1228,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if transfer_now and self._telephony and not self._mic_test:
             await self._execute_transfer()
         await self._speak_bot_text(turn.reply)
+        if self._telephony and (turn.reply or "").strip():
+            from .call_trace import trace_call
+
+            trace_call(f"=== BOT: {(turn.reply or '')[:240]!r} ===")
 
         if transfer_now:
             if self._mic_test:

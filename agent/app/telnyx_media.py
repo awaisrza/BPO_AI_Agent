@@ -94,6 +94,27 @@ def _playback_duration_ms(pcm: bytes, *, sample_rate: int, wire_rate: int) -> in
 
 
 
+def lookup_pcm_in_tts_cache(tts: object | None, line: str) -> bytes | None:
+    """Find pre-warmed PCM for a full bot line (joined pitch, greeting, etc.)."""
+    cache = getattr(tts, "_cache", None) if tts is not None else None
+    if not isinstance(cache, dict):
+        return None
+    from .speech_renderer import normalize_spoken_text, prepare_for_speech
+
+    prepared = prepare_for_speech(line)
+    candidates = (
+        line.strip(),
+        prepared,
+        normalize_spoken_text(prepared),
+        normalize_spoken_text(line),
+    )
+    for key in candidates:
+        key = (key or "").strip()
+        if key and key in cache:
+            return cache[key]
+    return None
+
+
 def _synthesize_line(line: str, tts: object | None = None) -> bytes | None:
     """Synthesize one telephony line — inference pool first, then in-process Chatterbox."""
     if not line.strip():
@@ -109,6 +130,10 @@ def _synthesize_line(line: str, tts: object | None = None) -> bytes | None:
                 telephony=True,
             )
             if pcm:
+                if tts is not None:
+                    cache = getattr(tts, "_cache", None)
+                    if isinstance(cache, dict):
+                        cache[text] = pcm
                 return pcm
     except Exception as exc:
         logger.warning(f"Pool synthesize failed ({text[:32]!r}): {exc}")
