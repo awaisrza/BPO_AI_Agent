@@ -762,7 +762,16 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                             trace_call(
                                 f"=== pitch acoustic wait (~{duration_ms}ms) ==="
                             )
-                            await asyncio.sleep(duration_ms / 1000.0)
+                            remaining_s = duration_ms / 1000.0
+                            while (
+                                remaining_s > 0
+                                and not self._direct_playback_cancel.is_set()
+                            ):
+                                step = min(2.0, remaining_s)
+                                await asyncio.sleep(step)
+                                remaining_s -= step
+                                self._touch_activity()
+                            trace_call("=== pitch acoustic wait done ===")
                     else:
                         duration_ms = await send_direct_bulk_pcm(
                             self._telephony_send_json,
