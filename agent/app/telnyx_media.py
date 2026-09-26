@@ -93,19 +93,23 @@ def _playback_duration_ms(pcm: bytes, *, sample_rate: int, wire_rate: int) -> in
     return len(pcm) * 1000 // (wire_rate * 2)
 
 
+# Greeting ships as one WS message; match that for joined pitch (~8s @ 16 kHz ≈ 256 KB).
+_MAX_SINGLE_BULK_PCM_BYTES = 400_000
+
+
 def iter_bulk_pcm_segments(
     pcm: bytes,
     *,
     sample_rate: int,
     max_duration_ms: int = 3500,
 ) -> list[bytes]:
-    """Split long utterances so each WS media message stays bridge-friendly."""
+    """Split only very long utterances — small multi-segment bursts overflow the bridge queue."""
     if not pcm:
         return []
+    if len(pcm) <= _MAX_SINGLE_BULK_PCM_BYTES:
+        return [pcm]
     bytes_per_ms = max(1, sample_rate * 2 // 1000)
     max_bytes = max(32_000, bytes_per_ms * max_duration_ms)
-    if len(pcm) <= max_bytes:
-        return [pcm]
     return [pcm[i : i + max_bytes] for i in range(0, len(pcm), max_bytes)]
 
 

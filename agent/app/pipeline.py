@@ -635,7 +635,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             and self._telephony_tts is not None
         ):
             from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
-            from .telnyx_media import iter_bulk_pcm_segments, send_direct_bulk_pcm
+            from .telnyx_media import send_direct_bulk_pcm
             from .call_trace import trace_call
 
             # Stay PROCESSING while synthesizing — do NOT enter SPEAKING until
@@ -705,31 +705,27 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             for line, pcm in prepared:
                 if self._direct_playback_cancel.is_set():
                     break
-                segments = iter_bulk_pcm_segments(
-                    pcm, sample_rate=TELEPHONY_PIPELINE_RATE
+                # One WS message per utterance (same as greeting). Multi-segment bursts
+                # overflow the AudioSocket queue and callers hear silence.
+                duration_ms = await send_direct_bulk_pcm(
+                    self._telephony_send_json,
+                    pcm,
+                    sample_rate=TELEPHONY_PIPELINE_RATE,
+                    encoding=self._telephony_encoding,
+                    pace=False,
                 )
-                for seg_idx, segment in enumerate(segments):
-                    if self._direct_playback_cancel.is_set():
-                        break
-                    duration_ms = await send_direct_bulk_pcm(
-                        self._telephony_send_json,
-                        segment,
-                        sample_rate=TELEPHONY_PIPELINE_RATE,
-                        encoding=self._telephony_encoding,
-                        pace=False,
-                    )
-                    if duration_ms <= 0:
-                        trace_call(
-                            f"=== WARNING: direct reply 0ms (seg {seg_idx}): "
-                            f"{line[:72]!r} ==="
-                        )
-                        continue
-                    total_duration_ms += duration_ms
+                if duration_ms <= 0:
                     trace_call(
-                        f"=== direct reply sent (~{duration_ms}ms, seg {seg_idx + 1}/"
-                        f"{len(segments)}): {line[:72]!r} ==="
+                        f"=== WARNING: direct reply 0ms: {line[:72]!r} "
+                        f"({len(pcm)} pcm bytes) ==="
                     )
-                    sent_any = True
+                    continue
+                total_duration_ms += duration_ms
+                trace_call(
+                    f"=== direct reply sent (~{duration_ms}ms, single bulk, "
+                    f"{len(pcm)} bytes): {line[:72]!r} ==="
+                )
+                sent_any = True
 
             if sent_any and total_duration_ms > 0:
                 self._mark_bot_audio_window(total_duration_ms)
@@ -743,7 +739,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 self._schedule_pipeline_tts_playback_fallback(reply)
                 return False
 
-            await self._complete_direct_bot_playback()
+            await self._complete_direct_bot_playback(after_bot_audio=True)
             return True
         await self.push_frame(TTSSpeakFrame(reply))
         if self._telephony:
@@ -802,11 +798,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
         self._playback_fallback_task = asyncio.create_task(_fallback())
 
-    async def _complete_direct_bot_playback(self) -> None:
+    async def _complete_direct_bot_playback(self, *, after_bot_audio: bool = False) -> None:
         """End direct bulk PCM the same way pipeline TTS ends (local BSSF handling).
 
         push_frame(BSSF, DOWNSTREAM) never reaches this processor — follow-ups stayed
         silent and STT queued mid-utterance dumped later as a rapid qualify burst.
+
+        after_bot_audio: True right after pitch/reply PCM — do not blast silence on the
+        bridge (it floods the AudioSocket queue and drops the speech you just sent).
         """
         self._cancel_playback_fallback_task()
         self._touch_activity()
@@ -839,7 +838,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         # Relying only on BSSF left bare "yes" stuck after Part A / decisions.
         if not self._call.can_accept_caller():
             self._call.finish_bot_playback()
-        await self._start_telephony_keepalive(direct_silence=True)
+        await self._start_telephony_keepalive(direct_silence=not after_bot_audio)
         self._move_pending_to_buffer()
         buf = self._caller_buffer.strip()
         self._schedule_post_playback_listen(buffer_text=buf)
