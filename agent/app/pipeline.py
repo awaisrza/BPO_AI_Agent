@@ -366,7 +366,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         return engine_expects_yes_no_qualify_answer(self._engine)
 
     def _maybe_stop_playback_for_qualify_yes(self, text: str) -> None:
-        """Stop long joined pitch+Part A when caller says yes mid-playback."""
+        """Stop bot playback on yes — but never cut off the joined pitch+Part A utterance."""
+        if self._long_direct_playback_active:
+            return
         if not (
             self._expects_yes_no_qualify_answer()
             and (_is_bare_yes_stt(text) or _is_yes_elaboration(text))
@@ -729,6 +731,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 combined_pcm = b"".join(pcm for _, pcm in prepared)
                 prepared = [(reply, combined_pcm)]
             total_duration_ms = 0
+            self._long_direct_playback_active = any(
+                len(pcm) > 48_000 for _, pcm in prepared
+            )
             try:
                 for line, pcm in prepared:
                     if self._direct_playback_cancel.is_set():
@@ -740,7 +745,6 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                             f"for {line[:72]!r} ==="
                         )
                     long_play = len(pcm) > 48_000
-                    self._long_direct_playback_active = long_play
                     if long_play:
                         duration_ms = await send_direct_realtime_pcm(
                             self._telephony_send_json,
@@ -972,11 +976,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
     def _maybe_barge_in_for_caller(self, text: str) -> bool:
         if not self._telephony:
             return False
-        normalized = _normalize_caller_stt(text)
-        # Let the joined pitch + Part A finish — bare yes is queued and flushed after.
-        if self._long_direct_playback_active and (
-            _is_bare_yes_stt(normalized) or _is_yes_elaboration(normalized)
-        ):
+        # Joined pitch is ~8s — never barge (yes / "already have" KB / etc.). Queue STT.
+        if self._long_direct_playback_active:
             return False
         return should_telephony_barge_in(text, self._engine)
 

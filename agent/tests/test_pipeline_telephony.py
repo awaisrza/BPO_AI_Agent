@@ -68,6 +68,14 @@ def test_no_barge_in_for_thank_you():
     assert not should_telephony_barge_in("Thank you.", engine)
 
 
+def test_yes_i_have_still_barges_at_fsm_level_but_not_during_long_playback():
+    """KB + yes can barge at FSM level; joined pitch must not be interrupted."""
+    engine = _medicare_engine()
+    engine.open()
+    engine.handle("I'm fine")
+    assert should_telephony_barge_in("Yes, I have.", engine)
+
+
 def test_coerce_yes_i_have_on_part_a():
     from app.config import ScriptConfig
     from app.conversation import ConversationEngine

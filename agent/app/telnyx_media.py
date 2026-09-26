@@ -46,6 +46,17 @@ def telephony_bulk_media_enabled() -> bool:
     return os.getenv("TELNYX_BULK_MEDIA", "true").strip().lower() in ("1", "true", "yes")
 
 
+def normalize_telephony_pcm_level(pcm: bytes, *, target_peak: int = 26_000) -> bytes:
+    """Match greeting loudness — streamed pitch chunks are often quieter than one-shot greeting."""
+    if not pcm:
+        return pcm
+    peak = audioop.max(pcm, 2)
+    if peak < 120 or peak >= int(target_peak * 0.88):
+        return pcm
+    factor = min(4.0, target_peak / peak)
+    return audioop.mul(pcm, 2, factor)
+
+
 def pcm_to_telnyx_media_json(
     pcm: bytes,
     *,
@@ -55,6 +66,7 @@ def pcm_to_telnyx_media_json(
 ) -> str | None:
     if not pcm:
         return None
+    pcm = normalize_telephony_pcm_level(pcm)
     try:
         if sample_rate != wire_rate:
             pcm, _ = audioop.ratecv(pcm, 2, 1, sample_rate, wire_rate, None)
