@@ -635,7 +635,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             and self._telephony_tts is not None
         ):
             from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
-            from .telnyx_media import send_direct_bulk_pcm
+            from .telnyx_media import iter_bulk_pcm_segments, send_direct_bulk_pcm
             from .call_trace import trace_call
 
             # Stay PROCESSING while synthesizing — do NOT enter SPEAKING until
@@ -705,32 +705,46 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             for line, pcm in prepared:
                 if self._direct_playback_cancel.is_set():
                     break
-                # One WS message per utterance (same as greeting). Multi-segment bursts
-                # overflow the AudioSocket queue and callers hear silence.
-                duration_ms = await send_direct_bulk_pcm(
-                    self._telephony_send_json,
-                    pcm,
-                    sample_rate=TELEPHONY_PIPELINE_RATE,
-                    encoding=self._telephony_encoding,
-                    pace=False,
-                )
-                if duration_ms <= 0:
-                    trace_call(
-                        f"=== WARNING: direct reply 0ms: {line[:72]!r} "
-                        f"({len(pcm)} pcm bytes) ==="
+                # Long joined pitch: several ~2s WS messages paced in this task
+                # (not in process_frame). One 8s blob can flood the bridge queue.
+                if len(pcm) > 100_000:
+                    pcm_chunks = iter_bulk_pcm_segments(
+                        pcm,
+                        sample_rate=TELEPHONY_PIPELINE_RATE,
+                        max_duration_ms=2000,
                     )
-                    continue
-                total_duration_ms += duration_ms
-                trace_call(
-                    f"=== direct reply sent (~{duration_ms}ms, single bulk, "
-                    f"{len(pcm)} bytes): {line[:72]!r} ==="
-                )
-                sent_any = True
+                else:
+                    pcm_chunks = [pcm]
+                for chunk_i, pcm_chunk in enumerate(pcm_chunks, start=1):
+                    if self._direct_playback_cancel.is_set():
+                        break
+                    duration_ms = await send_direct_bulk_pcm(
+                        self._telephony_send_json,
+                        pcm_chunk,
+                        sample_rate=TELEPHONY_PIPELINE_RATE,
+                        encoding=self._telephony_encoding,
+                        pace=True,
+                    )
+                    if duration_ms <= 0:
+                        trace_call(
+                            f"=== WARNING: direct reply 0ms: {line[:72]!r} "
+                            f"({len(pcm_chunk)} pcm bytes) ==="
+                        )
+                        continue
+                    total_duration_ms += duration_ms
+                    bulk_label = (
+                        f"chunk {chunk_i}/{len(pcm_chunks)}"
+                        if len(pcm_chunks) > 1
+                        else "single bulk"
+                    )
+                    trace_call(
+                        f"=== direct reply sent (~{duration_ms}ms, {bulk_label}, "
+                        f"{len(pcm_chunk)} bytes): {line[:72]!r} ==="
+                    )
+                    sent_any = True
 
             if sent_any and total_duration_ms > 0:
                 self._mark_bot_audio_window(total_duration_ms)
-                # Match greeting acoustic gate — bridge plays bulk PCM in real time.
-                await asyncio.sleep(total_duration_ms / 1000.0)
 
             if not sent_any and not self._direct_playback_cancel.is_set():
                 trace_call(
@@ -1521,7 +1535,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             if self._pending_caller_texts and self._call.can_accept_caller():
                 self._move_pending_to_buffer()
             if self._call.can_accept_caller() and self._caller_buffer:
-                await self._flush_caller_buffer()
+                # Never await caller handling inside process_frame — pitch PCM
+                # paces ~8s and would freeze STT until playback completes.
+                asyncio.create_task(self._flush_caller_buffer())
             elif self._caller_buffer:
                 self._schedule_caller_flush()
             await self.push_frame(frame, direction)
