@@ -171,11 +171,11 @@ class Settings(BaseModel):
     )
     telephony_caller_flush_delay_s: float = Field(
         default_factory=lambda: float(
-            os.getenv("TELEPHONY_CALLER_FLUSH_DELAY_S", "0.10") or "0.10"
+            os.getenv("TELEPHONY_CALLER_FLUSH_DELAY_S", "0.22") or "0.22"
         )
     )
     telephony_vad_stop_secs: float = Field(
-        default_factory=lambda: float(os.getenv("TELEPHONY_VAD_STOP_SECS", "0.38") or "0.38")
+        default_factory=lambda: float(os.getenv("TELEPHONY_VAD_STOP_SECS", "0.45") or "0.45")
     )
     telephony_echo_tail_s: float = Field(
         default_factory=lambda: float(os.getenv("TELEPHONY_ECHO_TAIL_S", "0.42") or "0.42")

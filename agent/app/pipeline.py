@@ -435,7 +435,17 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
     def _schedule_post_playback_listen(self, *, buffer_text: str = "") -> None:
         """Dead air after bot speech — shorter when the caller already spoke."""
+        from .conversation import State, _is_age_question
+
         base = self._caller_post_playback_listen_s
+        if (
+            self._telephony
+            and self._engine.state == State.QUALIFY
+            and self._engine._qualify_idx > 0
+        ):
+            current = self._engine._active_questions()[self._engine._qualify_idx - 1]
+            if _is_age_question(current):
+                base = max(base, 0.28)
         if self._caller_answered_during_playback:
             listen_s = min(base, 0.06)
         elif buffer_text.strip() and self._snappy_caller_answer(buffer_text):
@@ -1090,14 +1100,36 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._flush_task.cancel()
         self._flush_task = None
 
+    def _caller_flush_delay_s_effective(self) -> float:
+        """Wait for Whisper to finish phrases like 'yes I have' / 'I'm 82 years old'."""
+        from .conversation import State, _extract_age_years, _is_age_question
+
+        base = self._caller_flush_delay_s
+        if not self._telephony:
+            return base
+        buf = self._caller_buffer.strip()
+        if buf and _extract_age_years(buf) is None:
+            pre = buf.lower().rstrip(".!?")
+            if pre in {"i am", "im", "i'm", "i m"}:
+                return max(base, 0.72)
+        if (
+            self._engine.state == State.QUALIFY
+            and self._engine._qualify_idx > 0
+        ):
+            current = self._engine._active_questions()[self._engine._qualify_idx - 1]
+            if _is_age_question(current):
+                return max(base, 0.48)
+        return max(base, 0.22)
+
     def _schedule_caller_flush(self) -> None:
         if not PIPECAT_AVAILABLE:
             return
         self._cancel_flush_task()
+        delay_s = self._caller_flush_delay_s_effective()
 
         async def _delayed_flush() -> None:
             try:
-                await asyncio.sleep(self._caller_flush_delay_s)
+                await asyncio.sleep(delay_s)
                 await self._flush_caller_buffer()
             except asyncio.CancelledError:
                 pass
@@ -1119,6 +1151,23 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 self._schedule_caller_flush()
             return
         text = self._caller_buffer.strip()
+        if self._telephony:
+            from .conversation import _extract_age_years
+
+            pre = text.lower().rstrip(".!?")
+            if _extract_age_years(text) is None and pre in {
+                "i am",
+                "im",
+                "i'm",
+                "i m",
+            }:
+                from .call_trace import trace_call
+
+                trace_call(
+                    f"=== age preamble only — waiting for number: {text!r} ==="
+                )
+                self._schedule_caller_flush()
+                return
         self._caller_buffer = ""
         await self._wait_caller_listen_window(text)
         if not _is_meaningful_caller_text(text):
@@ -1660,9 +1709,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             if self._pending_caller_texts and self._call.can_accept_caller():
                 self._move_pending_to_buffer()
             if self._call.can_accept_caller() and self._caller_buffer:
-                # Never await caller handling inside process_frame — pitch PCM
-                # paces ~8s and would freeze STT until playback completes.
-                asyncio.create_task(self._flush_caller_buffer())
+                # Debounce so "I'm" + "82 years old" arrive as one flush (not instant VAD cut).
+                self._schedule_caller_flush()
             elif self._caller_buffer:
                 self._schedule_caller_flush()
             await self.push_frame(frame, direction)

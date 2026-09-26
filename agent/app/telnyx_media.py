@@ -47,13 +47,19 @@ def telephony_bulk_media_enabled() -> bool:
 
 
 def normalize_telephony_pcm_level(pcm: bytes, *, target_peak: int = 26_000) -> bytes:
-    """Match greeting loudness — streamed pitch chunks are often quieter than one-shot greeting."""
+    """Optional gain boost — off by default (normalization was muddying PSTN audio)."""
+    if os.getenv("TELEPHONY_PCM_NORMALIZE", "0").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return pcm
     if not pcm:
         return pcm
     peak = audioop.max(pcm, 2)
     if peak < 120 or peak >= int(target_peak * 0.88):
         return pcm
-    factor = min(4.0, target_peak / peak)
+    factor = min(2.0, target_peak / peak)
     return audioop.mul(pcm, 2, factor)
 
 
