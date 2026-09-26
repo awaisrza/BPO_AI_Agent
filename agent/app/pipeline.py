@@ -796,10 +796,6 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             finally:
                 self._long_direct_playback_active = False
 
-            if self._direct_playback_cancel.is_set():
-                trace_call("=== direct speak cancelled — skipping playback complete ===")
-                return False
-
             if sent_any and total_duration_ms > 0:
                 self._mark_bot_audio_window(total_duration_ms)
 
@@ -812,8 +808,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 self._schedule_pipeline_tts_playback_fallback(reply)
                 return False
 
+            if self._direct_playback_cancel.is_set():
+                trace_call(
+                    "=== direct speak cancelled — still completing playback "
+                    "to flush queued caller ==="
+                )
             await self._complete_direct_bot_playback(after_bot_audio=True)
-            return True
+            return not self._direct_playback_cancel.is_set()
         await self.push_frame(TTSSpeakFrame(reply))
         if self._telephony:
             self._schedule_pipeline_tts_playback_fallback(reply)
@@ -826,11 +827,30 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         return self._is_call_active is None or self._is_call_active()
 
     async def _start_telephony_keepalive(self, *, direct_silence: bool = False) -> None:
+        # ViciDial uses direct WS PCM — pipecat keepalive frames can deadlock
+        # push_frame from background caller-handle tasks (silence after pitch reply).
+        if self._telephony_direct_media:
+            if direct_silence and self._telephony_send_json is not None:
+                from .telnyx_media import send_direct_silence_keepalive
+
+                try:
+                    await send_direct_silence_keepalive(
+                        self._telephony_send_json,
+                        encoding=self._telephony_encoding,
+                    )
+                    if self._telephony:
+                        from .call_trace import trace_call
+
+                        trace_call(
+                            "=== telephony direct silence keepalive sent ==="
+                        )
+                except Exception as exc:
+                    logger.warning(f"Direct silence keepalive failed: {exc}")
+            return
         if self._telephony and PIPECAT_AVAILABLE:
             await self.push_frame(RtpKeepaliveStartFrame())
         if (
             direct_silence
-            and self._telephony_direct_media
             and self._telephony_send_json is not None
         ):
             from .telnyx_media import send_direct_silence_keepalive
@@ -943,6 +963,11 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._followup_reply = None
         # Do not await process_frame(BotStoppedSpeakingFrame) here — VAD/flush paths
         # call us from inside process_frame; nested process_frame deadlocks STT.
+        if self._telephony and self._has_pending_caller():
+            from .call_trace import trace_call
+
+            trace_call("=== caller turn open — scheduling post-playback flush ===")
+            asyncio.create_task(self._flush_caller_buffer())
 
     async def on_direct_greeting_complete(self) -> None:
         """Opening line played via direct bulk PCM — match normal TTS end-of-playback."""
@@ -1084,6 +1109,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if not self._call.can_accept_caller():
             # Turn still closed (bot still speaking) — retry shortly; don't orphan.
             if self._caller_buffer.strip():
+                if self._telephony:
+                    from .call_trace import trace_call
+
+                    trace_call(
+                        f"=== flush deferred (state={self._call.state.value}): "
+                        f"{self._caller_buffer[:64]!r} ==="
+                    )
                 self._schedule_caller_flush()
             return
         text = self._caller_buffer.strip()
