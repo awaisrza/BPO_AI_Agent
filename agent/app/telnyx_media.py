@@ -274,6 +274,7 @@ async def send_direct_realtime_pcm(
     encoding: str = "PCMU",
     wire_rate: int = TELNYX_WIRE_RATE,
     chunk_ms: int = _DIRECT_STREAM_CHUNK_MS,
+    cancel: asyncio.Event | None = None,
 ) -> int:
     """Stream bot audio in small WS messages paced to real time (ViciDial bridge).
 
@@ -293,6 +294,12 @@ async def send_direct_realtime_pcm(
     total_ms = 0
     chunks = 0
     for offset in range(0, len(pcm), step):
+        if cancel is not None and cancel.is_set():
+            trace_call(
+                f"=== direct realtime stream cancelled (~{total_ms}ms, "
+                f"chunk {chunks}) ==="
+            )
+            return total_ms
         chunk = pcm[offset : offset + step]
         msg = pcm_to_telnyx_media_json(
             chunk,

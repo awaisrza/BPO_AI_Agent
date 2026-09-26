@@ -348,6 +348,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._pitch_pcm_ready = asyncio.Event()
         self._prefetch_lock = asyncio.Lock()
         self._caller_handle_lock = asyncio.Lock()
+        self._long_direct_playback_active = False
 
     def _bot_reference_text(self) -> str:
         parts = [
@@ -728,44 +729,54 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 combined_pcm = b"".join(pcm for _, pcm in prepared)
                 prepared = [(reply, combined_pcm)]
             total_duration_ms = 0
-            for line, pcm in prepared:
-                if self._direct_playback_cancel.is_set():
-                    break
-                peak = audioop.max(pcm, 2) if pcm else 0
-                if peak < 80:
+            try:
+                for line, pcm in prepared:
+                    if self._direct_playback_cancel.is_set():
+                        break
+                    peak = audioop.max(pcm, 2) if pcm else 0
+                    if peak < 80:
+                        trace_call(
+                            f"=== WARNING: direct PCM near-silence (peak={peak}) "
+                            f"for {line[:72]!r} ==="
+                        )
+                    long_play = len(pcm) > 48_000
+                    self._long_direct_playback_active = long_play
+                    if long_play:
+                        duration_ms = await send_direct_realtime_pcm(
+                            self._telephony_send_json,
+                            pcm,
+                            sample_rate=TELEPHONY_PIPELINE_RATE,
+                            encoding=self._telephony_encoding,
+                            cancel=self._direct_playback_cancel,
+                        )
+                        bulk_label = "realtime stream"
+                    else:
+                        duration_ms = await send_direct_bulk_pcm(
+                            self._telephony_send_json,
+                            pcm,
+                            sample_rate=TELEPHONY_PIPELINE_RATE,
+                            encoding=self._telephony_encoding,
+                            pace=True,
+                        )
+                        bulk_label = "single bulk"
+                    if duration_ms <= 0:
+                        trace_call(
+                            f"=== WARNING: direct reply 0ms: {line[:72]!r} "
+                            f"({len(pcm)} pcm bytes) ==="
+                        )
+                        continue
+                    total_duration_ms += duration_ms
                     trace_call(
-                        f"=== WARNING: direct PCM near-silence (peak={peak}) "
-                        f"for {line[:72]!r} ==="
+                        f"=== direct reply sent (~{duration_ms}ms, {bulk_label}, "
+                        f"{len(pcm)} bytes, peak={peak}): {line[:72]!r} ==="
                     )
-                if len(pcm) > 48_000:
-                    duration_ms = await send_direct_realtime_pcm(
-                        self._telephony_send_json,
-                        pcm,
-                        sample_rate=TELEPHONY_PIPELINE_RATE,
-                        encoding=self._telephony_encoding,
-                    )
-                    bulk_label = "realtime stream"
-                else:
-                    duration_ms = await send_direct_bulk_pcm(
-                        self._telephony_send_json,
-                        pcm,
-                        sample_rate=TELEPHONY_PIPELINE_RATE,
-                        encoding=self._telephony_encoding,
-                        pace=True,
-                    )
-                    bulk_label = "single bulk"
-                if duration_ms <= 0:
-                    trace_call(
-                        f"=== WARNING: direct reply 0ms: {line[:72]!r} "
-                        f"({len(pcm)} pcm bytes) ==="
-                    )
-                    continue
-                total_duration_ms += duration_ms
-                trace_call(
-                    f"=== direct reply sent (~{duration_ms}ms, {bulk_label}, "
-                    f"{len(pcm)} bytes, peak={peak}): {line[:72]!r} ==="
-                )
-                sent_any = True
+                    sent_any = True
+            finally:
+                self._long_direct_playback_active = False
+
+            if self._direct_playback_cancel.is_set():
+                trace_call("=== direct speak cancelled — skipping playback complete ===")
+                return False
 
             if sent_any and total_duration_ms > 0:
                 self._mark_bot_audio_window(total_duration_ms)
@@ -959,7 +970,15 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         await self._handle_caller(_normalize_caller_stt(merged))
 
     def _maybe_barge_in_for_caller(self, text: str) -> bool:
-        return self._telephony and should_telephony_barge_in(text, self._engine)
+        if not self._telephony:
+            return False
+        normalized = _normalize_caller_stt(text)
+        # Let the joined pitch + Part A finish — bare yes is queued and flushed after.
+        if self._long_direct_playback_active and (
+            _is_bare_yes_stt(normalized) or _is_yes_elaboration(normalized)
+        ):
+            return False
+        return should_telephony_barge_in(text, self._engine)
 
     def _coerce_qualify_yes_stt(self, text: str) -> str:
         """Collapse Whisper 'Yes, I have/do' to bare Yes on pitch-ack / Part A / decisions."""
