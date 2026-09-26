@@ -371,10 +371,24 @@ async def send_direct_bulk_pcm(
             f"=== WARNING: direct bulk PCM encode failed ({len(pcm)} bytes) ==="
         )
         return 0
-    await send_json(msg)
+    try:
+        await send_json(msg)
+    except Exception as exc:  # noqa: BLE001
+        from .call_trace import trace_call
+
+        trace_call(
+            f"=== WARNING: direct bulk WS send failed ({len(pcm)} bytes): {exc!s} ==="
+        )
+        return 0
     duration_ms = _playback_duration_ms(
         pcm, sample_rate=sample_rate, wire_rate=wire_rate
     )
+    if len(pcm) > 48_000:
+        from .call_trace import trace_call
+
+        trace_call(
+            f"=== direct bulk WS sent ({len(pcm)} pcm bytes, ~{duration_ms}ms) ==="
+        )
     if pace and duration_ms > 0:
         await asyncio.sleep(duration_ms / 1000.0)
     return duration_ms

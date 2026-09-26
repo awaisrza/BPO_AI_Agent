@@ -661,7 +661,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             import audioop
 
             from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
-            from .telnyx_media import send_direct_bulk_pcm, send_direct_realtime_pcm
+            from .telnyx_media import send_direct_bulk_pcm
             from .call_trace import trace_call
 
             # Stay PROCESSING while synthesizing — do NOT enter SPEAKING until
@@ -671,7 +671,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._touch_activity()
             self._direct_playback_cancel.clear()
             trace_call(
-                f"=== bot speak begin (direct, {len(reply)} chars): {reply[:72]!r} ==="
+                f"=== bot speak begin (direct, {len(reply)} chars): {reply[:240]!r} ==="
             )
             await self._wait_for_joined_pitch_pcm(reply)
             stored = self._joined_pitch_pcm_for_reply(reply)
@@ -746,14 +746,23 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                         )
                     long_play = len(pcm) > 48_000
                     if long_play:
-                        duration_ms = await send_direct_realtime_pcm(
+                        # Same one-shot WS path as the greeting (audible on ViciDial).
+                        duration_ms = await send_direct_bulk_pcm(
                             self._telephony_send_json,
                             pcm,
                             sample_rate=TELEPHONY_PIPELINE_RATE,
                             encoding=self._telephony_encoding,
-                            cancel=self._direct_playback_cancel,
+                            pace=False,
                         )
-                        bulk_label = "realtime stream"
+                        bulk_label = "pitch bulk"
+                        if (
+                            duration_ms > 0
+                            and not self._direct_playback_cancel.is_set()
+                        ):
+                            trace_call(
+                                f"=== pitch acoustic wait (~{duration_ms}ms) ==="
+                            )
+                            await asyncio.sleep(duration_ms / 1000.0)
                     else:
                         duration_ms = await send_direct_bulk_pcm(
                             self._telephony_send_json,
