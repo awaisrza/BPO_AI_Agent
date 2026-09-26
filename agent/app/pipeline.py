@@ -729,6 +729,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
             if sent_any and total_duration_ms > 0:
                 self._mark_bot_audio_window(total_duration_ms)
+                # Match greeting acoustic gate — bridge plays bulk PCM in real time.
+                await asyncio.sleep(total_duration_ms / 1000.0)
 
             if not sent_any and not self._direct_playback_cancel.is_set():
                 trace_call(
@@ -836,8 +838,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             )
         # Always release the caller turn and flush queued yes/answers here.
         # Relying only on BSSF left bare "yes" stuck after Part A / decisions.
-        if not self._call.can_accept_caller():
-            self._call.finish_bot_playback()
+        self._call.finish_bot_playback()
         await self._start_telephony_keepalive(direct_silence=not after_bot_audio)
         self._move_pending_to_buffer()
         buf = self._caller_buffer.strip()
@@ -859,7 +860,9 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                     f"=== flushing queued caller after playback: "
                     f"{self._caller_buffer[:80]!r} ==="
                 )
-            await self._flush_caller_buffer()
+            # Defer — we are often invoked from VAD flush inside process_frame;
+            # nested _handle_caller there must not block the frame processor.
+            asyncio.create_task(self._flush_caller_buffer())
             return
         if self._followup_reply and self._telephony_direct_media:
             logger.info(
@@ -867,12 +870,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 f"{self._followup_reply[:64]!r}"
             )
             self._followup_reply = None
-        if not PIPECAT_AVAILABLE:
-            return
-        from pipecat.frames.frames import BotStoppedSpeakingFrame
-        from pipecat.processors.frame_processor import FrameDirection
-
-        await self.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+        # Do not await process_frame(BotStoppedSpeakingFrame) here — VAD/flush paths
+        # call us from inside process_frame; nested process_frame deadlocks STT.
 
     async def on_direct_greeting_complete(self) -> None:
         """Opening line played via direct bulk PCM — match normal TTS end-of-playback."""
