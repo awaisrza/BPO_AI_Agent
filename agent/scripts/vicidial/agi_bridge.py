@@ -787,6 +787,9 @@ class AudioSocketGpuBridge:
             if len(frame) < chunk:
                 frame = frame + b"\x00" * (chunk - len(frame))
                 short_padded += 1
+            # Backpressure: never enqueue hundreds of frames faster than real time.
+            while self._audio_q.qsize() > 120 and not self._stop.is_set():
+                time.sleep(0.02)
             try:
                 self._audio_q.put(frame, timeout=2.0)
             except queue.Full:
@@ -826,6 +829,11 @@ class AudioSocketGpuBridge:
         ulaw = _parse_gpu_media(raw)
         if ulaw is None:
             return False
+        if len(ulaw) > 4000:
+            _log(
+                f"GPU bot audio packet {len(ulaw)} ulaw bytes "
+                f"(qsize={self._audio_q.qsize()})"
+            )
         return self._write_ulaw_to_as(ulaw, paced=paced)
 
     def _sync_greeting_from_gpu(self, *, chunks: int | None = None) -> bool:

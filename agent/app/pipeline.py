@@ -634,8 +634,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             and self._telephony_send_json is not None
             and self._telephony_tts is not None
         ):
+            import audioop
+
             from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
-            from .telnyx_media import iter_bulk_pcm_segments, send_direct_bulk_pcm
+            from .telnyx_media import send_direct_bulk_pcm, send_direct_realtime_pcm
             from .call_trace import trace_call
 
             # Stay PROCESSING while synthesizing — do NOT enter SPEAKING until
@@ -705,43 +707,41 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             for line, pcm in prepared:
                 if self._direct_playback_cancel.is_set():
                     break
-                # Long joined pitch: several ~2s WS messages paced in this task
-                # (not in process_frame). One 8s blob can flood the bridge queue.
-                if len(pcm) > 100_000:
-                    pcm_chunks = iter_bulk_pcm_segments(
+                peak = audioop.max(pcm, 2) if pcm else 0
+                if peak < 80:
+                    trace_call(
+                        f"=== WARNING: direct PCM near-silence (peak={peak}) "
+                        f"for {line[:72]!r} ==="
+                    )
+                if len(pcm) > 48_000:
+                    duration_ms = await send_direct_realtime_pcm(
+                        self._telephony_send_json,
                         pcm,
                         sample_rate=TELEPHONY_PIPELINE_RATE,
-                        max_duration_ms=2000,
+                        encoding=self._telephony_encoding,
                     )
+                    bulk_label = "realtime stream"
                 else:
-                    pcm_chunks = [pcm]
-                for chunk_i, pcm_chunk in enumerate(pcm_chunks, start=1):
-                    if self._direct_playback_cancel.is_set():
-                        break
                     duration_ms = await send_direct_bulk_pcm(
                         self._telephony_send_json,
-                        pcm_chunk,
+                        pcm,
                         sample_rate=TELEPHONY_PIPELINE_RATE,
                         encoding=self._telephony_encoding,
                         pace=True,
                     )
-                    if duration_ms <= 0:
-                        trace_call(
-                            f"=== WARNING: direct reply 0ms: {line[:72]!r} "
-                            f"({len(pcm_chunk)} pcm bytes) ==="
-                        )
-                        continue
-                    total_duration_ms += duration_ms
-                    bulk_label = (
-                        f"chunk {chunk_i}/{len(pcm_chunks)}"
-                        if len(pcm_chunks) > 1
-                        else "single bulk"
-                    )
+                    bulk_label = "single bulk"
+                if duration_ms <= 0:
                     trace_call(
-                        f"=== direct reply sent (~{duration_ms}ms, {bulk_label}, "
-                        f"{len(pcm_chunk)} bytes): {line[:72]!r} ==="
+                        f"=== WARNING: direct reply 0ms: {line[:72]!r} "
+                        f"({len(pcm)} pcm bytes) ==="
                     )
-                    sent_any = True
+                    continue
+                total_duration_ms += duration_ms
+                trace_call(
+                    f"=== direct reply sent (~{duration_ms}ms, {bulk_label}, "
+                    f"{len(pcm)} bytes, peak={peak}): {line[:72]!r} ==="
+                )
+                sent_any = True
 
             if sent_any and total_duration_ms > 0:
                 self._mark_bot_audio_window(total_duration_ms)

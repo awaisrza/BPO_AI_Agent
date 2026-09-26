@@ -262,6 +262,55 @@ async def send_direct_silence_keepalive(
     )
 
 
+# ~20 ms @ 16 kHz — matches AudioSocket bridge frame cadence.
+_DIRECT_STREAM_CHUNK_MS = 160
+
+
+async def send_direct_realtime_pcm(
+    send_json: SendJson,
+    pcm: bytes,
+    *,
+    sample_rate: int = TELEPHONY_PIPELINE_RATE,
+    encoding: str = "PCMU",
+    wire_rate: int = TELNYX_WIRE_RATE,
+    chunk_ms: int = _DIRECT_STREAM_CHUNK_MS,
+) -> int:
+    """Stream bot audio in small WS messages paced to real time (ViciDial bridge).
+
+    One multi-second bulk message makes the bridge enqueue hundreds of 20 ms frames
+    at once; the queue drops speech and callers hear silence even though GPU logs OK.
+    """
+    if not pcm:
+        return 0
+    bytes_per_ms = max(1, sample_rate * 2 // 1000)
+    step = max(bytes_per_ms, bytes_per_ms * chunk_ms)
+    total_ms = 0
+    chunks = 0
+    for offset in range(0, len(pcm), step):
+        chunk = pcm[offset : offset + step]
+        msg = pcm_to_telnyx_media_json(
+            chunk,
+            sample_rate=sample_rate,
+            encoding=encoding,
+            wire_rate=wire_rate,
+        )
+        if not msg:
+            continue
+        await send_json(msg)
+        chunks += 1
+        duration_ms = _playback_duration_ms(
+            chunk, sample_rate=sample_rate, wire_rate=wire_rate
+        )
+        total_ms += duration_ms
+        if duration_ms > 0:
+            await asyncio.sleep(duration_ms / 1000.0)
+    if chunks and not _is_silence_pcm(pcm):
+        logger.info(
+            f"Direct realtime PCM: {len(pcm)} bytes in {chunks} chunk(s) (~{total_ms} ms)"
+        )
+    return total_ms
+
+
 async def send_direct_bulk_pcm(
     send_json: SendJson,
     pcm: bytes,
