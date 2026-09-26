@@ -347,6 +347,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._joined_pitch_pcm: tuple[str, bytes] | None = None
         self._pitch_pcm_ready = asyncio.Event()
         self._prefetch_lock = asyncio.Lock()
+        self._caller_handle_lock = asyncio.Lock()
 
     def _bot_reference_text(self) -> str:
         parts = [
@@ -601,11 +602,31 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             except Exception as exc:
                 logger.warning(f"Joined pitch pre-warm failed: {exc}")
 
-    async def _wait_for_joined_pitch_pcm(self, reply: str, *, timeout_s: float = 12.0) -> None:
+    def _joined_pitch_pcm_for_reply(self, reply: str) -> tuple[str, bytes] | None:
+        """Match pre-warmed joined pitch bytes to the FSM line (preview may differ slightly)."""
+        stored = self._joined_pitch_pcm
+        if not stored or not stored[1]:
+            return None
+        preview = self._engine.joined_pitch_reply_preview().strip()
+        rs = reply.strip()
+        ps = stored[0].strip()
+        if rs == ps or rs == preview or ps == preview:
+            return stored
+        if len(stored[1]) > 48_000 and preview and (rs in preview or preview in rs):
+            return stored
+        return None
+
+    async def _wait_for_joined_pitch_pcm(self, reply: str, *, timeout_s: float = 3.0) -> None:
         preview = self._engine.joined_pitch_reply_preview().strip()
         if reply.strip() != preview or self._joined_pitch_pcm:
             return
         if not self._pitch_pcm_ready.is_set():
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(
+                    f"=== waiting for joined pitch PCM (up to {timeout_s:.0f}s) ==="
+                )
             asyncio.create_task(self.prefetch_joined_pitch_pcm())
         try:
             await asyncio.wait_for(self._pitch_pcm_ready.wait(), timeout=timeout_s)
@@ -646,10 +667,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._call.on_processing()
             self._touch_activity()
             self._direct_playback_cancel.clear()
+            trace_call(
+                f"=== bot speak begin (direct, {len(reply)} chars): {reply[:72]!r} ==="
+            )
             await self._wait_for_joined_pitch_pcm(reply)
-            stored = self._joined_pitch_pcm
-            if stored and stored[0].strip() == reply.strip():
-                prepared = [(reply, stored[1])]
+            stored = self._joined_pitch_pcm_for_reply(reply)
+            if stored:
+                prepared = [(reply.strip(), stored[1])]
                 self._joined_pitch_pcm = None
                 trace_call(
                     f"=== direct speak using pre-warmed PCM ({len(stored[1])} bytes) ==="
@@ -698,8 +722,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._touch_activity()
 
             sent_any = False
-            if PIPECAT_AVAILABLE:
-                await self.push_frame(RtpKeepaliveStopFrame())
+            # Direct PCM bypasses pipecat output — push_frame here can deadlock
+            # when _handle_caller runs in a background task.
             if settings.telephony_single_utterance and len(prepared) > 1:
                 combined_pcm = b"".join(pcm for _, pcm in prepared)
                 prepared = [(reply, combined_pcm)]
@@ -1038,7 +1062,14 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 trace_call(f"=== STT echo dropped: {text[:80]!r} ===")
             return
         self._call.close_user_turn()
-        await self._handle_caller(text)
+        try:
+            await self._handle_caller(text)
+        except Exception as exc:
+            logger.exception(f"Caller flush/handle failed: {exc}")
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(f"=== WARNING: caller handle failed: {exc!s} ===")
 
     def _queue_pending_caller_text(self, text: str) -> None:
         if not _is_meaningful_caller_text(text):
@@ -1241,6 +1272,13 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             self._caller_buffer = next_text
 
     async def _handle_caller(self, text: str) -> None:
+        if self._telephony:
+            async with self._caller_handle_lock:
+                await self._handle_caller_body(text)
+            return
+        await self._handle_caller_body(text)
+
+    async def _handle_caller_body(self, text: str) -> None:
         if self._greeting_playing:
             logger.info(f"STT held during greeting playback: {text[:64]!r}")
             if self._telephony:
@@ -1252,7 +1290,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._caller_answered_during_playback = False
         self._call.close_user_turn()
         self._call.on_processing()
-        await self._start_telephony_keepalive()
+        if self._telephony_direct_media:
+            asyncio.create_task(self._start_telephony_keepalive())
+        else:
+            await self._start_telephony_keepalive()
         logger.info(f"CALLER: {text}")
         if self._telephony:
             from .call_trace import trace_call
@@ -1282,7 +1323,12 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             await self._start_telephony_keepalive(direct_silence=True)
             return
         spoken = render_speech(turn.reply)
-        logger.info(f"BOT: {' | '.join(c.text for c in spoken) or turn.reply}")
+        bot_line = " | ".join(c.text for c in spoken) or turn.reply
+        logger.info(f"BOT: {bot_line}")
+        if self._telephony:
+            from .call_trace import trace_call
+
+            trace_call(f"=== BOT: {bot_line[:240]!r} ===")
         followup = self._engine.take_pending_followup()
         turn, followup = self._apply_telephony_followup_policy(turn, followup)
         self._followup_reply = followup or None
@@ -1291,7 +1337,16 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         transfer_now = turn.action == Action.TRANSFER
         if transfer_now and self._telephony and not self._mic_test:
             await self._execute_transfer()
-        played = await self._speak_bot_text(turn.reply)
+        try:
+            played = await self._speak_bot_text(turn.reply)
+        except Exception as exc:
+            logger.exception(f"Telephony speak failed: {exc}")
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(f"=== WARNING: speak failed: {exc!s} ===")
+            self._call.finish_bot_playback()
+            return
         if self._telephony and (turn.reply or "").strip():
             from .call_trace import trace_call
 

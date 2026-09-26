@@ -282,6 +282,12 @@ async def send_direct_realtime_pcm(
     """
     if not pcm:
         return 0
+    from .call_trace import trace_call
+
+    trace_call(
+        f"=== direct realtime stream begin ({len(pcm)} pcm bytes, "
+        f"{chunk_ms}ms chunks) ==="
+    )
     bytes_per_ms = max(1, sample_rate * 2 // 1000)
     step = max(bytes_per_ms, bytes_per_ms * chunk_ms)
     total_ms = 0
@@ -304,6 +310,14 @@ async def send_direct_realtime_pcm(
         total_ms += duration_ms
         if duration_ms > 0:
             await asyncio.sleep(duration_ms / 1000.0)
+        if chunks == 1 or chunks % 12 == 0:
+            trace_call(
+                f"=== direct realtime stream progress (~{total_ms}ms, "
+                f"chunk {chunks}) ==="
+            )
+    trace_call(
+        f"=== direct realtime stream done (~{total_ms}ms, {chunks} chunks) ==="
+    )
     if chunks and not _is_silence_pcm(pcm):
         logger.info(
             f"Direct realtime PCM: {len(pcm)} bytes in {chunks} chunk(s) (~{total_ms} ms)"
