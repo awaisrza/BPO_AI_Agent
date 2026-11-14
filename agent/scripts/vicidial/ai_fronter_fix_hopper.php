@@ -85,9 +85,17 @@ function ai_fronter_preflight(mysqli $db, string $campaign, string $agent): void
         $notes[] = 'process check skipped (shell_exec disabled)';
     }
 
-    $sock = @fsockopen('127.0.0.1', 9092, $errno, $errstr, 2.0);
-    if ($sock) {
-        fclose($sock);
+    // Read the kernel's listen table — SELinux usually blocks httpd from connecting out.
+    $listening = false;
+    foreach (['/proc/net/tcp', '/proc/net/tcp6'] as $procFile) {
+        foreach ((array) @file($procFile) as $line) {
+            $cols = preg_split('/\s+/', trim((string) $line));
+            if (isset($cols[3]) && $cols[3] === '0A' && substr($cols[1], -5) === ':2384') {
+                $listening = true;
+            }
+        }
+    }
+    if ($listening) {
         $notes[] = 'AudioSocket bridge listening on 9092';
     } else {
         $problems[] = "AudioSocket bridge not listening on 9092 (systemctl restart ai-fronter-audiosocket@{$agent})";
