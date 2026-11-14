@@ -356,6 +356,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._telephony_encoding: str = "PCMU"
         self._telephony_direct_media = False
         self._bot_audio_until: float = 0.0
+        self._transfer_started = False
         self._discard_early_ack_after_play = False
         self._direct_playback_cancel = asyncio.Event()
         self._playback_fallback_task: asyncio.Task | None = None
@@ -1426,6 +1427,12 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         await self._handle_caller_body(text)
 
     async def _handle_caller_body(self, text: str) -> None:
+        if self._transfer_started:
+            if self._telephony:
+                from .call_trace import trace_call
+
+                trace_call(f"=== STT ignored (transfer in progress): {text[:80]!r} ===")
+            return
         if self._greeting_playing:
             logger.info(f"STT held during greeting playback: {text[:64]!r}")
             if self._telephony:
@@ -1482,6 +1489,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if followup:
             logger.info(f"BOT follow-up queued: {followup[:64]!r}")
         transfer_now = turn.action == Action.TRANSFER
+        if transfer_now:
+            self._transfer_started = True
         try:
             played = await self._speak_bot_text(turn.reply)
         except Exception as exc:

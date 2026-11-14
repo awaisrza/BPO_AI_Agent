@@ -265,6 +265,25 @@ def test_bare_yes_not_echo_dropped_during_part_a_tail():
     assert proc2._should_drop_stt_as_echo("Yes.")
 
 
+def test_caller_speech_ignored_after_transfer_started():
+    import asyncio
+
+    from app.config import ScriptConfig
+    from app.conversation import ConversationEngine
+    from app.pipeline import FronterProcessor
+
+    engine = ConversationEngine(script=ScriptConfig(greeting="Hi.", pitch="Pitch."))
+    engine.open()
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc._transfer_started = True
+
+    def _fail(_text):
+        raise AssertionError("engine must not handle speech after transfer started")
+
+    engine.handle = _fail
+    asyncio.run(proc._handle_caller_body("Please."))
+
+
 def test_rejections_are_not_echo():
     from app.pipeline import _is_cant_hear, _is_likely_bot_echo
 
