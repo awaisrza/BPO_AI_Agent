@@ -119,6 +119,19 @@ function ai_fronter_load_hopper(mysqli $db, string $campaign): void
            AND l.called_since_last_reset = 'N'
            AND h.lead_id IS NULL
            AND d.phone_number IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM vicidial_list dup
+             WHERE dup.list_id IN ({$listSql})
+               AND dup.phone_number = l.phone_number
+               AND dup.status IN ({$statusSql})
+               AND dup.called_since_last_reset = 'N'
+               AND dup.lead_id > l.lead_id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM vicidial_hopper hq
+             JOIN vicidial_list ql ON ql.lead_id = hq.lead_id
+             WHERE hq.campaign_id = '{$c}' AND ql.phone_number = l.phone_number
+           )
          ORDER BY l.lead_id
          LIMIT {$limit}"
     );

@@ -117,7 +117,21 @@ export async function runVicidialTestDial(
     detail: firstLine(remoteText),
   });
 
-  const addLeadText = await vd(
+  // Reuse the existing lead for this number — add_lead on every test dial filled the
+  // list with duplicates that all redial when their status is reset to NEW.
+  const { fixVicidialHopperReady } = await import("./hopper-fix");
+  const reuse = await fixVicidialHopperReady(creds, {
+    vicidialCampaignId: input.vicidialCampaignId,
+    phone_code: input.phone_code,
+    phone_number: input.phone_number,
+  });
+  if (reuse.ok) {
+    steps.push({ step: "reuse_lead", ok: true, detail: reuse.detail });
+  }
+
+  const addLeadText = reuse.ok
+    ? `SUCCESS: existing lead reused - ${reuse.detail}`
+    : await vd(
     creds,
     {
       function: "add_lead",
@@ -127,6 +141,7 @@ export async function runVicidialTestDial(
       first_name: "Test",
       last_name: "Dial",
       add_to_hopper: "Y",
+      duplicate_check: "DUPLIST",
       hopper_local_call_time_check: "N",
       dnc_check: "N",
       campaign_dnc_check: "N",
@@ -134,15 +149,18 @@ export async function runVicidialTestDial(
     },
     { timeoutMs: 60_000 },
   );
-  const leadOk = vicidialStepOk(addLeadText);
-  steps.push({
-    step: "add_lead",
-    ok: leadOk,
-    detail: firstLine(addLeadText),
-  });
+  // DUPLIST: reuse the existing lead (hopper fix below resets it to NEW + READY)
+  // instead of piling up copies that a later status reset would all dial.
+  const leadOk = vicidialStepOk(addLeadText) || /DUPLICATE/i.test(firstLine(addLeadText));
+  if (!reuse.ok) {
+    steps.push({
+      step: "add_lead",
+      ok: leadOk,
+      detail: firstLine(addLeadText),
+    });
+  }
 
-  if (leadOk) {
-    const { fixVicidialHopperReady } = await import("./hopper-fix");
+  if (leadOk && !reuse.ok) {
     const hopperFix = await fixVicidialHopperReady(creds, {
       vicidialCampaignId: input.vicidialCampaignId,
       phone_code: input.phone_code,
