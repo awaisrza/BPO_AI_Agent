@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { Download, RefreshCw, Search } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -135,16 +135,71 @@ export function LeadsPageClient() {
     return ["ALL", ...Array.from(set).sort()];
   }, [leads]);
 
+  function exportExcel() {
+    const rows = filtered.length ? filtered : leads;
+    if (!rows.length) {
+      setError("Nothing to export — sync leads first.");
+      return;
+    }
+    const escapeXml = (v: string) =>
+      v
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    const cell = (v: string | number, type: "String" | "Number" = "String") =>
+      `<Cell><Data ss:Type="${type}">${escapeXml(String(v ?? ""))}</Data></Cell>`;
+    const header = ["Lead ID", "Phone", "Name", "Status", "List", "Calls", "Last attempt"]
+      .map((h) => cell(h))
+      .join("");
+    const body = rows
+      .map(
+        (lead) =>
+          `<Row>${cell(lead.leadId, "Number")}${cell(lead.phone)}${cell(lead.name)}${cell(lead.status)}${cell(lead.listId, "Number")}${cell(lead.calledCount, "Number")}${cell(lead.lastAttempt || "")}</Row>`,
+      )
+      .join("");
+    const xml = `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="Leads">
+  <Table>
+   <Row>${header}</Row>
+   ${body}
+  </Table>
+ </Worksheet>
+</Workbook>`;
+    const blob = new Blob([xml], { type: "application/vnd.ms-excel" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `leads-${campaignId}-${stamp}.xls`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setHint(`Exported ${rows.length} lead(s) to Excel.`);
+  }
+
   return (
     <>
       <PageHeader
         title="Leads"
         description={`ViciDial list for campaign ${campaignId}. Sync pulls live dialer rows.`}
         action={
-          <Button variant="secondary" onClick={() => void sync()} disabled={syncing}>
-            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing…" : "Sync ViciDial"}
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              onClick={exportExcel}
+              disabled={loading || (!filtered.length && !leads.length)}
+            >
+              <Download className="h-4 w-4" />
+              Export Excel
+            </Button>
+            <Button variant="secondary" onClick={() => void sync()} disabled={syncing}>
+              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Syncing…" : "Sync ViciDial"}
+            </Button>
+          </>
         }
       />
 
