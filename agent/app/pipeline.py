@@ -1462,8 +1462,6 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if followup:
             logger.info(f"BOT follow-up queued: {followup[:64]!r}")
         transfer_now = turn.action == Action.TRANSFER
-        if transfer_now and self._telephony and not self._mic_test:
-            await self._execute_transfer()
         try:
             played = await self._speak_bot_text(turn.reply)
         except Exception as exc:
@@ -1473,6 +1471,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
 
                 trace_call(f"=== WARNING: speak failed: {exc!s} ===")
             self._call.finish_bot_playback()
+            if transfer_now and not self._mic_test:
+                await self._execute_transfer()
             return
         if self._telephony and (turn.reply or "").strip():
             from .call_trace import trace_call
@@ -1488,7 +1488,15 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         if transfer_now:
             if self._mic_test:
                 logger.info("MIC TEST -> qualified lead (warm transfer simulated)")
-            elif not self._telephony:
+            else:
+                if self._telephony:
+                    # Bridge buffers ~0.5-1s of audio; redirecting earlier cuts off
+                    # the end of the transfer line.
+                    tail_s = float(os.getenv("TRANSFER_AFTER_SPEECH_DELAY_S", "1.2") or "1.2")
+                    from .call_trace import trace_call
+
+                    trace_call(f"=== transfer line played — transferring in {tail_s:.1f}s ===")
+                    await asyncio.sleep(tail_s)
                 await self._execute_transfer()
             if not self._telephony_phone_test:
                 await self.push_frame(EndFrame())
