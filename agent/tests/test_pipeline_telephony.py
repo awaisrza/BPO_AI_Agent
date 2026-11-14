@@ -292,6 +292,36 @@ def test_early_yes_stops_playback_during_part_a():
     assert proc._direct_playback_cancel.is_set()
 
 
+def test_new_stt_does_not_cancel_running_flush():
+    """Pitch plays inside the flush task; later STT must not cancel it mid-playback."""
+    import asyncio
+
+    from app.pipeline import FronterProcessor
+
+    engine = _medicare_engine()
+    proc = FronterProcessor(engine, None, "6666", telephony=True)
+    proc._caller_flush_delay_s_effective = lambda: 0.01  # type: ignore[method-assign]
+    events: list[str] = []
+
+    async def fake_flush() -> None:
+        events.append("speak start")
+        await asyncio.sleep(0.3)
+        events.append("speak done")
+
+    proc._flush_caller_buffer = fake_flush  # type: ignore[method-assign]
+
+    async def run() -> None:
+        proc._schedule_caller_flush()
+        await asyncio.sleep(0.1)
+        assert events == ["speak start"]
+        proc._flush_caller_buffer = lambda: asyncio.sleep(0)  # type: ignore[method-assign]
+        proc._schedule_caller_flush()
+        await asyncio.sleep(0.4)
+
+    asyncio.run(run())
+    assert events == ["speak start", "speak done"]
+
+
 def test_merge_age_fragments():
     from app.pipeline import FronterProcessor
 

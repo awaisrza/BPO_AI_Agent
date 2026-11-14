@@ -1130,9 +1130,17 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         async def _delayed_flush() -> None:
             try:
                 await asyncio.sleep(delay_s)
-                await self._flush_caller_buffer()
             except asyncio.CancelledError:
-                pass
+                return
+            # Only the debounce sleep is cancellable. Once flushing starts it may run
+            # the bot reply (pitch acoustic wait); a later STT reschedule must not
+            # cancel it, or CallController stays SPEAKING for the rest of the call.
+            if self._flush_task is asyncio.current_task():
+                self._flush_task = None
+            try:
+                await self._flush_caller_buffer()
+            except Exception:  # noqa: BLE001
+                logger.exception("Caller flush failed")
 
         self._flush_task = asyncio.create_task(_delayed_flush())
 
