@@ -131,6 +131,11 @@ async def _transcribe_wav(
         for segment in segments:
             if segment.no_speech_prob < no_speech_prob:
                 text += f"{segment.text} "
+            else:
+                logger.info(
+                    f"STT dropped segment (no_speech_prob={segment.no_speech_prob:.2f} "
+                    f">= {no_speech_prob}): {segment.text.strip()!r}"
+                )
         return text.strip()
 
     async with _state.stt_lock:

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import time
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 from loguru import logger
 
@@ -50,6 +53,13 @@ class PooledWhisperSTTService(SegmentedSTTService):
         )
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        dump_dir = os.getenv("STT_DUMP_DIR", "").strip()
+        if dump_dir:
+            path = Path(dump_dir)
+            path.mkdir(parents=True, exist_ok=True)
+            wav_path = path / f"stt-{time.strftime('%H%M%S')}-{time.monotonic_ns() % 100000}.wav"
+            wav_path.write_bytes(audio)
+            logger.info(f"STT segment saved: {wav_path} ({len(audio)} bytes)")
         await self.start_processing_metrics()
         try:
             text = await self._client.transcribe(
