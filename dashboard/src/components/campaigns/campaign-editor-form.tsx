@@ -10,6 +10,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea, Input, Select, Field } from "@/components/ui/input";
 import type { VicidialCampaignOption } from "@/lib/vicidial/campaigns";
+import { normalizeVicidialCampaignId } from "@/lib/vicidial/campaigns";
 import type { VicidialCloser } from "@/lib/vicidial/closers";
 import { createClient, isSupabaseConfigured, supabaseConfigHelp } from "@/lib/supabase/client";
 import type { CampaignRow, CampaignStatus, KnowledgeEntry, ScriptJson } from "@/lib/types/database";
@@ -36,6 +37,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
   const [closers, setClosers] = useState<VicidialCloser[]>([]);
   const [closersLoading, setClosersLoading] = useState(false);
   const [closersError, setClosersError] = useState("");
+  const [botAgentUsers, setBotAgentUsers] = useState<string[]>([]);
   const [transferLine, setTransferLine] = useState("");
   const [notInterestedLine, setNotInterestedLine] = useState("");
   const [botCount, setBotCount] = useState(0);
@@ -89,7 +91,9 @@ export function CampaignEditorForm({ id }: { id: string }) {
         setTransferPreset(script.transfer_preset ?? "closers-01");
         setTransferCloserUser(script.transfer_closer_user ?? "");
         setTransferCloserName(script.transfer_closer_name ?? "");
-        setVicidialCampaignId(row.vicidial_campaign_id ?? "");
+        setVicidialCampaignId(
+          row.vicidial_campaign_id ? normalizeVicidialCampaignId(row.vicidial_campaign_id) : "",
+        );
         setKnowledge(
           (script.knowledge_base?.length ? script.knowledge_base : DEFAULT_KNOWLEDGE_BASE).map(
             toKnowledgeDraft,
@@ -102,6 +106,13 @@ export function CampaignEditorForm({ id }: { id: string }) {
           .eq("campaign_id", id);
 
         setBotCount(count ?? 0);
+
+        const { data: botRows } = await supabase.from("bots").select("vicidial_agent_user");
+        setBotAgentUsers(
+          (botRows ?? [])
+            .map((b) => (b.vicidial_agent_user as string | null)?.trim() ?? "")
+            .filter(Boolean),
+        );
       } catch (err) {
         const code = (err as { code?: string } | null)?.code;
         if (code === "PGRST116") {
@@ -135,6 +146,13 @@ export function CampaignEditorForm({ id }: { id: string }) {
         return;
       }
       setVicidialCampaigns(data.campaigns ?? []);
+      if (data.campaigns?.length) {
+        setVicidialCampaignId((current) => {
+          const normalized = normalizeVicidialCampaignId(current);
+          if (normalized !== current) return normalized;
+          return current;
+        });
+      }
     } catch {
       setVicidialCampaignsError("Could not reach ViciDial.");
     } finally {
@@ -283,6 +301,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
           outbound_cid: testOutboundCid.trim() || undefined,
           start_campaign: false,
           skip_gpu_wait: true,
+          vicidial_campaign_id: normalizeVicidialCampaignId(vicidialCampaignId),
         }),
       });
       const data = await readJsonResponse<{
@@ -382,16 +401,20 @@ export function CampaignEditorForm({ id }: { id: string }) {
         knowledge_base: knowledge.map(fromKnowledgeDraft).filter((entry) => entry.answer),
       };
 
+      const vdCampaignId = normalizeVicidialCampaignId(vicidialCampaignId) || null;
+
       const { error: updateError } = await supabase
         .from("campaigns")
         .update({
           name: trimmedName,
           script_json,
-          vicidial_campaign_id: vicidialCampaignId.trim() || null,
+          vicidial_campaign_id: vdCampaignId,
         })
         .eq("id", id);
 
       if (updateError) throw updateError;
+
+      setVicidialCampaignId(vdCampaignId ?? "");
 
       setSaved(true);
       router.refresh();
@@ -493,10 +516,10 @@ export function CampaignEditorForm({ id }: { id: string }) {
               </Field>
               <Field
                 label="ViciDial campaign ID"
-                description="Must match the campaign ID in the BPO dialer (hopper / lists)."
+                description="Must match the campaign ID in the BPO dialer (hopper / lists). Use only the ID (e.g. test_cam), not a full CSV row."
                 className="sm:col-span-2"
               >
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <Input
                     list="vicidial-campaign-options"
                     value={vicidialCampaignId}
@@ -504,9 +527,34 @@ export function CampaignEditorForm({ id }: { id: string }) {
                       setVicidialCampaignId(e.target.value);
                       setSaved(false);
                     }}
-                    placeholder="e.g. MEDICARE01"
-                    className="font-mono text-sm"
+                    onBlur={(e) => {
+                      const n = normalizeVicidialCampaignId(e.target.value);
+                      if (n !== e.target.value) {
+                        setVicidialCampaignId(n);
+                        setSaved(false);
+                      }
+                    }}
+                    placeholder="e.g. test_cam"
+                    className="font-mono text-sm sm:flex-1"
                   />
+                  {vicidialCampaigns.length > 0 ? (
+                    <Select
+                      value={vicidialCampaignId || ""}
+                      onChange={(e) => {
+                        setVicidialCampaignId(e.target.value);
+                        setSaved(false);
+                      }}
+                      className="font-mono text-sm sm:max-w-xs"
+                    >
+                      <option value="">Pick campaign…</option>
+                      {vicidialCampaigns.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.id}
+                          {c.name !== c.id ? ` — ${c.name}` : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : null}
                   <Button
                     type="button"
                     variant="secondary"
@@ -517,6 +565,11 @@ export function CampaignEditorForm({ id }: { id: string }) {
                     <RefreshCw className={`h-3.5 w-3.5 ${vicidialCampaignsLoading ? "animate-spin" : ""}`} />
                   </Button>
                 </div>
+                {vicidialCampaigns.length > 0 && (
+                  <p className="mt-1.5 text-xs text-foreground-muted">
+                    {vicidialCampaigns.length} campaign(s) from ViciDial — choose from the list or type the ID, then Save.
+                  </p>
+                )}
                 {vicidialCampaignsError && (
                   <p className="mt-1.5 text-xs text-status-danger">{vicidialCampaignsError}</p>
                 )}
@@ -712,14 +765,47 @@ export function CampaignEditorForm({ id }: { id: string }) {
                   <option value="">
                     {closersLoading ? "Loading closers…" : "Select a closer"}
                   </option>
-                  {closers.map((closer) => (
-                    <option key={closer.user} value={closer.user}>
-                      {closer.fullName}
-                      {closer.available ? " · Available" : " · On a call"}
+                  {closers
+                    .filter((closer) => !botAgentUsers.includes(closer.user))
+                    .map((closer) => (
+                      <option key={closer.user} value={closer.user}>
+                        {closer.fullName}
+                        {closer.available ? " · Available" : " · On a call"}
+                      </option>
+                    ))}
+                  {transferCloserUser.startsWith("+") && (
+                    <option value={transferCloserUser}>Phone {transferCloserUser}</option>
+                  )}
+                  {botAgentUsers.includes(transferCloserUser) && (
+                    <option value={transferCloserUser}>
+                      {transferCloserUser} (AI bot — cannot be its own closer)
                     </option>
-                  ))}
+                  )}
                 </Select>
               </Field>
+
+              <Field
+                label="Or transfer to a phone number"
+                description="E.164, e.g. +923009311352. ViciDial dials it through your carrier when a lead qualifies."
+              >
+                <Input
+                  value={transferCloserUser.startsWith("+") ? transferCloserUser : ""}
+                  placeholder="+923009311352"
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/[^\d]/g, "");
+                    setTransferCloserUser(digits ? `+${digits}` : "");
+                    setTransferCloserName(digits ? `Phone +${digits}` : "");
+                    setSaved(false);
+                  }}
+                />
+              </Field>
+
+              {botAgentUsers.includes(transferCloserUser) && (
+                <p className="rounded-md border border-status-warning/30 bg-status-warning-muted px-4 py-3 text-body text-status-warning">
+                  {transferCloserUser} is an AI bot agent — transfers would loop back to the bot.
+                  Pick a human closer or enter a phone number.
+                </p>
+              )}
 
               {closersError && (
                 <p className="rounded-md border border-status-warning/30 bg-status-warning-muted px-4 py-3 text-body text-status-warning">

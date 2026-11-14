@@ -1507,7 +1507,12 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         token = (closer or "").strip()
         if not token:
             return None
-        if token.startswith("+") or token.isdigit():
+        if token.startswith("+"):
+            # EXTENSIONTRANSFER runs Goto(default,<ext>) — external numbers need the
+            # carrier dial prefix used by the ViciDial dialplan (e.g. _9923XXXXXXXXX).
+            prefix = os.getenv("VICIDIAL_TRANSFER_DIAL_PREFIX", "9").strip()
+            return prefix + "".join(ch for ch in token if ch.isdigit())
+        if token.isdigit():
             return token
         digits = "".join(ch for ch in token if ch.isdigit())
         return digits if len(digits) >= 3 else None
