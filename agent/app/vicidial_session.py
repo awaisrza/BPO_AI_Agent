@@ -409,6 +409,12 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             end_reason = reason
             await shutdown.end_call(reason)
 
+        from .supabase_scripts import refresh_transfer_settings
+
+        asyncio.get_running_loop().run_in_executor(
+            None, refresh_transfer_settings, ctx.script, ctx.campaign_id
+        )
+
         vici = ctx.vicidial_client()
         build_started = time.monotonic()
         _event(

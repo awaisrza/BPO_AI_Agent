@@ -1548,6 +1548,10 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             or settings.vicidial_transfer_preset
         )
 
+        if self._telephony:
+            from .call_trace import trace_call
+
+            trace_call(f"=== TRANSFER closer={closer or '-'} preset={preset or '-'} ===")
         call_id = await self._resolve_vicidial_call_id()
         if call_id:
             extension = self._transfer_extension(closer)

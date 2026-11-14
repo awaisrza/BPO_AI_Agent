@@ -170,6 +170,37 @@ def load_bot_context(bot_id: str) -> BotRunContext:
     )
 
 
+_TRANSFER_FIELDS = ("transfer_closer_user", "transfer_closer_name", "transfer_preset")
+
+
+def refresh_transfer_settings(script: ScriptConfig, campaign_id: str | None) -> None:
+    """Re-read closer/preset from Supabase into ``script`` (workers outlive dashboard edits)."""
+    if not campaign_id:
+        return
+    try:
+        base, key = supabase_config()
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get(
+                f"{base}/rest/v1/campaigns",
+                params={"id": f"eq.{campaign_id}", "select": "script_json"},
+                headers=supabase_headers(key),
+            )
+            resp.raise_for_status()
+            rows = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Transfer settings refresh failed (keeping startup values): {exc}")
+        return
+    if not rows:
+        return
+    data = rows[0].get("script_json") or {}
+    for field in _TRANSFER_FIELDS:
+        value = data.get(field)
+        value = str(value).strip() if value is not None else None
+        if (getattr(script, field) or None) != (value or None):
+            logger.info(f"Campaign {field} updated: {getattr(script, field)!r} -> {value!r}")
+        setattr(script, field, value or None)
+
+
 def load_script_for_bot(bot_id: str) -> tuple[ScriptConfig, str]:
     """Load script via bot → assigned campaign. Returns (script, vicidial_agent_user)."""
     ctx = load_bot_context(bot_id)
