@@ -69,6 +69,21 @@ export async function runVicidialTestDial(
     detail: firstLine(versionText),
   });
 
+  const { runVicidialPreflight } = await import("./hopper-fix");
+  const preflight = await runVicidialPreflight(creds, {
+    vicidialCampaignId: input.vicidialCampaignId,
+    agentUser: input.remoteAgentUser,
+  });
+  steps.push({ step: "dialer_preflight", ok: preflight.ok, detail: preflight.detail });
+  if (!preflight.ok) {
+    return {
+      ok: false,
+      steps,
+      hopperPreview: "",
+      message: `Dialer not ready — no call placed: ${preflight.detail}`,
+    };
+  }
+
   const campaignParams: Record<string, string> = {
     function: "update_campaign",
     campaign_id: input.vicidialCampaignId,
@@ -126,6 +141,20 @@ export async function runVicidialTestDial(
     detail: firstLine(addLeadText),
   });
 
+  if (leadOk) {
+    const { fixVicidialHopperReady } = await import("./hopper-fix");
+    const hopperFix = await fixVicidialHopperReady(creds, {
+      vicidialCampaignId: input.vicidialCampaignId,
+      phone_code: input.phone_code,
+      phone_number: input.phone_number,
+    });
+    steps.push({
+      step: "hopper_ready",
+      ok: hopperFix.ok,
+      detail: hopperFix.detail,
+    });
+  }
+
   let hopperPreview = "";
   let hopperHasNew = false;
   try {
@@ -164,14 +193,19 @@ export async function runVicidialTestDial(
 
   let message: string;
   if (criticalOk) {
+    const hopperStep = steps.find((s) => s.step === "hopper_ready");
+    const hopperFixHint = hopperStep?.ok
+      ? "Hopper set to READY on dialer — expect a dial within ~30–60s."
+      : hopperStep?.detail ||
+        "On the ViciDial server run: bash fix_test_hopper.sh test_cam 92 3142222318";
     if (remoteOk) {
-      message = `Test lead ${e164} is in the hopper. ViciDial should dial within ~30–60s if the GPU worker is running. If the phone rings but is silent, the answered call is not bridged to the GPU bot yet — run capture_after_call.sh on the ViciDial server.`;
+      message = `Test lead ${e164} is in the hopper. ${hopperFixHint} If the phone rings but is silent, check /var/log/ai-fronter-bridge.log on the dialer.`;
     } else if (remoteDetail.includes("ALREADY ACTIVE")) {
-      message = `Test lead ${e164} is in the hopper. Remote agent was already active — ViciDial should dial shortly. If you hear silence on answer, run capture_after_call.sh on the ViciDial server.`;
+      message = `Test lead ${e164} is in the hopper. ${hopperFixHint}`;
     } else {
       message =
         `Test lead ${e164} is in the hopper. Remote agent API step skipped (${remoteDetail || "permission denied"}). ` +
-        "If agent 6666 is already ACTIVE in ViciDial Admin → Remote Agents, dialing should still work.";
+        hopperFixHint;
     }
   } else {
     const failed = steps.filter((s) => !s.ok).map((s) => s.step);

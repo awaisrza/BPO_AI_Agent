@@ -9,8 +9,25 @@ import uvicorn
 from fastapi import FastAPI, WebSocket
 from loguru import logger
 
+import httpx
+
 from .bot_context import BotRunContext
+from .inference_client import inference_pool_url
 from .vicidial_session import call_runner_ready, run_vicidial_call
+
+
+def inference_pool_error() -> str | None:
+    """None when no pool is configured or it reports Whisper + Chatterbox loaded."""
+    url = inference_pool_url()
+    if not url:
+        return None
+    try:
+        body = httpx.get(f"{url.rstrip('/')}/health", timeout=2.0).json()
+    except Exception as exc:
+        return f"inference pool unreachable: {exc}"
+    if not body.get("ok") or not body.get("whisper_loaded"):
+        return f"inference pool not loaded: {body.get('error') or 'warming'}"
+    return None
 
 
 def create_worker_app(ctx: BotRunContext) -> FastAPI:
@@ -19,9 +36,13 @@ def create_worker_app(ctx: BotRunContext) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str | int | None | bool]:
         ready = call_runner_ready()
+        pool_error = inference_pool_error()
+        if pool_error:
+            ready = False
         return {
             "ok": "true",
             "ready": ready,
+            "pool_error": pool_error,
             "bot_id": ctx.bot_id,
             "agent_user": ctx.agent_user,
             "vicidial_campaign_id": ctx.vicidial_campaign_id,

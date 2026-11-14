@@ -104,8 +104,10 @@ export async function fetchGpuWorkerHealth(): Promise<GpuWorkerHealthStatus> {
       };
     }
 
-    const busyHint =
-      "ready" in body
+    const poolError = typeof body.pool_error === "string" ? body.pool_error : "";
+    const busyHint = poolError
+      ? `Whisper/Chatterbox not ready on GPU — ${poolError}.`
+      : "ready" in body
         ? "Worker is up but busy finishing the previous call."
         : "Worker responded but is not ready.";
 
