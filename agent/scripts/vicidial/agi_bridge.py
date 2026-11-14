@@ -34,7 +34,8 @@ Test without Asterisk:
 
 AudioSocket (when EAGI fd 3 is broken — CyburDial/Asterisk 18+):
   python3 ai-fronter-bridge.py --serve-audiosocket 6666
-  Dialplan: Answer() then AudioSocket(${UUID()},127.0.0.1:9092)
+  Dialplan: Answer(), Set(AS_UUID=${FILTER(0-9a-f-,${SHELL(cat /proc/sys/kernel/random/uuid)})}),
+  then AudioSocket(${AS_UUID},127.0.0.1:9092)
 """
 
 from __future__ import annotations
@@ -406,12 +407,16 @@ def _lookup_vicidial_call_id(agent_user: str) -> str:
                 continue
             for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
                 line = line.strip()
-                if line.startswith("VARDB_user") and "=" in line:
-                    mysql_user = line.split("=", 1)[1].strip()
-                elif line.startswith("VARDB_pass") and "=" in line:
-                    mysql_pass = line.split("=", 1)[1].strip()
-                elif line.startswith("VARDB_database") and "=" in line:
-                    mysql_db = line.split("=", 1)[1].strip() or mysql_db
+                if "=" not in line:
+                    continue
+                # astguiclient.conf uses "VARDB_user => cron"
+                value = line.split("=", 1)[1].lstrip(">").strip()
+                if line.startswith("VARDB_user"):
+                    mysql_user = value
+                elif line.startswith("VARDB_pass"):
+                    mysql_pass = value
+                elif line.startswith("VARDB_database"):
+                    mysql_db = value or mysql_db
             if mysql_user:
                 break
     if not mysql_user:
@@ -675,27 +680,53 @@ class AudioSocketGpuBridge:
         """Single 20 ms ticker — prevents Asterisk AudioSocket EAGAIN aborts."""
         _log("AudioSocket writer thread started (20ms ticker)")
         next_t = time.monotonic()
-        while not self._stop.is_set():
-            now = time.monotonic()
-            delay = next_t - now
-            if delay > 0:
-                # Short waits so _stop is noticed quickly.
-                self._stop.wait(min(delay, 0.005))
-                continue
-            next_t += 0.02
-            if next_t < time.monotonic() - 0.05:
-                # Fell behind (GC/pause) — resync rather than catch-up blasting.
-                next_t = time.monotonic() + 0.02
-            try:
-                frame = self._audio_q.get_nowait()
-            except queue.Empty:
-                frame = self._comfort_slin_frame()
-            if len(frame) != SLIN_CHUNK_BYTES:
-                frame = (frame + b"\x00" * SLIN_CHUNK_BYTES)[:SLIN_CHUNK_BYTES]
-            if not _as_write_frame(self._conn, _AS_TYPE_AUDIO, frame):
-                self._stop.set()
-                break
-            self._touch_as_write()
+        speech_frames = 0
+        speech_peak = 0
+        speech_started = 0.0
+        try:
+            while not self._stop.is_set():
+                now = time.monotonic()
+                delay = next_t - now
+                if delay > 0:
+                    # Short waits so _stop is noticed quickly.
+                    self._stop.wait(min(delay, 0.005))
+                    continue
+                next_t += 0.02
+                if next_t < time.monotonic() - 0.05:
+                    # Fell behind (GC/pause) — resync rather than catch-up blasting.
+                    next_t = time.monotonic() + 0.02
+                try:
+                    frame = self._audio_q.get_nowait()
+                    if speech_frames == 0:
+                        speech_started = time.monotonic()
+                    speech_frames += 1
+                    speech_peak = max(speech_peak, audioop.max(frame, 2))
+                except queue.Empty:
+                    frame = self._comfort_slin_frame()
+                    if speech_frames:
+                        _log(
+                            f"AudioSocket played {speech_frames} bot frames "
+                            f"({speech_frames * 20}ms audio in "
+                            f"{(time.monotonic() - speech_started) * 1000:.0f}ms, "
+                            f"peak={speech_peak})"
+                        )
+                        speech_frames = 0
+                        speech_peak = 0
+                if len(frame) != SLIN_CHUNK_BYTES:
+                    frame = (frame + b"\x00" * SLIN_CHUNK_BYTES)[:SLIN_CHUNK_BYTES]
+                write_t = time.monotonic()
+                if not _as_write_frame(self._conn, _AS_TYPE_AUDIO, frame):
+                    self._stop.set()
+                    break
+                blocked_ms = (time.monotonic() - write_t) * 1000.0
+                if blocked_ms > 200:
+                    _log(f"AudioSocket write blocked {blocked_ms:.0f}ms (Asterisk not reading)")
+                self._touch_as_write()
+        except Exception as exc:  # noqa: BLE001
+            _log(f"AudioSocket writer crashed: {exc!r}")
+            self._stop.set()
+        if speech_frames:
+            _log(f"AudioSocket writer stopped mid-speech after {speech_frames} frames")
 
     def _start_writer_thread(self) -> None:
         if self._writer_thread is not None and self._writer_thread.is_alive():
@@ -817,11 +848,12 @@ class AudioSocketGpuBridge:
         self._gpu_media_packets += 1
         if short_padded:
             _log(f"AudioSocket padded {short_padded} short frame(s) to {chunk} bytes")
-        if not self._wrote_audio:
+        if not self._wrote_audio or len(ulaw) > 4000:
             self._wrote_audio = True
             _log(
-                f"AudioSocket queued first bot audio "
-                f"({len(slin)} bytes slin → {queued} frames)"
+                f"AudioSocket queued bot audio "
+                f"({len(slin)} bytes slin → {queued} frames, qsize={self._audio_q.qsize()}, "
+                f"writer_alive={bool(self._writer_thread and self._writer_thread.is_alive())})"
             )
         return True
 
@@ -1093,7 +1125,7 @@ class AudioSocketGpuBridge:
                 if not self._forward_caller_payload(payload):
                     end_reason = "gpu_forward_failed"
                     break
-            elif msg_type not in (_AS_TYPE_UUID, _AS_TYPE_DTMF):
+            elif msg_type not in (_AS_TYPE_UUID, _AS_TYPE_DTMF, _AS_TYPE_AUDIO):
                 _log(f"AudioSocket ignoring frame type=0x{msg_type:02x}")
         duration_s = time.monotonic() - self._session_started
         _log(
