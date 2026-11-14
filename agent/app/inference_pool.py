@@ -103,12 +103,6 @@ def _wav_to_float32(wav_bytes: bytes) -> tuple[np.ndarray, int]:
     return audio, sample_rate
 
 
-_TELEPHONY_WHISPER_PROMPT = (
-    "Medicare outbound phone call. Caller answers yes, no, okay, their age in years, "
-    "or asks who is calling, why you are calling, or if they already have benefits."
-)
-
-
 async def _transcribe_wav(
     wav_bytes: bytes,
     *,
@@ -120,13 +114,11 @@ async def _transcribe_wav(
     audio, _sample_rate = _wav_to_float32(wav_bytes)
 
     def _run() -> str:
-        kwargs: dict[str, object] = {
-            "language": "en",
-            "vad_filter": False,
-        }
-        if telephony:
-            kwargs["initial_prompt"] = _TELEPHONY_WHISPER_PROMPT
-        segments, _info = _state.whisper_model.transcribe(audio, **kwargs)
+        # No initial_prompt on telephony: a Medicare/age prompt made Whisper truncate
+        # "I am 82 years old" to "I am." and return empty for bare numbers.
+        segments, _info = _state.whisper_model.transcribe(
+            audio, language="en", vad_filter=False
+        )
         text = ""
         for segment in segments:
             if segment.no_speech_prob < no_speech_prob:
