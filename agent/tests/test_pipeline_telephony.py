@@ -265,6 +265,22 @@ def test_bare_yes_not_echo_dropped_during_part_a_tail():
     assert proc2._should_drop_stt_as_echo("Yes.")
 
 
+def test_rejections_are_not_echo():
+    from app.pipeline import _is_cant_hear, _is_likely_bot_echo
+
+    bot = (
+        "I'm sorry about that - I can note that for you. Before I update it, it's just a "
+        "quick eligibility check - fair enough? I'm calling because you already have "
+        "Medicare benefits you may not know about."
+    )
+    assert not _is_likely_bot_echo("No.", bot)
+    assert not _is_likely_bot_echo("I have already benefits.", bot)
+    assert not _is_likely_bot_echo("I'm not interested.", bot)
+    assert _is_likely_bot_echo("fair enough", bot)
+    assert _is_likely_bot_echo("quick eligibility check", bot)
+    assert _is_cant_hear("Don't you hear me?")
+
+
 def test_early_yes_stops_playback_during_part_a():
     from app.config import ScriptConfig
     from app.conversation import ConversationEngine

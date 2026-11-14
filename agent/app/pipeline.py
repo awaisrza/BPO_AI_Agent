@@ -150,7 +150,10 @@ _CANT_HEAR_MARKERS = (
     "can't fear",  # common STT mangling of "can't hear"
     "can't share you",
     "i don't hear",
+    "don't you hear",
+    "do you hear me",
     "not hearing",
+    "are you there",
 )
 
 
@@ -224,13 +227,28 @@ def _is_whisper_phantom(text: str) -> bool:
     return False
 
 
+_CALLER_INTENT_WORDS = frozenset(
+    {
+        "no", "nope", "nah", "not", "don", "dont", "never", "already",
+        "stop", "remove", "busy", "wrong", "hear", "interested", "who", "why",
+    }
+)
+
+
 def _is_likely_bot_echo(text: str, bot_reply: str) -> bool:
     """True when STT is the bot hearing itself (e.g. 'you can' from 'you qualify')."""
     t = _normalize_echo_text(text)
     b = _normalize_echo_text(bot_reply)
     if not t or not b:
         return False
-    if t in b:
+    verbatim = f" {t} " in f" {b} "
+    if verbatim and len(t.split()) >= 3:
+        return True
+    # Rejections/objections ("No.", "I already have benefits", "not interested") reuse
+    # words from the pitch — treating them as echo silently ignored the caller.
+    if set(t.split()) & _CALLER_INTENT_WORDS:
+        return False
+    if verbatim:
         return True
     t_words = t.split()
     b_words = b.split()
@@ -408,6 +426,8 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             if self._expects_yes_no_qualify_answer():
                 if _is_bare_yes_stt(text) or _is_yes_elaboration(text):
                     return False
+            if set(t.split()) & _CALLER_INTENT_WORDS:
+                return False
             # Mid-playback short acks on age asks — usually echo or impatience.
             if len(t.split()) <= 4 and not _is_cant_hear(text):
                 return True
