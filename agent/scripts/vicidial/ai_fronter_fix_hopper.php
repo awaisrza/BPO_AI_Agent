@@ -24,7 +24,7 @@ $campaign = preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) ($_GET['campaign_id']
 $pcode = preg_replace('/\D/', '', (string) ($_GET['phone_code'] ?? ''));
 $pnum = preg_replace('/\D/', '', (string) ($_GET['phone_number'] ?? ''));
 $action = (string) ($_GET['action'] ?? 'hopper');
-$noPhoneActions = ['preflight', 'load_hopper', 'clear_hopper'];
+$noPhoneActions = ['preflight', 'load_hopper', 'clear_hopper', 'set_remote_agent'];
 if ($campaign === '' || (!in_array($action, $noPhoneActions, true) && ($pcode === '' || $pnum === ''))) {
     http_response_code(400);
     echo "ERROR: campaign_id, phone_code, phone_number required\n";
@@ -68,6 +68,45 @@ if ($action === 'clear_hopper') {
     $c = $mysqli->real_escape_string($campaign);
     $mysqli->query("DELETE FROM vicidial_hopper WHERE campaign_id='{$c}' AND status IN ('READY','NEW')");
     echo "OK: hopper cleared ({$mysqli->affected_rows} lead(s)) campaign={$campaign}\n";
+    exit;
+}
+if ($action === 'set_remote_agent') {
+    // Dashboard API user often lacks modify_remote_agents — toggle via MySQL instead.
+    $agent = preg_replace('/\D/', '', (string) ($_GET['agent_user'] ?? '6666'));
+    $status = strtoupper((string) ($_GET['status'] ?? 'ACTIVE'));
+    if ($status !== 'ACTIVE' && $status !== 'INACTIVE') {
+        echo "ERROR: status must be ACTIVE or INACTIVE\n";
+        exit;
+    }
+    if ($agent === '') {
+        echo "ERROR: agent_user required\n";
+        exit;
+    }
+    $a = $mysqli->real_escape_string($agent);
+    $c = $mysqli->real_escape_string($campaign);
+    $s = $mysqli->real_escape_string($status);
+    $mysqli->query(
+        "UPDATE vicidial_remote_agents SET status='{$s}', campaign_id='{$c}', number_of_lines=1
+         WHERE user_start='{$a}'"
+    );
+    if ($mysqli->affected_rows < 1) {
+        $check = $mysqli->query("SELECT status, campaign_id FROM vicidial_remote_agents WHERE user_start='{$a}'");
+        $row = $check ? $check->fetch_assoc() : null;
+        if (!$row) {
+            echo "ERROR: remote agent {$agent} not found\n";
+            exit;
+        }
+        // Already at the requested status/campaign — treat as success.
+        echo "OK: remote agent {$agent} already {$row['status']} on {$row['campaign_id']}\n";
+        exit;
+    }
+    if ($status === 'INACTIVE') {
+        $mysqli->query(
+            "UPDATE vicidial_live_agents SET status='PAUSED', lead_id=0, uniqueid='', callerid='', channel='', comments=''
+             WHERE user='{$a}'"
+        );
+    }
+    echo "OK: remote agent {$agent} set {$status} on {$campaign}\n";
     exit;
 }
 

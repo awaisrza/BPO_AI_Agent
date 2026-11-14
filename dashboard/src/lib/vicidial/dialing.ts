@@ -50,18 +50,23 @@ export async function startVicidialDialing(
     };
   }
 
-  const remoteLine = await vd(creds, {
-    function: "update_remote_agent",
-    agent_user: input.agentUser,
+  // API user often lacks modify_remote_agents — activate via dialer MySQL helper.
+  const remote = await runVicidialHopperAction(creds, {
+    vicidialCampaignId: input.vicidialCampaignId,
+    action: "set_remote_agent",
+    agentUser: input.agentUser,
     status: "ACTIVE",
-    campaign_id: input.vicidialCampaignId,
-    number_of_lines: "1",
   });
-  const remoteOk = apiOk(remoteLine) || remoteLine.includes("ALREADY ACTIVE");
-  steps.push({ step: "update_remote_agent", ok: remoteOk, detail: remoteLine });
+  steps.push({ step: "activate_remote_agent", ok: remote.ok, detail: remote.detail });
+  if (!remote.ok) {
+    return {
+      ok: false,
+      steps,
+      message: `Could not activate remote agent ${input.agentUser}: ${remote.detail}`,
+    };
+  }
 
-  // Pause sets the remote agent INACTIVE; ASTVDremote logs it back in a few seconds
-  // after it is ACTIVE again, so retry the "not logged in" preflight for a while.
+  // ASTVDremote logs the agent in a few seconds after status becomes ACTIVE.
   let preflight = await runVicidialPreflight(creds, input);
   for (let i = 0; i < 10 && !preflight.ok && /not logged in/i.test(preflight.detail); i++) {
     await new Promise((resolve) => setTimeout(resolve, 3_000));
@@ -98,16 +103,13 @@ export async function stopVicidialDialing(
   input: { vicidialCampaignId: string; agentUser: string },
 ): Promise<DialingResult> {
   const steps: DialingStep[] = [];
-  const remoteLine = await vd(creds, {
-    function: "update_remote_agent",
-    agent_user: input.agentUser,
+  const remote = await runVicidialHopperAction(creds, {
+    vicidialCampaignId: input.vicidialCampaignId,
+    action: "set_remote_agent",
+    agentUser: input.agentUser,
     status: "INACTIVE",
   });
-  steps.push({
-    step: "remote_agent_inactive",
-    ok: apiOk(remoteLine),
-    detail: remoteLine,
-  });
+  steps.push({ step: "remote_agent_inactive", ok: remote.ok, detail: remote.detail });
   const hopper = await runVicidialHopperAction(creds, {
     vicidialCampaignId: input.vicidialCampaignId,
     action: "clear_hopper",

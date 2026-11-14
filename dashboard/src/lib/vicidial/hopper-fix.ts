@@ -67,10 +67,15 @@ export async function runVicidialPreflight(
   }
 }
 
-/** action=load_hopper / clear_hopper on ai_fronter_fix_hopper.php. */
+/** action=load_hopper / clear_hopper / set_remote_agent on ai_fronter_fix_hopper.php. */
 export async function runVicidialHopperAction(
   creds: VicidialCredentials,
-  input: { vicidialCampaignId: string; action: "load_hopper" | "clear_hopper" },
+  input: {
+    vicidialCampaignId: string;
+    action: "load_hopper" | "clear_hopper" | "set_remote_agent";
+    agentUser?: string;
+    status?: "ACTIVE" | "INACTIVE";
+  },
 ): Promise<{ ok: boolean; detail: string }> {
   const secret = process.env.VICIDIAL_HOPPER_FIX_SECRET?.trim();
   const base = normalizeVicidialUrl(creds.baseUrl);
@@ -86,6 +91,8 @@ export async function runVicidialHopperAction(
   url.searchParams.set("secret", secret);
   url.searchParams.set("action", input.action);
   url.searchParams.set("campaign_id", input.vicidialCampaignId);
+  if (input.agentUser) url.searchParams.set("agent_user", input.agentUser);
+  if (input.status) url.searchParams.set("status", input.status);
   try {
     const res = await fetch(url.toString(), {
       method: "GET",
@@ -93,11 +100,11 @@ export async function runVicidialHopperAction(
     });
     const line = (await res.text()).trim().split(/\r?\n/)[0] ?? "";
     if (line.startsWith("OK:")) return { ok: true, detail: line.replace(/^OK:\s*/, "") };
-    if (line.includes("phone_number required")) {
+    if (line.includes("phone_number required") || /forbidden/i.test(line)) {
       return {
         ok: false,
         detail:
-          "Dialer helper is outdated — copy the latest ai_fronter_fix_hopper.php to /var/www/html/vicidial/.",
+          "Dialer helper is outdated or secret mismatch — copy the latest ai_fronter_fix_hopper.php to /var/www/html/vicidial/.",
       };
     }
     return {
