@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -50,12 +50,10 @@ export function LeadsPageClient() {
   const [campaignId, setCampaignId] = useState("test_cam");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
   const [hint, setHint] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [search, setSearch] = useState("");
-  const [newPhone, setNewPhone] = useState("");
 
   const sync = useCallback(async () => {
     setSyncing(true);
@@ -88,37 +86,6 @@ export function LeadsPageClient() {
   useEffect(() => {
     void sync();
   }, [sync]);
-
-  async function addLead() {
-    setAdding(true);
-    setError("");
-    try {
-      const res = await fetch("/api/vicidial/leads", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          phone: newPhone.trim(),
-          campaign_id: campaignId,
-          status: "NEW",
-        }),
-      });
-      const data = await readJsonResponse<{
-        error?: string;
-        message?: string;
-        leads?: VicidialLead[];
-        summary?: VicidialLeadSummary;
-      }>(res);
-      if (!res.ok) throw new Error(data.error ?? "Could not add lead.");
-      setLeads(data.leads ?? []);
-      setSummary(data.summary ?? emptySummary);
-      setHint(data.message ?? "Lead saved as NEW.");
-      setNewPhone("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add lead.");
-    } finally {
-      setAdding(false);
-    }
-  }
 
   async function resetToNew(lead: VicidialLead) {
     setError("");
@@ -199,27 +166,6 @@ export function LeadsPageClient() {
         <StatCard label="Transferred" value={summary.transferred.toLocaleString()} />
         <StatCard label="DNC" value={summary.dnc.toLocaleString()} />
       </div>
-
-      <Card className="mb-6">
-        <CardHeader
-          title="Add / reset lead"
-          description="Saves the number on the dialer as NEW so Run campaign can dial it."
-        />
-        <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <div className="flex-1">
-            <label className="mb-1.5 block text-caption text-foreground-muted">Phone (E.164)</label>
-            <Input
-              value={newPhone}
-              onChange={(e) => setNewPhone(e.target.value)}
-              placeholder="+923142222318"
-            />
-          </div>
-          <Button onClick={() => void addLead()} disabled={adding || !newPhone.trim()}>
-            <Plus className="h-4 w-4" />
-            {adding ? "Saving…" : "Save as NEW"}
-          </Button>
-        </CardBody>
-      </Card>
 
       <Card>
         <CardHeader
