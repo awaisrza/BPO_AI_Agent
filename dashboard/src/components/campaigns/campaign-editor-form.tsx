@@ -55,6 +55,46 @@ export function CampaignEditorForm({ id }: { id: string }) {
   const [testDialProgress, setTestDialProgress] = useState<string[]>([]);
   const [runProgress, setRunProgress] = useState<string[]>([]);
 
+  // While Running, poll the dialer — when every lead is dialed, auto-pause (Pause → Run).
+  useEffect(() => {
+    if (campaignStatus !== "running" || togglingStatus) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/campaigns/${id}/dialing-status`, { cache: "no-store" });
+        const data = await readJsonResponse<{
+          done?: boolean;
+          autoPaused?: boolean;
+          status?: CampaignStatus;
+          message?: string;
+          detail?: string;
+          error?: string;
+        }>(res);
+        if (cancelled || !res.ok) return;
+        if (data.autoPaused || (data.done && data.status === "paused")) {
+          setCampaignStatus("paused");
+          setReadinessHint(
+            data.message ??
+              "All leads dialed — campaign paused. Reset leads to NEW on the Leads page to run again.",
+          );
+          setRunProgress((prev) => [
+            ...prev,
+            `✓ dialing finished: ${data.detail ?? "hopper empty"}`,
+          ]);
+          router.refresh();
+        }
+      } catch {
+        /* ignore transient poll errors */
+      }
+    };
+    void tick();
+    const timer = setInterval(() => void tick(), 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [campaignStatus, togglingStatus, id, router]);
+
   useEffect(() => {
     async function load() {
       if (!isSupabaseConfigured()) {
@@ -496,9 +536,9 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
       {campaignStatus === "paused" && botCount > 0 && (
         <p className="mb-6 rounded-lg border border-border bg-surface-raised px-4 py-3 text-sm text-foreground-muted">
-          Campaign is paused. Click <strong className="text-foreground">Run campaign</strong> when
-          ViciDial campaign ID and agent logins are set — GPU supervisor will start workers and map
-          agents to ViciDial.
+          Campaign is paused. Click <strong className="text-foreground">Run campaign</strong> to
+          dial NEW leads. When every number has been called, it pauses automatically and this
+          button returns to Run.
         </p>
       )}
 

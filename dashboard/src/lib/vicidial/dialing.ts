@@ -105,6 +105,27 @@ export async function startVicidialDialing(
   };
 }
 
+/** Poll dialer: true when hopper + dialable NEW leads are empty and no live call. */
+export async function checkVicidialDialingDone(
+  creds: VicidialCredentials,
+  input: { vicidialCampaignId: string; agentUser: string },
+): Promise<{ ok: boolean; done: boolean; detail: string }> {
+  const result = await runVicidialHopperAction(creds, {
+    vicidialCampaignId: input.vicidialCampaignId,
+    action: "dialing_status",
+    agentUser: input.agentUser,
+  });
+  if (!result.ok) {
+    return { ok: false, done: false, detail: result.detail };
+  }
+  // Helper prints "OK: done …" / "OK: dialing …"; hopper-fix strips the OK: prefix.
+  return {
+    ok: true,
+    done: result.detail.trim().toLowerCase().startsWith("done"),
+    detail: result.detail,
+  };
+}
+
 /** Stop new dials: remote agent INACTIVE and queued (not yet dialed) leads removed. */
 export async function stopVicidialDialing(
   creds: VicidialCredentials,

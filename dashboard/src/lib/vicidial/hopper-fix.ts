@@ -72,7 +72,7 @@ export async function runVicidialHopperAction(
   creds: VicidialCredentials,
   input: {
     vicidialCampaignId: string;
-    action: "load_hopper" | "clear_hopper" | "set_remote_agent";
+    action: "load_hopper" | "clear_hopper" | "set_remote_agent" | "dialing_status";
     agentUser?: string;
     status?: "ACTIVE" | "INACTIVE";
   },

@@ -24,7 +24,7 @@ $campaign = preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) ($_GET['campaign_id']
 $pcode = preg_replace('/\D/', '', (string) ($_GET['phone_code'] ?? ''));
 $pnum = preg_replace('/\D/', '', (string) ($_GET['phone_number'] ?? ''));
 $action = (string) ($_GET['action'] ?? 'hopper');
-$noPhoneActions = ['preflight', 'load_hopper', 'clear_hopper', 'set_remote_agent', 'list_leads'];
+$noPhoneActions = ['preflight', 'load_hopper', 'clear_hopper', 'set_remote_agent', 'list_leads', 'dialing_status'];
 if ($campaign === '' || (!in_array($action, $noPhoneActions, true) && ($pcode === '' || $pnum === ''))) {
     http_response_code(400);
     echo "ERROR: campaign_id, phone_code, phone_number required\n";
@@ -113,6 +113,11 @@ if ($action === 'list_leads') {
     ai_fronter_list_leads($mysqli, $campaign);
     exit;
 }
+if ($action === 'dialing_status') {
+    $agent = preg_replace('/\D/', '', (string) ($_GET['agent_user'] ?? '6666'));
+    ai_fronter_dialing_status($mysqli, $campaign, $agent);
+    exit;
+}
 if ($action === 'upsert_lead') {
     $listId = (int) ($_GET['list_id'] ?? 0);
     $status = strtoupper(preg_replace('/[^A-Z0-9_]/', '', (string) ($_GET['status'] ?? 'NEW')) ?: 'NEW');
@@ -120,6 +125,48 @@ if ($action === 'upsert_lead') {
     $last = substr(preg_replace('/[^\w\s\-\.]/', '', (string) ($_GET['last_name'] ?? 'Lead')), 0, 30);
     ai_fronter_upsert_lead($mysqli, $campaign, $pcode, $pnum, $listId, $status, $first, $last);
     exit;
+}
+
+/**
+ * Whether the campaign has finished dialing its current queue (hopper empty, no live call).
+ */
+function ai_fronter_dialing_status(mysqli $db, string $campaign, string $agent): void
+{
+    $c = $db->real_escape_string($campaign);
+    $a = $db->real_escape_string($agent);
+
+    $res = $db->query("SELECT COUNT(*) n FROM vicidial_hopper WHERE campaign_id='{$c}' AND status IN ('READY','NEW','QUEUE')");
+    $hopper = (int) (($res ? $res->fetch_assoc() : ['n' => 0])['n']);
+
+    $res = $db->query("SELECT COUNT(*) n FROM vicidial_auto_calls WHERE campaign_id='{$c}'");
+    $liveCalls = (int) (($res ? $res->fetch_assoc() : ['n' => 0])['n']);
+
+    $agentStatus = '';
+    $res = $db->query("SELECT status FROM vicidial_live_agents WHERE user='{$a}'");
+    if ($res && ($row = $res->fetch_assoc())) {
+        $agentStatus = (string) $row['status'];
+    }
+
+    $lists = [];
+    $res = $db->query("SELECT list_id FROM vicidial_lists WHERE campaign_id='{$c}' AND active='Y'");
+    while ($res && ($row = $res->fetch_assoc())) {
+        $lists[] = (int) $row['list_id'];
+    }
+    $dialable = 0;
+    if ($lists) {
+        $listSql = implode(',', $lists);
+        $res = $db->query(
+            "SELECT COUNT(*) n FROM vicidial_list
+             WHERE list_id IN ({$listSql}) AND status='NEW' AND called_since_last_reset='N'"
+        );
+        $dialable = (int) (($res ? $res->fetch_assoc() : ['n' => 0])['n']);
+    }
+
+    $busy = $liveCalls > 0 || in_array($agentStatus, ['INCALL', 'QUEUE', '3WAY'], true);
+    $done = ($hopper === 0 && $dialable === 0 && !$busy);
+    echo ($done ? 'OK: done' : 'OK: dialing')
+        . " hopper={$hopper} dialable={$dialable} live_calls={$liveCalls} agent="
+        . ($agentStatus !== '' ? $agentStatus : 'none') . "\n";
 }
 
 /**
