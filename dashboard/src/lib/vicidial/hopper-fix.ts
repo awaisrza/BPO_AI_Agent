@@ -19,7 +19,11 @@ export async function runVicidialPreflight(
   const secret = process.env.VICIDIAL_HOPPER_FIX_SECRET?.trim();
   const base = normalizeVicidialUrl(creds.baseUrl);
   if (!secret || !base) {
-    return { ok: true, skipped: true, detail: "Dialer preflight skipped (VICIDIAL_HOPPER_FIX_SECRET not set)." };
+    return {
+      ok: true,
+      skipped: true,
+      detail: "Dialer preflight skipped (VICIDIAL_HOPPER_FIX_SECRET not set).",
+    };
   }
 
   const path =
@@ -31,23 +35,80 @@ export async function runVicidialPreflight(
   url.searchParams.set("agent_user", input.agentUser);
 
   try {
-    const res = await fetch(url.toString(), { method: "GET", cache: "no-store" });
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      cache: "no-store",
+    });
     const text = (await res.text()).trim();
     const first = text.split(/\r?\n/)[0] ?? "";
     if (first.startsWith("OK:")) {
       return { ok: true, skipped: false, detail: text.replace(/\r?\n/g, " ") };
     }
     if (first.startsWith("ERROR:") && !first.includes("phone_number required")) {
-      return { ok: false, skipped: false, detail: text.replace(/^ERROR:\s*/, "").replace(/\r?\n/g, " ") };
+      return {
+        ok: false,
+        skipped: false,
+        detail: text.replace(/^ERROR:\s*/, "").replace(/\r?\n/g, " "),
+      };
     }
     return {
       ok: true,
       skipped: true,
-      detail: "Dialer preflight not available — copy the latest ai_fronter_fix_hopper.php to /var/www/html/vicidial/.",
+      detail:
+        "Dialer preflight not available — copy the latest ai_fronter_fix_hopper.php to /var/www/html/vicidial/.",
     };
   } catch (err) {
     const reason = err instanceof Error ? err.message : "fetch failed";
-    return { ok: true, skipped: true, detail: `Dialer preflight unreachable (${reason}).` };
+    return {
+      ok: true,
+      skipped: true,
+      detail: `Dialer preflight unreachable (${reason}).`,
+    };
+  }
+}
+
+/** action=load_hopper / clear_hopper on ai_fronter_fix_hopper.php. */
+export async function runVicidialHopperAction(
+  creds: VicidialCredentials,
+  input: { vicidialCampaignId: string; action: "load_hopper" | "clear_hopper" },
+): Promise<{ ok: boolean; detail: string }> {
+  const secret = process.env.VICIDIAL_HOPPER_FIX_SECRET?.trim();
+  const base = normalizeVicidialUrl(creds.baseUrl);
+  if (!secret || !base) {
+    return {
+      ok: false,
+      detail: "VICIDIAL_HOPPER_FIX_SECRET or ViciDial URL not set — cannot load the hopper.",
+    };
+  }
+  const path =
+    process.env.VICIDIAL_HOPPER_FIX_PATH?.trim() || "/vicidial/ai_fronter_fix_hopper.php";
+  const url = new URL(path.startsWith("/") ? path : `/${path}`, `${base}/`);
+  url.searchParams.set("secret", secret);
+  url.searchParams.set("action", input.action);
+  url.searchParams.set("campaign_id", input.vicidialCampaignId);
+  try {
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      cache: "no-store",
+    });
+    const line = (await res.text()).trim().split(/\r?\n/)[0] ?? "";
+    if (line.startsWith("OK:")) return { ok: true, detail: line.replace(/^OK:\s*/, "") };
+    if (line.includes("phone_number required")) {
+      return {
+        ok: false,
+        detail:
+          "Dialer helper is outdated — copy the latest ai_fronter_fix_hopper.php to /var/www/html/vicidial/.",
+      };
+    }
+    return {
+      ok: false,
+      detail: line.replace(/^ERROR:\s*/, "") || `HTTP ${res.status}`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      detail: `Dialer helper unreachable (${err instanceof Error ? err.message : "fetch failed"}).`,
+    };
   }
 }
 
@@ -79,7 +140,10 @@ export async function fixVicidialHopperReady(
   url.searchParams.set("phone_number", input.phone_number);
 
   try {
-    const res = await fetch(url.toString(), { method: "GET", cache: "no-store" });
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      cache: "no-store",
+    });
     const text = (await res.text()).trim();
     const line = text.split(/\r?\n/)[0] ?? text;
     if (!res.ok || line.startsWith("ERROR:")) {

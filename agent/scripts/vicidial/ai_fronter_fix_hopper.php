@@ -24,7 +24,8 @@ $campaign = preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) ($_GET['campaign_id']
 $pcode = preg_replace('/\D/', '', (string) ($_GET['phone_code'] ?? ''));
 $pnum = preg_replace('/\D/', '', (string) ($_GET['phone_number'] ?? ''));
 $action = (string) ($_GET['action'] ?? 'hopper');
-if ($campaign === '' || ($action !== 'preflight' && ($pcode === '' || $pnum === ''))) {
+$noPhoneActions = ['preflight', 'load_hopper', 'clear_hopper'];
+if ($campaign === '' || (!in_array($action, $noPhoneActions, true) && ($pcode === '' || $pnum === ''))) {
     http_response_code(400);
     echo "ERROR: campaign_id, phone_code, phone_number required\n";
     exit;
@@ -58,6 +59,82 @@ if ($mysqli->connect_error) {
 if ($action === 'preflight') {
     ai_fronter_preflight($mysqli, $campaign, preg_replace('/\D/', '', (string) ($_GET['agent_user'] ?? '6666')));
     exit;
+}
+if ($action === 'load_hopper') {
+    ai_fronter_load_hopper($mysqli, $campaign);
+    exit;
+}
+if ($action === 'clear_hopper') {
+    $c = $mysqli->real_escape_string($campaign);
+    $mysqli->query("DELETE FROM vicidial_hopper WHERE campaign_id='{$c}' AND status IN ('READY','NEW')");
+    echo "OK: hopper cleared ({$mysqli->affected_rows} lead(s)) campaign={$campaign}\n";
+    exit;
+}
+
+/**
+ * Queue dialable leads from the campaign's active lists as READY (no local-call-time
+ * filter — AST_VDhopper skips foreign numbers like +92 outside US call windows).
+ */
+function ai_fronter_load_hopper(mysqli $db, string $campaign): void
+{
+    $c = $db->real_escape_string($campaign);
+    $res = $db->query("SELECT dial_statuses, hopper_level FROM vicidial_campaigns WHERE campaign_id='{$c}'");
+    $camp = $res ? $res->fetch_assoc() : null;
+    if (!$camp) {
+        echo "ERROR: campaign {$campaign} not found\n";
+        return;
+    }
+    $statuses = array_values(array_filter(
+        preg_split('/\s+/', trim((string) $camp['dial_statuses'])),
+        function ($s) { return $s !== '' && $s !== '-'; }
+    ));
+    if (!$statuses) {
+        $statuses = ['NEW'];
+    }
+    $statusSql = "'" . implode("','", array_map([$db, 'real_escape_string'], $statuses)) . "'";
+    $limit = max(1, (int) $camp['hopper_level']);
+
+    $lists = [];
+    $res = $db->query("SELECT list_id FROM vicidial_lists WHERE campaign_id='{$c}' AND active='Y'");
+    while ($res && ($row = $res->fetch_assoc())) {
+        $lists[] = (int) $row['list_id'];
+    }
+    if (!$lists) {
+        echo "ERROR: no active lists for campaign {$campaign} (ViciDial Admin -> Lists -> Active=Y)\n";
+        return;
+    }
+    $listSql = implode(',', $lists);
+
+    $res = $db->query("SELECT COUNT(*) n FROM vicidial_hopper WHERE campaign_id='{$c}' AND status='READY'");
+    $already = (int) (($res ? $res->fetch_assoc() : ['n' => 0])['n']);
+
+    $db->query(
+        "INSERT INTO vicidial_hopper (lead_id, campaign_id, status, list_id, gmt_offset_now, state, priority, source, vendor_lead_code)
+         SELECT l.lead_id, '{$c}', 'READY', l.list_id, l.gmt_offset_now, l.state, 0, 'M', l.vendor_lead_code
+         FROM vicidial_list l
+         LEFT JOIN vicidial_hopper h ON h.lead_id = l.lead_id
+         LEFT JOIN vicidial_dnc d ON d.phone_number = l.phone_number
+         WHERE l.list_id IN ({$listSql})
+           AND l.status IN ({$statusSql})
+           AND l.called_since_last_reset = 'N'
+           AND h.lead_id IS NULL
+           AND d.phone_number IS NULL
+         ORDER BY l.lead_id
+         LIMIT {$limit}"
+    );
+    $loaded = max(0, $db->affected_rows);
+
+    if ($loaded + $already === 0) {
+        $counts = [];
+        $res = $db->query("SELECT status, COUNT(*) n FROM vicidial_list WHERE list_id IN ({$listSql}) GROUP BY status");
+        while ($res && ($row = $res->fetch_assoc())) {
+            $counts[] = "{$row['status']}={$row['n']}";
+        }
+        echo "ERROR: no dialable leads in lists {$listSql} (dial statuses: " . implode(' ', $statuses)
+            . '; leads by status: ' . ($counts ? implode(', ', $counts) : 'none') . ")\n";
+        return;
+    }
+    echo "OK: hopper loaded {$loaded} lead(s), {$already} already queued, lists {$listSql}\n";
 }
 
 /**

@@ -53,6 +53,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
   const [testDialing, setTestDialing] = useState(false);
   const [testDialResult, setTestDialResult] = useState("");
   const [testDialProgress, setTestDialProgress] = useState<string[]>([]);
+  const [runProgress, setRunProgress] = useState<string[]>([]);
 
   useEffect(() => {
     async function load() {
@@ -223,14 +224,73 @@ export function CampaignEditorForm({ id }: { id: string }) {
     setSaved(false);
   }
 
+  async function waitForGpuReady(pushProgress: (line: string) => void, progress: string[]) {
+    const prewarmTimeoutMs = 900_000;
+    const pollMs = 3_000;
+    pushProgress("Starting GPU warmup (supervisor + prewarm)…");
+    const warmStart = await fetch(`/api/campaigns/${id}/gpu-warmup`, {
+      method: "POST",
+    });
+    const warmStartData = await readJsonResponse<{
+      error?: string;
+      gpuMessage?: string;
+      message?: string;
+      phase?: string;
+      logTail?: string[];
+    }>(warmStart);
+    if (!warmStart.ok) {
+      throw new Error(warmStartData.error ?? "Could not start GPU warmup.");
+    }
+    if (warmStartData.gpuMessage) pushProgress(`GPU: ${warmStartData.gpuMessage}`);
+    if (warmStartData.message) pushProgress(warmStartData.message);
+    warmStartData.logTail?.slice(-3).forEach((line) => pushProgress(`  log: ${line}`));
+
+    const warmupStarted = Date.now();
+    let gpuReady = false;
+    while (Date.now() - warmupStarted < prewarmTimeoutMs) {
+      const warmRes = await fetch(`/api/campaigns/${id}/gpu-warmup`, {
+        cache: "no-store",
+      });
+      const warm = await readJsonResponse<{
+        ready?: boolean;
+        phase?: string;
+        message?: string;
+        logTail?: string[];
+        error?: string;
+      }>(warmRes);
+      if (!warmRes.ok) {
+        throw new Error(warm.error ?? "GPU warmup status failed.");
+      }
+      const elapsed = Math.round((Date.now() - warmupStarted) / 1000);
+      const statusLine = `[${elapsed}s] ${warm.phase ?? "checking"} — ${warm.message ?? "…"}`;
+      if (progress[progress.length - 1] !== statusLine) {
+        pushProgress(statusLine);
+      }
+      warm.logTail?.slice(-2).forEach((line) => {
+        const logLine = `  log: ${line}`;
+        if (!progress.includes(logLine)) pushProgress(logLine);
+      });
+      if (warm.ready) {
+        gpuReady = true;
+        pushProgress("GPU worker ready.");
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+
+    if (!gpuReady) {
+      throw new Error(
+        "GPU worker did not become ready in time. SSH to the GPU: pgrep -af run_supervisor; tail /tmp/fleet_worker_*.log; curl -s http://127.0.0.1:10200/health",
+      );
+    }
+  }
+
   async function runTestDial() {
     setTestDialing(true);
     setError("");
     setTestDialResult("");
     setTestDialProgress([]);
 
-    const prewarmTimeoutMs = 900_000;
-    const pollMs = 3_000;
     const progress: string[] = [];
 
     function pushProgress(line: string) {
@@ -239,58 +299,8 @@ export function CampaignEditorForm({ id }: { id: string }) {
     }
 
     try {
-      pushProgress("Starting GPU warmup (supervisor + prewarm)…");
-      const warmStart = await fetch(`/api/campaigns/${id}/gpu-warmup`, { method: "POST" });
-      const warmStartData = await readJsonResponse<{
-        error?: string;
-        gpuMessage?: string;
-        message?: string;
-        phase?: string;
-        logTail?: string[];
-      }>(warmStart);
-      if (!warmStart.ok) {
-        throw new Error(warmStartData.error ?? "Could not start GPU warmup.");
-      }
-      if (warmStartData.gpuMessage) pushProgress(`GPU: ${warmStartData.gpuMessage}`);
-      if (warmStartData.message) pushProgress(warmStartData.message);
-      warmStartData.logTail?.slice(-3).forEach((line) => pushProgress(`  log: ${line}`));
-
-      const warmupStarted = Date.now();
-      let gpuReady = false;
-      while (Date.now() - warmupStarted < prewarmTimeoutMs) {
-        const warmRes = await fetch(`/api/campaigns/${id}/gpu-warmup`, { cache: "no-store" });
-        const warm = await readJsonResponse<{
-          ready?: boolean;
-          phase?: string;
-          message?: string;
-          logTail?: string[];
-          error?: string;
-        }>(warmRes);
-        if (!warmRes.ok) {
-          throw new Error(warm.error ?? "GPU warmup status failed.");
-        }
-        const elapsed = Math.round((Date.now() - warmupStarted) / 1000);
-        const statusLine = `[${elapsed}s] ${warm.phase ?? "checking"} — ${warm.message ?? "…"}`;
-        if (progress[progress.length - 1] !== statusLine) {
-          pushProgress(statusLine);
-        }
-        warm.logTail?.slice(-2).forEach((line) => {
-          const logLine = `  log: ${line}`;
-          if (!progress.includes(logLine)) pushProgress(logLine);
-        });
-        if (warm.ready) {
-          gpuReady = true;
-          pushProgress("GPU worker ready — placing test call in ViciDial hopper.");
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, pollMs));
-      }
-
-      if (!gpuReady) {
-        throw new Error(
-          "GPU worker did not become ready in time. SSH to the GPU: pgrep -af run_supervisor; tail /tmp/fleet_worker_*.log; curl -s http://127.0.0.1:10200/health",
-        );
-      }
+      await waitForGpuReady(pushProgress, progress);
+      pushProgress("Placing test call in ViciDial hopper…");
 
       const res = await fetch(`/api/campaigns/${id}/test-dial`, {
         method: "POST",
@@ -326,9 +336,7 @@ export function CampaignEditorForm({ id }: { id: string }) {
       if (data.gpuMessage) parts.push(`GPU: ${data.gpuMessage}`);
       if (data.workerHealth) parts.push(`Worker: ${data.workerHealth}`);
       if (data.steps?.length) {
-        const stepLines = data.steps.map(
-          (s) => `${s.ok ? "✓" : "○"} ${s.step}: ${s.detail}`,
-        );
+        const stepLines = data.steps.map((s) => `${s.ok ? "✓" : "○"} ${s.step}: ${s.detail}`);
         parts.push(stepLines.join("\n"));
       }
       if (data.hopperPreview) parts.push(`Hopper:\n${data.hopperPreview}`);
@@ -347,9 +355,20 @@ export function CampaignEditorForm({ id }: { id: string }) {
     setTogglingStatus(true);
     setError("");
     setReadinessHint("");
+    setRunProgress([]);
+
+    const progress: string[] = [];
+    function pushProgress(line: string) {
+      progress.push(line);
+      setRunProgress([...progress]);
+    }
 
     try {
       const action = campaignStatus === "running" ? "stop" : "start";
+      if (action === "start") {
+        await waitForGpuReady(pushProgress, progress);
+        pushProgress("Starting ViciDial dialing (preflight, campaign, agent, hopper)…");
+      }
       const res = await fetch(`/api/campaigns/${id}/run`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -359,11 +378,13 @@ export function CampaignEditorForm({ id }: { id: string }) {
         error?: string;
         message?: string;
         status?: CampaignStatus;
+        steps?: { step: string; ok: boolean; detail: string }[];
         readiness?: { issues?: { level: string; message: string }[] };
       }>(res);
 
+      data.steps?.forEach((s) => pushProgress(`${s.ok ? "✓" : "✗"} ${s.step}: ${s.detail}`));
       if (!res.ok) {
-        throw new Error(data.error ?? "Could not update campaign status.");
+        throw new Error(data.error ?? data.message ?? "Could not update campaign status.");
       }
 
       if (data.message) setReadinessHint(data.message);
@@ -444,7 +465,10 @@ export function CampaignEditorForm({ id }: { id: string }) {
         description="Configure what the bot says, qualifying questions, and transfer rules."
         action={
           <>
-            <Badge variant={campaignStatus === "running" ? "live" : "default"} dot={campaignStatus === "running"}>
+            <Badge
+              variant={campaignStatus === "running" ? "live" : "default"}
+              dot={campaignStatus === "running"}
+            >
               {campaignStatus === "running" ? "Running" : "Paused"}
             </Badge>
             {campaignStatus === "running" ? (
@@ -458,7 +482,11 @@ export function CampaignEditorForm({ id }: { id: string }) {
                 {togglingStatus ? "Starting…" : "Run campaign"}
               </Button>
             )}
-            <Button variant="secondary" onClick={handleSave} disabled={saving || !campaignName.trim()}>
+            <Button
+              variant="secondary"
+              onClick={handleSave}
+              disabled={saving || !campaignName.trim()}
+            >
               <Save className="h-4 w-4" />
               {saving ? "Saving…" : saved ? "Saved" : "Save"}
             </Button>
@@ -468,9 +496,16 @@ export function CampaignEditorForm({ id }: { id: string }) {
 
       {campaignStatus === "paused" && botCount > 0 && (
         <p className="mb-6 rounded-lg border border-border bg-surface-raised px-4 py-3 text-sm text-foreground-muted">
-          Campaign is paused. Click <strong className="text-foreground">Run campaign</strong> when ViciDial
-          campaign ID and agent logins are set — GPU supervisor will start workers and map agents to ViciDial.
+          Campaign is paused. Click <strong className="text-foreground">Run campaign</strong> when
+          ViciDial campaign ID and agent logins are set — GPU supervisor will start workers and map
+          agents to ViciDial.
         </p>
+      )}
+
+      {runProgress.length > 0 && (
+        <pre className="mb-6 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-surface-raised px-4 py-3 text-xs text-foreground-muted">
+          {runProgress.join("\n")}
+        </pre>
       )}
 
       {readinessHint && (
@@ -562,12 +597,15 @@ export function CampaignEditorForm({ id }: { id: string }) {
                     disabled={vicidialCampaignsLoading}
                     onClick={() => void loadVicidialCampaigns()}
                   >
-                    <RefreshCw className={`h-3.5 w-3.5 ${vicidialCampaignsLoading ? "animate-spin" : ""}`} />
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${vicidialCampaignsLoading ? "animate-spin" : ""}`}
+                    />
                   </Button>
                 </div>
                 {vicidialCampaigns.length > 0 && (
                   <p className="mt-1.5 text-xs text-foreground-muted">
-                    {vicidialCampaigns.length} campaign(s) from ViciDial — choose from the list or type the ID, then Save.
+                    {vicidialCampaigns.length} campaign(s) from ViciDial — choose from the list or
+                    type the ID, then Save.
                   </p>
                 )}
                 {vicidialCampaignsError && (
@@ -598,7 +636,10 @@ export function CampaignEditorForm({ id }: { id: string }) {
           </Card>
 
           <Card>
-            <CardHeader title="Pitch" description="Delivered after the caller responds to the greeting" />
+            <CardHeader
+              title="Pitch"
+              description="Delivered after the caller responds to the greeting"
+            />
             <CardBody>
               <Textarea
                 className="min-h-[100px]"
@@ -704,7 +745,10 @@ export function CampaignEditorForm({ id }: { id: string }) {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
-                    <Field label="Topic label" description="What this answer is about (for your team).">
+                    <Field
+                      label="Topic label"
+                      description="What this answer is about (for your team)."
+                    >
                       <Input
                         value={entry.topic}
                         onChange={(e) => updateKnowledge(index, { topic: e.target.value })}
@@ -717,7 +761,11 @@ export function CampaignEditorForm({ id }: { id: string }) {
                     >
                       <Input
                         value={entry.triggersText}
-                        onChange={(e) => updateKnowledge(index, { triggersText: e.target.value })}
+                        onChange={(e) =>
+                          updateKnowledge(index, {
+                            triggersText: e.target.value,
+                          })
+                        }
                         placeholder="who are you, who's this, spam call"
                       />
                     </Field>
@@ -978,7 +1026,9 @@ function SettingRow({
   return (
     <div>
       <p className="text-xs text-foreground-faint">{label}</p>
-      <p className={`mt-1.5 flex items-center gap-2 text-sm text-zinc-200 ${mono ? "font-mono" : ""}`}>
+      <p
+        className={`mt-1.5 flex items-center gap-2 text-sm text-zinc-200 ${mono ? "font-mono" : ""}`}
+      >
         {Icon && <Icon className="h-3.5 w-3.5 text-foreground-faint" />}
         {value}
       </p>
