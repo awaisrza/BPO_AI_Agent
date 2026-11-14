@@ -1546,6 +1546,17 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         call_id = await self._resolve_vicidial_call_id()
         if call_id:
             extension = self._transfer_extension(closer)
+            if extension and extension == (self._agent_user or "").strip():
+                # Extension = bot's own remote-agent seat → call re-enters AudioSocket
+                # and the caller hears the greeting again.
+                if self._telephony:
+                    from .call_trace import trace_call
+
+                    trace_call(
+                        f"=== WARNING: closer {closer!r} is this bot's own extension — "
+                        "using in-group transfer instead (set a real closer in the campaign) ==="
+                    )
+                extension = None
             if extension:
                 logger.info(
                     f"FSM -> remote-agent EXTENSIONTRANSFER ext={extension} "
