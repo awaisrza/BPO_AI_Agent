@@ -70,12 +70,14 @@ export function TableRow({
 export function TableCell({
   children,
   className,
+  colSpan,
 }: {
   children: React.ReactNode;
   className?: string;
+  colSpan?: number;
 }) {
   return (
-    <td className={cn("px-4 py-3 first:pl-5 last:pr-5", className)}>
+    <td colSpan={colSpan} className={cn("px-4 py-3 first:pl-5 last:pr-5", className)}>
       {children}
     </td>
   );

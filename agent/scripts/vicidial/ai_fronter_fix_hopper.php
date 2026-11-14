@@ -24,7 +24,7 @@ $campaign = preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) ($_GET['campaign_id']
 $pcode = preg_replace('/\D/', '', (string) ($_GET['phone_code'] ?? ''));
 $pnum = preg_replace('/\D/', '', (string) ($_GET['phone_number'] ?? ''));
 $action = (string) ($_GET['action'] ?? 'hopper');
-$noPhoneActions = ['preflight', 'load_hopper', 'clear_hopper', 'set_remote_agent'];
+$noPhoneActions = ['preflight', 'load_hopper', 'clear_hopper', 'set_remote_agent', 'list_leads'];
 if ($campaign === '' || (!in_array($action, $noPhoneActions, true) && ($pcode === '' || $pnum === ''))) {
     http_response_code(400);
     echo "ERROR: campaign_id, phone_code, phone_number required\n";
@@ -108,6 +108,133 @@ if ($action === 'set_remote_agent') {
     }
     echo "OK: remote agent {$agent} set {$status} on {$campaign}\n";
     exit;
+}
+if ($action === 'list_leads') {
+    ai_fronter_list_leads($mysqli, $campaign);
+    exit;
+}
+if ($action === 'upsert_lead') {
+    $listId = (int) ($_GET['list_id'] ?? 0);
+    $status = strtoupper(preg_replace('/[^A-Z0-9_]/', '', (string) ($_GET['status'] ?? 'NEW')) ?: 'NEW');
+    $first = substr(preg_replace('/[^\w\s\-\.]/', '', (string) ($_GET['first_name'] ?? 'Test')), 0, 30);
+    $last = substr(preg_replace('/[^\w\s\-\.]/', '', (string) ($_GET['last_name'] ?? 'Lead')), 0, 30);
+    ai_fronter_upsert_lead($mysqli, $campaign, $pcode, $pnum, $listId, $status, $first, $last);
+    exit;
+}
+
+/**
+ * List leads on active lists for a campaign (CSV after OK line).
+ */
+function ai_fronter_list_leads(mysqli $db, string $campaign): void
+{
+    $c = $db->real_escape_string($campaign);
+    $lists = [];
+    $res = $db->query("SELECT list_id FROM vicidial_lists WHERE campaign_id='{$c}' AND active='Y'");
+    while ($res && ($row = $res->fetch_assoc())) {
+        $lists[] = (int) $row['list_id'];
+    }
+    if (!$lists) {
+        $res = $db->query("SELECT list_id FROM vicidial_lists WHERE campaign_id='{$c}'");
+        while ($res && ($row = $res->fetch_assoc())) {
+            $lists[] = (int) $row['list_id'];
+        }
+    }
+    if (!$lists) {
+        echo "ERROR: no lists for campaign {$campaign}\n";
+        return;
+    }
+    $listSql = implode(',', $lists);
+    $res = $db->query(
+        "SELECT lead_id, list_id, phone_code, phone_number, status, first_name, last_name,
+                called_count, called_since_last_reset, last_local_call_time
+         FROM vicidial_list
+         WHERE list_id IN ({$listSql})
+         ORDER BY lead_id DESC
+         LIMIT 500"
+    );
+    $rows = [];
+    while ($res && ($row = $res->fetch_assoc())) {
+        $rows[] = $row;
+    }
+    echo 'OK: count=' . count($rows) . " campaign={$campaign} lists={$listSql}\n";
+    echo "lead_id,list_id,phone_code,phone_number,status,first_name,last_name,called_count,called_since_last_reset,last_local_call_time\n";
+    foreach ($rows as $row) {
+        $cells = [
+            $row['lead_id'],
+            $row['list_id'],
+            $row['phone_code'],
+            $row['phone_number'],
+            $row['status'],
+            str_replace([',', '"', "\n", "\r"], ' ', (string) $row['first_name']),
+            str_replace([',', '"', "\n", "\r"], ' ', (string) $row['last_name']),
+            $row['called_count'],
+            $row['called_since_last_reset'],
+            $row['last_local_call_time'],
+        ];
+        echo implode(',', $cells) . "\n";
+    }
+}
+
+/**
+ * Insert or reset a lead to dialable status on the campaign's list.
+ */
+function ai_fronter_upsert_lead(
+    mysqli $db,
+    string $campaign,
+    string $pcode,
+    string $pnum,
+    int $listId,
+    string $status,
+    string $first,
+    string $last
+): void {
+    $c = $db->real_escape_string($campaign);
+    if ($listId <= 0) {
+        $res = $db->query("SELECT list_id FROM vicidial_lists WHERE campaign_id='{$c}' AND active='Y' ORDER BY list_id LIMIT 1");
+        $row = $res ? $res->fetch_assoc() : null;
+        $listId = (int) ($row['list_id'] ?? 0);
+    }
+    if ($listId <= 0) {
+        echo "ERROR: no active list for campaign {$campaign} (pass list_id)\n";
+        return;
+    }
+    $db->query("UPDATE vicidial_lists SET active='Y' WHERE list_id=" . (int) $listId);
+    $db->query("DELETE FROM vicidial_dnc WHERE phone_number='" . $db->real_escape_string($pnum) . "'");
+
+    $stmt = $db->prepare(
+        'SELECT lead_id FROM vicidial_list WHERE list_id=? AND phone_code=? AND phone_number=? ORDER BY lead_id DESC LIMIT 1'
+    );
+    $stmt->bind_param('iss', $listId, $pcode, $pnum);
+    $stmt->execute();
+    $found = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if ($found) {
+        $leadId = (int) $found['lead_id'];
+        $st = $db->real_escape_string($status);
+        $db->query(
+            "UPDATE vicidial_list SET status='{$st}', called_since_last_reset='N', called_count=0,
+             first_name='" . $db->real_escape_string($first) . "',
+             last_name='" . $db->real_escape_string($last) . "'
+             WHERE lead_id={$leadId}"
+        );
+        echo "OK: updated lead_id={$leadId} +{$pcode}{$pnum} status={$status} list={$listId}\n";
+        return;
+    }
+
+    $stmt = $db->prepare(
+        'INSERT INTO vicidial_list (entry_date, status, list_id, phone_code, phone_number, first_name, last_name, called_since_last_reset, gmt_offset_now)
+         VALUES (NOW(), ?, ?, ?, ?, ?, ?, \'N\', \'5.00\')'
+    );
+    $stmt->bind_param('sissss', $status, $listId, $pcode, $pnum, $first, $last);
+    if (!$stmt->execute()) {
+        echo "ERROR: insert failed\n";
+        $stmt->close();
+        return;
+    }
+    $leadId = (int) $stmt->insert_id;
+    $stmt->close();
+    echo "OK: inserted lead_id={$leadId} +{$pcode}{$pnum} status={$status} list={$listId}\n";
 }
 
 /**
