@@ -81,6 +81,14 @@ export async function startVicidialDialing(
     };
   }
 
+  // Drop any stale READY/NEW hopper rows left from a previous run, then reload.
+  // "1 already queued" often means a stuck lead that ASTVDauto never dials.
+  const cleared = await runVicidialHopperAction(creds, {
+    vicidialCampaignId: input.vicidialCampaignId,
+    action: "clear_hopper",
+  });
+  steps.push({ step: "clear_stale_hopper", ok: cleared.ok, detail: cleared.detail });
+
   const hopper = await runVicidialHopperAction(creds, {
     vicidialCampaignId: input.vicidialCampaignId,
     action: "load_hopper",
