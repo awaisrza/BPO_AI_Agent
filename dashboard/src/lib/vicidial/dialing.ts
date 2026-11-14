@@ -29,20 +29,6 @@ export async function startVicidialDialing(
 ): Promise<DialingResult> {
   const steps: DialingStep[] = [];
 
-  const preflight = await runVicidialPreflight(creds, input);
-  steps.push({
-    step: "dialer_preflight",
-    ok: preflight.ok,
-    detail: preflight.detail,
-  });
-  if (!preflight.ok) {
-    return {
-      ok: false,
-      steps,
-      message: `Dialer not ready — no calls placed: ${preflight.detail}`,
-    };
-  }
-
   const campaignLine = await vd(creds, {
     function: "update_campaign",
     campaign_id: input.vicidialCampaignId,
@@ -73,6 +59,22 @@ export async function startVicidialDialing(
   });
   const remoteOk = apiOk(remoteLine) || remoteLine.includes("ALREADY ACTIVE");
   steps.push({ step: "update_remote_agent", ok: remoteOk, detail: remoteLine });
+
+  // Pause sets the remote agent INACTIVE; ASTVDremote logs it back in a few seconds
+  // after it is ACTIVE again, so retry the "not logged in" preflight for a while.
+  let preflight = await runVicidialPreflight(creds, input);
+  for (let i = 0; i < 10 && !preflight.ok && /not logged in/i.test(preflight.detail); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    preflight = await runVicidialPreflight(creds, input);
+  }
+  steps.push({ step: "dialer_preflight", ok: preflight.ok, detail: preflight.detail });
+  if (!preflight.ok) {
+    return {
+      ok: false,
+      steps,
+      message: `Dialer not ready — no calls placed: ${preflight.detail}`,
+    };
+  }
 
   const hopper = await runVicidialHopperAction(creds, {
     vicidialCampaignId: input.vicidialCampaignId,
