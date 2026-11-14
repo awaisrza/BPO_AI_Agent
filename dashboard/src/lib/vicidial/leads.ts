@@ -125,7 +125,13 @@ export async function fetchVicidialLeads(
   const text = (await res.text()).trim();
   const first = text.split(/\r?\n/)[0] ?? "";
   if (!first.startsWith("OK:")) {
-    throw new Error(first.replace(/^ERROR:\s*/, "") || `HTTP ${res.status}`);
+    const err = first.replace(/^ERROR:\s*/, "") || `HTTP ${res.status}`;
+    if (/phone_number required|phone_code/i.test(err)) {
+      throw new Error(
+        "Dialer helper is outdated — copy the latest ai_fronter_fix_hopper.php to /var/www/html/vicidial/ on the ViciDial server, then Sync again.",
+      );
+    }
+    throw new Error(err);
   }
   return { leads: parseLeadsCsv(text), detail: first.replace(/^OK:\s*/, "") };
 }
