@@ -79,6 +79,7 @@ def complete_call(
     *,
     reason: str,
     transferred: bool | None = None,
+    transcript_json: list[dict[str, Any]] | None = None,
 ) -> None:
     if active is None:
         return
@@ -94,6 +95,7 @@ def complete_call(
                 outcome=outcome,
                 disposition=disposition,
                 transferred=is_xfer,
+                transcript_json=transcript_json,
             )
         except Exception as exc:
             logger.warning(f"Could not finish Supabase call row: {exc}")

@@ -357,6 +357,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
         self._telephony_direct_media = False
         self._bot_audio_until: float = 0.0
         self._transfer_started = False
+        self._transcript: list[dict[str, str]] = []
         self._discard_early_ack_after_play = False
         self._direct_playback_cancel = asyncio.Event()
         self._playback_fallback_task: asyncio.Task | None = None
@@ -674,11 +675,25 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 )
             await self.prefetch_joined_pitch_pcm()
 
+    def record_bot(self, text: str) -> None:
+        line = (text or "").strip()
+        if line:
+            self._transcript.append({"role": "bot", "text": line})
+
+    def record_caller(self, text: str) -> None:
+        line = (text or "").strip()
+        if line:
+            self._transcript.append({"role": "caller", "text": line})
+
+    def get_transcript(self) -> list[dict[str, str]]:
+        return list(self._transcript)
+
     async def _speak_bot_text(self, text: str) -> bool:
         """Play bot reply — direct bulk PCM on ViciDial, else pipeline TTS."""
         reply = (text or "").strip()
         if not reply:
             return False
+        self.record_bot(reply)
         if self._greeting_playing:
             logger.info("Skipping bot speak during greeting playback")
             return False
@@ -1453,6 +1468,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
             from .call_trace import trace_call
 
             trace_call(f"=== CALLER: {text[:120]!r} ===")
+        self.record_caller(text)
 
         # Caller can't hear bot audio — repeat last line instead of KB/qualify skip.
         if self._telephony and _is_cant_hear(text):
@@ -1703,6 +1719,7 @@ class FronterProcessor(FrameProcessor):  # type: ignore[misc]
                 opening = self._engine.open()
                 spoken = render_speech(opening.reply)
                 logger.info(f"BOT: {' | '.join(c.text for c in spoken) or opening.reply}")
+                self.record_bot(opening.reply)
                 await self.push_frame(TTSSpeakFrame(opening.reply))
             await self.push_frame(frame, direction)
             return

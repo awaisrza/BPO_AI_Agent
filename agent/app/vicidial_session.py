@@ -550,6 +550,7 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
                 fronter._call.begin_bot_reply(1)
 
             opening = fronter._engine.open()
+            fronter.record_bot(opening.reply)
 
             tts_src = tts_for_cleanup or next(
                 (p for p in pipeline.processors if getattr(p, "_cache", None) is not None),
@@ -684,16 +685,19 @@ async def _run_vicidial_call_locked(websocket, ctx: BotRunContext) -> None:
             from .call_lifecycle import complete_call
 
             transferred = False
+            transcript = None
             if fronter is not None:
                 from .conversation import State
 
                 transferred = fronter._engine.state == State.TRANSFER
+                transcript = fronter.get_transcript()
             await asyncio.to_thread(
                 complete_call,
                 ctx,
                 active_call,
                 reason=end_reason or "runner_finished",
                 transferred=transferred,
+                transcript_json=transcript,
             )
         if ctx.bot_id:
             from .fleet_worker import patch_bot_status

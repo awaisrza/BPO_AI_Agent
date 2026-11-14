@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { FileText, Play } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ import {
   TableHeaderCell,
   TableRow,
 } from "@/components/ui/table";
+import { readJsonResponse } from "@/lib/fetch-json";
 
 type CallRow = {
   id: string;
@@ -23,9 +24,12 @@ type CallRow = {
   outcome: string | null;
   disposition: string | null;
   transferred: boolean;
+  sentiment: string | null;
   created_at: string;
   campaigns: { name: string } | null;
 };
+
+type TranscriptLine = { role: string; text: string };
 
 type CallView = {
   id: string;
@@ -36,9 +40,9 @@ type CallView = {
   outcome: string;
   disposition: string;
   transferred: boolean;
-  queue: string;
   sentiment: string;
-  transcript: { role: string; text: string }[];
+  transcript: TranscriptLine[];
+  transcriptLoaded: boolean;
 };
 
 function formatDuration(sec: number): string {
@@ -58,9 +62,9 @@ function toView(row: CallRow): CallView {
     outcome: row.outcome ?? "—",
     disposition: row.disposition ?? "—",
     transferred: row.transferred,
-    queue: "—",
-    sentiment: "—",
+    sentiment: row.sentiment ?? "—",
     transcript: [],
+    transcriptLoaded: false,
   };
 }
 
@@ -68,49 +72,111 @@ export default function CallsPage() {
   const [calls, setCalls] = useState<CallView[]>([]);
   const [selected, setSelected] = useState<CallView | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [loadingTranscript, setLoadingTranscript] = useState(false);
+  const [error, setError] = useState("");
+  const [range, setRange] = useState("all");
+
+  const sync = useCallback(async () => {
+    setSyncing(true);
+    setError("");
+    try {
+      const res = await fetch("/api/calls", { cache: "no-store" });
+      const body = await readJsonResponse<{ calls?: CallRow[]; error?: string }>(res);
+      if (!res.ok) throw new Error(body.error ?? "Failed to load calls");
+      let raw = body.calls ?? [];
+      if (range === "today") {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        raw = raw.filter((c) => new Date(c.created_at).getTime() >= start.getTime());
+      } else if (range === "7d") {
+        const start = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        raw = raw.filter((c) => new Date(c.created_at).getTime() >= start);
+      }
+      const rows = raw.map(toView);
+      setCalls(rows);
+      setSelected((prev) => {
+        if (!prev) return rows[0] ?? null;
+        return rows.find((r) => r.id === prev.id) ?? rows[0] ?? null;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sync failed.");
+      setCalls([]);
+      setSelected(null);
+    } finally {
+      setSyncing(false);
+      setLoading(false);
+    }
+  }, [range]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/calls", { cache: "no-store" });
-        const body = (await res.json()) as { calls?: CallRow[]; error?: string };
-        if (!res.ok) throw new Error(body.error ?? "Failed to load calls");
-        const rows = (body.calls ?? []).map(toView);
-        if (!cancelled) {
-          setCalls(rows);
-          setSelected(rows[0] ?? null);
-        }
-      } catch {
-        if (!cancelled) {
-          setCalls([]);
-          setSelected(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void sync();
+  }, [sync]);
+
+  async function selectCall(call: CallView) {
+    setSelected(call);
+    if (call.transcriptLoaded) return;
+    setLoadingTranscript(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/calls/${call.id}`, { cache: "no-store" });
+      const body = await readJsonResponse<{
+        error?: string;
+        call?: {
+          transcript?: TranscriptLine[];
+          sentiment?: string | null;
+          disposition?: string | null;
+        };
+      }>(res);
+      if (!res.ok) throw new Error(body.error ?? "Could not load transcript.");
+      const transcript = body.call?.transcript ?? [];
+      const patch: Partial<CallView> = {
+        transcript,
+        transcriptLoaded: true,
+        sentiment: body.call?.sentiment ?? call.sentiment,
+        disposition: body.call?.disposition ?? call.disposition,
+      };
+      setCalls((prev) => prev.map((c) => (c.id === call.id ? { ...c, ...patch } : c)));
+      setSelected((prev) => (prev?.id === call.id ? { ...prev, ...patch } : prev));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load transcript.");
+    } finally {
+      setLoadingTranscript(false);
+    }
+  }
 
   return (
     <>
       <PageHeader
         title="Call log"
         description="Review every call, transcript, and disposition."
+        action={
+          <Button variant="secondary" onClick={() => void sync()} disabled={syncing}>
+            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing…" : "Sync calls"}
+          </Button>
+        }
       />
+
+      {error && (
+        <p className="mb-6 rounded-lg border border-status-danger/30 bg-status-danger-muted px-4 py-3 text-sm text-status-danger">
+          {error}
+        </p>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-5">
         <Card className="lg:col-span-3">
           <CardHeader
             title="Recent calls"
             action={
-              <Select className="py-1.5 text-xs">
-                <option>Today</option>
-                <option>Last 7 days</option>
-                <option>All campaigns</option>
+              <Select
+                className="py-1.5 text-xs"
+                value={range}
+                onChange={(e) => setRange(e.target.value)}
+              >
+                <option value="today">Today</option>
+                <option value="7d">Last 7 days</option>
+                <option value="all">All calls</option>
               </Select>
             }
           />
@@ -119,7 +185,7 @@ export default function CallsPage() {
               <p className="px-4 py-6 text-body text-foreground-muted">Loading calls…</p>
             ) : calls.length === 0 ? (
               <p className="px-4 py-6 text-body text-foreground-muted">
-                No calls yet — run a campaign and complete a test dial.
+                No calls yet — run a campaign and complete a call, then Sync.
               </p>
             ) : (
               <Table>
@@ -135,7 +201,7 @@ export default function CallsPage() {
                   {calls.map((call) => (
                     <TableRow
                       key={call.id}
-                      onClick={() => setSelected(call)}
+                      onClick={() => void selectCall(call)}
                       selected={selected?.id === call.id}
                     >
                       <TableCell className="text-foreground-muted">{call.time}</TableCell>
@@ -159,26 +225,14 @@ export default function CallsPage() {
         </Card>
 
         <Card className="lg:col-span-2">
-          <CardHeader
-            title="Call detail"
-            action={
-              <div className="flex gap-1">
-                <Button variant="ghost" size="sm" className="!px-2">
-                  <Play className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="sm" className="!px-2">
-                  <FileText className="h-4 w-4" />
-                </Button>
-              </div>
-            }
-          />
+          <CardHeader title="Call detail" />
           <CardBody className="space-y-6">
             {selected ? (
               <>
                 <dl className="grid grid-cols-2 gap-4 text-sm">
+                  <DetailItem label="Lead" value={selected.phone} mono />
                   <DetailItem label="Disposition" value={selected.disposition} mono />
-                  <DetailItem label="Queue" value={selected.queue} mono />
-                  <DetailItem label="Sentiment" value={selected.sentiment} />
+                  <DetailItem label="Outcome" value={selected.outcome} />
                   <DetailItem
                     label="Transferred"
                     value={selected.transferred ? "Yes" : "No"}
@@ -188,9 +242,12 @@ export default function CallsPage() {
                 <div>
                   <p className="data-label mb-3">Transcript</p>
                   <div className="max-h-72 space-y-3 overflow-y-auto rounded-md border border-surface-border-subtle bg-surface-overlay p-4 scrollbar-thin">
-                    {selected.transcript.length === 0 ? (
+                    {loadingTranscript && !selected.transcriptLoaded ? (
+                      <p className="text-body text-foreground-faint">Loading transcript…</p>
+                    ) : selected.transcript.length === 0 ? (
                       <p className="text-body text-foreground-faint">
-                        No transcript captured yet for this call.
+                        No transcript for this call yet. New calls after the GPU update will
+                        save one when the call ends.
                       </p>
                     ) : (
                       selected.transcript.map((line, i) => (
