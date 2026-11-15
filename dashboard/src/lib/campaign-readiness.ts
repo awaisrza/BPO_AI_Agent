@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveVicidialCreds } from "@/lib/vicidial/connection";
+import { normalizeVicidialCampaignId } from "@/lib/vicidial/campaigns";
 
 export type CampaignReadinessIssue = {
   level: "error" | "warning";
@@ -78,7 +79,9 @@ export async function getCampaignReadiness(
     });
   }
 
-  const vicidialCampaignId = row.vicidial_campaign_id?.trim() || null;
+  const vicidialCampaignId = row.vicidial_campaign_id
+    ? normalizeVicidialCampaignId(row.vicidial_campaign_id) || null
+    : null;
   if (!vicidialCampaignId) {
     issues.push({
       level: "error",

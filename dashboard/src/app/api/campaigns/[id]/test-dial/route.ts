@@ -7,6 +7,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { parseDialPhone } from "@/lib/vicidial/phone";
 import { getVicidialCredsForCampaign } from "@/lib/vicidial/connection";
 import { runVicidialTestDial } from "@/lib/vicidial/test-dial";
+import { normalizeVicidialCampaignId } from "@/lib/vicidial/campaigns";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -16,6 +17,8 @@ type Body = {
   outbound_cid?: string;
   start_campaign?: boolean;
   skip_gpu_wait?: boolean;
+  /** Uses editor value so test dial works before a full Save; persisted when sent. */
+  vicidial_campaign_id?: string;
 };
 
 export async function POST(request: Request, { params }: RouteParams) {
@@ -103,6 +106,31 @@ export async function POST(request: Request, { params }: RouteParams) {
       );
     }
 
+    const bodyCampaignId = body.vicidial_campaign_id?.trim()
+      ? normalizeVicidialCampaignId(body.vicidial_campaign_id)
+      : "";
+    let vicidialCampaignId =
+      bodyCampaignId || readiness.vicidialCampaignId || "";
+    if (bodyCampaignId && bodyCampaignId !== readiness.vicidialCampaignId) {
+      const { error: persistErr } = await supabase
+        .from("campaigns")
+        .update({ vicidial_campaign_id: bodyCampaignId })
+        .eq("id", id);
+      if (persistErr) {
+        return NextResponse.json(
+          { error: `Could not save ViciDial campaign ID: ${persistErr.message}` },
+          { status: 500 },
+        );
+      }
+      vicidialCampaignId = bodyCampaignId;
+    }
+    if (!vicidialCampaignId) {
+      return NextResponse.json(
+        { error: "Set the ViciDial campaign ID (e.g. test_cam) and try again." },
+        { status: 400 },
+      );
+    }
+
     const startCampaign = body.start_campaign !== false;
     const skipGpuWait = body.skip_gpu_wait === true;
 
@@ -172,7 +200,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     const result = await runVicidialTestDial(
       { baseUrl: creds.baseUrl, user: creds.user, pass: creds.pass },
       {
-        vicidialCampaignId: readiness.vicidialCampaignId!,
+        vicidialCampaignId,
         remoteAgentUser,
         phone_code: parsedPhone.phone_code,
         phone_number: parsedPhone.phone_number,

@@ -14,7 +14,7 @@ export type VicidialCredentials = {
   userGroups?: string;
 };
 
-function parseCsvLine(line: string): string[] {
+export function parseCsvLine(line: string): string[] {
   const values: string[] = [];
   let current = "";
   let inQuotes = false;

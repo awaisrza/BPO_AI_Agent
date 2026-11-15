@@ -39,19 +39,21 @@ export async function GET() {
   let bots: { id: string; name: string; agent_user: string; sip_uri: string }[] = [];
   if (isAdminConfigured()) {
     const admin = createAdminClient();
-    const { data } = await admin
-      .from("bots")
-      .select("id, name, vicidial_agent_user")
-      .eq("org_id", org.id)
-      .order("name", { ascending: true });
-    bots = (data ?? [])
-      .filter((b) => (b.vicidial_agent_user ?? "").trim())
-      .map((b) => ({
-        id: b.id,
-        name: b.name,
-        agent_user: b.vicidial_agent_user!.trim(),
-        sip_uri: buildSipUri(b.vicidial_agent_user!.trim(), orgRef),
-      }));
+    if (admin) {
+      const { data } = await admin
+        .from("bots")
+        .select("id, name, vicidial_agent_user")
+        .eq("org_id", org.id)
+        .order("name", { ascending: true });
+      bots = (data ?? [])
+        .filter((b) => (b.vicidial_agent_user ?? "").trim())
+        .map((b) => ({
+          id: b.id,
+          name: b.name,
+          agent_user: b.vicidial_agent_user!.trim(),
+          sip_uri: buildSipUri(b.vicidial_agent_user!.trim(), orgRef),
+        }));
+    }
   }
 
   return NextResponse.json({
