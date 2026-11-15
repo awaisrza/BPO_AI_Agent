@@ -2,11 +2,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getGpuOrchestratorConfig } from "@/lib/gpu/config";
 import { resumeRunPodPod, stopRunPodPod, waitForRunPodRunning } from "@/lib/gpu/runpod";
 import {
+  executeVastCommand,
   startVastInstance,
   stopVastInstance,
+  vastSupervisorRestartCommand,
   waitForVastRunning,
 } from "@/lib/gpu/vast";
 import { fetchGpuWorkerHealth } from "@/lib/gpu/worker-health";
+import { fetchGpuSupervisorStatus } from "@/lib/gpu/supervisor";
 
 export type OrchestrateResult = {
   ok: boolean;
@@ -114,6 +117,7 @@ export async function startGpuForCampaign(campaignId: string): Promise<Orchestra
   let podInfo: { id: string; desiredStatus: string } | undefined;
   const health = await fetchGpuWorkerHealth();
   const needsHostStart = !health.ready;
+  let restartHint = "";
 
   if (needsHostStart && config.vastApiKey && config.vastInstanceId) {
     const started = await startVastInstance(config.vastApiKey, config.vastInstanceId);
@@ -122,6 +126,27 @@ export async function startGpuForCampaign(campaignId: string): Promise<Orchestra
   } else if (needsHostStart && config.runpodApiKey && config.runpodPodId) {
     podInfo = await resumeRunPodPod(config.runpodApiKey, config.runpodPodId);
     await waitForRunPodRunning(config.runpodApiKey, config.runpodPodId, config.healthTimeoutMs);
+  }
+
+  // After a GPU reboot the instance is "running" but supervisor/worker are dead.
+  // Restart them via Vast execute (same as SSH: bash scripts/restart_fleet_supervisor.sh).
+  const supervisorSnap = config.supervisorUrl
+    ? await fetchGpuSupervisorStatus()
+    : null;
+  const supervisorDown =
+    Boolean(config.supervisorUrl) &&
+    (!supervisorSnap || supervisorSnap.ok === false);
+  const needsFleetRestart = needsHostStart || supervisorDown;
+
+  if (needsFleetRestart && config.vastApiKey && config.vastInstanceId) {
+    const exec = await executeVastCommand(
+      config.vastApiKey,
+      config.vastInstanceId,
+      vastSupervisorRestartCommand(),
+    );
+    restartHint = exec.ok
+      ? ` Restarted fleet supervisor on GPU (${exec.message}).`
+      : ` Could not auto-restart supervisor (${exec.message}).`;
   }
 
   const hostHint = podInfo
@@ -136,7 +161,7 @@ export async function startGpuForCampaign(campaignId: string): Promise<Orchestra
     const supervisorOk = await waitForSupervisorHealth(
       config.supervisorUrl,
       config.supervisorSecret,
-      Math.min(config.healthTimeoutMs, 90_000),
+      Math.min(config.healthTimeoutMs, 120_000),
     );
     if (supervisorOk) {
       try {
@@ -157,24 +182,25 @@ export async function startGpuForCampaign(campaignId: string): Promise<Orchestra
         configured: true,
         message:
           workerCount > 0
-            ? `GPU fleet started — ${workerCount} agent worker(s) running.${hostHint}`
-            : `GPU supervisor online; waiting for workers.${hostHint}`,
+            ? `GPU fleet started — ${workerCount} agent worker(s) running.${hostHint}${restartHint}`
+            : `GPU supervisor online; waiting for workers.${hostHint}${restartHint}`,
         pod: podInfo,
         supervisor,
       };
     }
   }
 
-  // Supervisor URL missing or not reachable (common when Vast maps 53604→53604).
+  // Supervisor URL missing or not reachable (common when Vast remaps ports after reboot).
+  // Worker health (10200) is enough to place calls once restart_fleet_supervisor finished.
   await waitForWorkerHealth(config.healthTimeoutMs);
   return {
     ok: true,
     configured: true,
     message:
-      `GPU worker is ready via health URL.${hostHint} ` +
+      `GPU worker is ready via health URL.${hostHint}${restartHint} ` +
       (config.supervisorUrl
-        ? "Supervisor URL is set but unreachable — remap Vast public port → internal 8770, or comment out GPU_SUPERVISOR_URL."
-        : "Relying on instance onstart + poll loop (GPU_SUPERVISOR_URL unset)."),
+        ? "Supervisor URL is set but unreachable — update GPU_SUPERVISOR_URL to the new Vast public port for 8770, or comment it out."
+        : "Relying on worker health + poll loop (GPU_SUPERVISOR_URL unset)."),
     pod: podInfo,
     supervisor,
   };

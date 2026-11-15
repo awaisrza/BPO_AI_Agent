@@ -30,11 +30,6 @@ function pollMs(): number {
   return parseInt(process.env.GPU_WORKER_READY_POLL_MS ?? "3000", 10);
 }
 
-/** Stop polling when the worker cannot come online without manual GPU action. */
-function isOfflineFailFastPhase(phase: GpuWarmupPhase): boolean {
-  return phase === "supervisor_unconfigured" || phase === "offline";
-}
-
 function offlineFailFastMs(): number {
   return parseInt(process.env.GPU_WORKER_OFFLINE_FAIL_FAST_MS ?? "5000", 10);
 }
@@ -235,7 +230,16 @@ export async function fetchGpuWarmupStatus(options?: {
  */
 export async function startGpuWarmup(campaignId: string): Promise<{ message: string }> {
   const health = await fetchGpuWorkerHealth();
-  if (!health.ready) {
+  const supervisorConfigured = Boolean(process.env.GPU_SUPERVISOR_URL?.trim());
+  let supervisorUnreachable = false;
+  if (supervisorConfigured) {
+    const { fetchGpuSupervisorStatus } = await import("./supervisor");
+    const snap = await fetchGpuSupervisorStatus();
+    supervisorUnreachable = !snap || snap.ok === false;
+  }
+
+  // Cold GPU / crashed supervisor: startGpuForCampaign restarts via Vast execute.
+  if (!health.ready || supervisorUnreachable) {
     try {
       const { startGpuForCampaign } = await import("./orchestrator");
       const gpu = await startGpuForCampaign(campaignId);
@@ -270,9 +274,20 @@ export async function startGpuWarmup(campaignId: string): Promise<{ message: str
     };
   } catch (err) {
     const reason = err instanceof Error ? err.message : "supervisor sync failed";
-    return {
-      message: `${reason} If the supervisor poll loop is running on the GPU, the worker should still start.`,
-    };
+    // Sync failed because supervisor died mid-session — restart fleet then sync again.
+    try {
+      const { startGpuForCampaign } = await import("./orchestrator");
+      const gpu = await startGpuForCampaign(campaignId);
+      return {
+        message: `${reason} Auto-restart attempted: ${gpu.message}`,
+      };
+    } catch (restartErr) {
+      const restartReason =
+        restartErr instanceof Error ? restartErr.message : "auto-restart failed";
+      return {
+        message: `${reason} ${restartReason}`,
+      };
+    }
   }
 }
 
@@ -312,8 +327,13 @@ export async function waitForGpuWarmup(options: {
 
     const elapsed = Date.now() - started;
 
-    // Worker unreachable and dashboard cannot start it — do not burn the full prewarm timeout.
-    if (isOfflineFailFastPhase(status.phase) && elapsed >= offlineFailFastMs()) {
+    // Supervisor public port often stale after Vast reboot — keep waiting on worker health
+    // (startGpuWarmup already triggered Vast execute restart). Only fail-fast when
+    // supervisor URL is not configured at all.
+    if (
+      status.phase === "supervisor_unconfigured" &&
+      elapsed >= offlineFailFastMs()
+    ) {
       return {
         ...status,
         ready: false,
@@ -321,7 +341,22 @@ export async function waitForGpuWarmup(options: {
         message:
           `${status.message} Worker still offline after ${Math.round(elapsed / 1000)}s — ` +
           "SSH to the GPU, verify the Vast public port for internal 10200, update GPU_WORKER_HEALTH_URL, " +
-          "then: cd /workspace/BPO_AI_Agent/agent && nohup python run_supervisor.py > /tmp/supervisor.log 2>&1 &",
+          "then: bash scripts/restart_fleet_supervisor.sh",
+        events,
+        waitedMs: elapsed,
+      };
+    }
+    // GPU_SUPERVISOR_URL unreachable: give restart + Whisper load time before giving up.
+    if (status.phase === "offline" && elapsed >= Math.min(timeoutMs, 180_000)) {
+      return {
+        ...status,
+        ready: false,
+        phase: "error",
+        message:
+          `${status.message} Still offline after ${Math.round(elapsed / 1000)}s. ` +
+          "Confirm VAST_API_KEY + VAST_INSTANCE_ID in dashboard .env (auto-restart), " +
+          "update GPU_WORKER_HEALTH_URL / GPU_SUPERVISOR_URL to current Vast ports, " +
+          "or SSH: bash scripts/restart_fleet_supervisor.sh",
         events,
         waitedMs: elapsed,
       };

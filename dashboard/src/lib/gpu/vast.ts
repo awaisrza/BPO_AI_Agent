@@ -123,6 +123,64 @@ export async function startVastInstance(
   return getVastInstance(apiKey, instanceId);
 }
 
+/**
+ * Run a short command on the instance (Vast execute API). Max 512 chars.
+ * Used to restart the fleet supervisor after a GPU reboot without SSH.
+ */
+export async function executeVastCommand(
+  apiKey: string,
+  instanceId: string,
+  command: string,
+): Promise<{ ok: boolean; resultUrl?: string; message: string }> {
+  const trimmed = command.trim().slice(0, 512);
+  if (!trimmed) {
+    return { ok: false, message: "Empty Vast execute command." };
+  }
+  const res = await fetch(
+    `${VAST_API_BASE}/instances/command/${encodeURIComponent(instanceId)}/`,
+    {
+      method: "PUT",
+      headers: authHeaders(apiKey),
+      body: JSON.stringify({ command: trimmed }),
+      cache: "no-store",
+    },
+  );
+  const text = await res.text();
+  let body: Record<string, unknown> = {};
+  if (text.trim()) {
+    try {
+      body = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!res.ok) {
+    const detail =
+      typeof body.msg === "string"
+        ? body.msg
+        : typeof body.error === "string"
+          ? body.error
+          : `HTTP ${res.status}`;
+    return { ok: false, message: `Vast execute failed: ${detail}` };
+  }
+  return {
+    ok: true,
+    resultUrl: typeof body.result_url === "string" ? body.result_url : undefined,
+    message:
+      typeof body.msg === "string"
+        ? body.msg
+        : "Restart command sent to GPU — waiting for worker health.",
+  };
+}
+
+/** Default onstart-equivalent: restart fleet supervisor + worker on the GPU. */
+export function vastSupervisorRestartCommand(): string {
+  return (
+    process.env.GPU_VAST_RESTART_CMD?.trim() ||
+    "cd /workspace/BPO_AI_Agent/agent && . .venv/bin/activate 2>/dev/null; bash scripts/restart_fleet_supervisor.sh"
+  );
+}
+
 export async function stopVastInstance(
   apiKey: string,
   instanceId: string,
