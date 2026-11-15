@@ -138,7 +138,6 @@ export function Sidebar() {
             <p className="truncate text-body font-semibold tracking-tight text-foreground">
               Parasite
             </p>
-            <p className="truncate text-2xs text-foreground-faint">Call center</p>
           </div>
         )}
       </div>
