@@ -346,9 +346,7 @@ export function LeadsPageClient() {
   }
 
   return (
-    <div
-      className="leads-shell relative -mx-4 -my-6 flex h-[calc(100dvh-3.5rem)] flex-col overflow-hidden border-y border-surface-border bg-surface-raised sm:-mx-6 lg:-mx-8 lg:-my-8 lg:h-[calc(100dvh-3.5rem)] lg:rounded-none"
-    >
+    <div className="leads-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-surface-raised">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_0%_0%,rgba(59,130,246,0.12),transparent_55%),radial-gradient(ellipse_60%_40%_at_100%_100%,rgba(15,23,42,0.85),transparent_55%)]"
