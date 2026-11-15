@@ -136,7 +136,7 @@ export function Sidebar() {
         {!collapsed && (
           <div className="min-w-0 flex-1">
             <p className="truncate text-body font-semibold tracking-tight text-foreground">
-              AI Fronter
+              Parasite
             </p>
             <p className="truncate text-2xs text-foreground-faint">Call center</p>
           </div>

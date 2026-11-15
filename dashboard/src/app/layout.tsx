@@ -8,8 +8,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "AI Fronter",
-  description: "AI fronter bots for BPO call centers",
+  title: "Parasite",
+  description: "AI call center agents for BPO teams",
 };
 
 export default function RootLayout({
