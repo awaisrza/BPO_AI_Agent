@@ -10,6 +10,7 @@ const FULL_BLEED = new Set([
   "/integrations",
   "/settings",
   "/campaigns",
+  "/analytics",
 ]);
 
 function isFullBleed(pathname: string) {
