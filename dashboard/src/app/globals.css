@@ -88,3 +88,27 @@
     scrollbar-color: var(--border-default) transparent;
   }
 }
+
+/* Leads directory — soft enter for list rows + resizable rail */
+@keyframes leads-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.leads-shell .leads-row {
+  animation: leads-row-in 0.28s ease-out both;
+}
+
+@media (min-width: 1024px) {
+  .leads-shell .leads-rail {
+    width: var(--leads-rail, 224px);
+    min-width: var(--leads-rail, 224px);
+    max-width: var(--leads-rail, 224px);
+  }
+}
