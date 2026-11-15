@@ -24,7 +24,7 @@ type TeamMember = {
   role: string;
 };
 
-export function UsersSettingsTable() {
+export function UsersSettingsTable({ embedded = false }: { embedded?: boolean }) {
   const [users, setUsers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -70,30 +70,38 @@ export function UsersSettingsTable() {
     void load();
   }, []);
 
-  return (
-    <Card>
-      <CardHeader
-        title="Team members"
-        action={
+  const content = (
+    <>
+      <div className={embedded ? "mb-4 flex justify-end" : undefined}>
+        {embedded && (
           <Button variant="secondary" size="sm" disabled>
             Invite user
           </Button>
-        }
-      />
-      <CardBody className="px-0 pb-0 pt-0">
-        {loading && <TableSkeleton rows={3} cols={3} />}
-
-        {error && (
-          <div className="p-5">
-            <Alert variant="error">{error}</Alert>
-          </div>
         )}
+      </div>
 
-        {!loading && !error && users.length === 0 && (
-          <p className="p-5 text-sm text-foreground-muted">No team members found.</p>
-        )}
+      {loading && <TableSkeleton rows={3} cols={3} />}
 
-        {!loading && !error && users.length > 0 && (
+      {error && (
+        <div className={embedded ? "py-2" : "p-5"}>
+          <Alert variant="error">{error}</Alert>
+        </div>
+      )}
+
+      {!loading && !error && users.length === 0 && (
+        <p className={embedded ? "text-sm text-foreground-muted" : "p-5 text-sm text-foreground-muted"}>
+          No team members found.
+        </p>
+      )}
+
+      {!loading && !error && users.length > 0 && (
+        <div
+          className={
+            embedded
+              ? "overflow-hidden rounded-md border border-surface-border"
+              : undefined
+          }
+        >
           <Table>
             <TableHead>
               <TableHeaderCell>Name</TableHeaderCell>
@@ -110,8 +118,24 @@ export function UsersSettingsTable() {
               ))}
             </TableBody>
           </Table>
-        )}
-      </CardBody>
+        </div>
+      )}
+    </>
+  );
+
+  if (embedded) return <div className="space-y-2">{content}</div>;
+
+  return (
+    <Card>
+      <CardHeader
+        title="Team members"
+        action={
+          <Button variant="secondary" size="sm" disabled>
+            Invite user
+          </Button>
+        }
+      />
+      <CardBody className="px-0 pb-0 pt-0">{content}</CardBody>
     </Card>
   );
 }
