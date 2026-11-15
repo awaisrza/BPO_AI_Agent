@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -15,7 +16,6 @@ import {
   Settings,
   Users,
   BarChart3,
-  PhoneCall,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -130,9 +130,14 @@ export function Sidebar() {
           collapsed ? "justify-center px-2" : "gap-2.5 px-3",
         )}
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br from-brand/30 to-brand/10 ring-1 ring-brand/20">
-          <PhoneCall className="h-4 w-4 text-brand" strokeWidth={1.75} />
-        </div>
+        <Image
+          src="/parasite-mark.png"
+          alt="Parasite"
+          width={32}
+          height={32}
+          className="h-8 w-8 shrink-0 object-contain"
+          priority
+        />
         {!collapsed && (
           <div className="min-w-0 flex-1">
             <p className="truncate text-body font-semibold tracking-tight text-foreground">
