@@ -127,23 +127,21 @@ export function Sidebar() {
       <div
         className={cn(
           "relative flex h-14 shrink-0 items-center border-b border-surface-border-subtle",
-          collapsed ? "justify-center px-2" : "gap-2.5 px-3",
+          collapsed ? "justify-center px-2" : "gap-2 px-3",
         )}
       >
         <Image
           src="/parasite-mark.png"
           alt="Parasite"
-          width={32}
-          height={32}
-          className="h-8 w-8 shrink-0 object-contain"
+          width={40}
+          height={40}
+          className="h-10 w-10 shrink-0 object-contain object-center"
           priority
         />
         {!collapsed && (
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-body font-semibold tracking-tight text-foreground">
-              Parasite
-            </p>
-          </div>
+          <p className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-none tracking-tight text-foreground">
+            Parasite
+          </p>
         )}
       </div>
 
