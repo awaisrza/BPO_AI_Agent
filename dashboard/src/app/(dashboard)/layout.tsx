@@ -2,6 +2,8 @@ import { AppShell } from "@/components/layout/app-shell";
 import { OrgProvider } from "@/components/layout/org-provider";
 import { DEFAULT_ORG_SUMMARY, getOrgSummary } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardLayout({
   children,
 }: {
