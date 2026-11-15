@@ -12,9 +12,16 @@ const FULL_BLEED = new Set([
   "/campaigns",
 ]);
 
+function isFullBleed(pathname: string) {
+  if (FULL_BLEED.has(pathname)) return true;
+  // Campaign editor / new campaign
+  if (pathname.startsWith("/campaigns/")) return true;
+  return false;
+}
+
 export function ContentFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const fullBleed = FULL_BLEED.has(pathname);
+  const fullBleed = isFullBleed(pathname);
 
   return (
     <main
