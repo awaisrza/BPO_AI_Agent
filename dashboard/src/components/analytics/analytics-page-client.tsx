@@ -123,10 +123,10 @@ export function AnalyticsPageClient() {
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
-            <div className="mx-auto w-full max-w-3xl space-y-6 px-5 py-6">
+            <div className="mx-auto flex w-full max-w-5xl flex-col justify-center px-5 py-8 sm:px-8 lg:min-h-full lg:px-10">
               {section === "overview" && (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-3">
+                <div className="mx-auto w-full max-w-4xl space-y-6">
+                  <div className="grid gap-4 sm:grid-cols-3">
                     <MetricTile
                       label="Connect rate"
                       value={`${stats.connectRate}%`}
@@ -144,8 +144,8 @@ export function AnalyticsPageClient() {
                     />
                   </div>
 
-                  <div className="rounded-md border border-surface-border-subtle bg-surface-overlay/40 p-4">
-                    <p className="mb-4 text-2xs font-semibold uppercase tracking-[0.12em] text-foreground-faint">
+                  <div className="rounded-md border border-surface-border-subtle bg-surface-overlay/40 p-5 sm:p-6">
+                    <p className="mb-5 text-2xs font-semibold uppercase tracking-[0.12em] text-foreground-faint">
                       Operational metrics
                     </p>
                     <div className="grid gap-4 sm:grid-cols-3">
@@ -158,12 +158,12 @@ export function AnalyticsPageClient() {
                       <MetricTile label="Reporting period" value="14 days" compact />
                     </div>
                   </div>
-                </>
+                </div>
               )}
 
               {section === "conversion" && (
-                <div className="rounded-md border border-surface-border-subtle bg-surface-overlay/40 px-4 py-6 sm:px-6">
-                  <p className="mb-1 text-center text-caption text-foreground-muted">
+                <div className="mx-auto w-full max-w-4xl rounded-md border border-surface-border-subtle bg-surface-overlay/40 px-6 py-10 sm:px-10 sm:py-12">
+                  <p className="mb-8 text-center text-body text-foreground-muted">
                     Share of each stage from dials to qualified transfer
                   </p>
                   <ConversionPieChart slices={slices} title="Stages" />
@@ -192,14 +192,14 @@ function MetricTile({
     <div
       className={cn(
         "rounded-md border border-surface-border-subtle bg-surface-overlay/55",
-        compact ? "px-3 py-3" : "px-4 py-4",
+        compact ? "px-4 py-4" : "px-5 py-5",
       )}
     >
       <p className="text-2xs uppercase tracking-wide text-foreground-faint">{label}</p>
       <p
         className={cn(
-          "mt-1 font-semibold tabular-nums tracking-tight",
-          compact ? "text-lg text-foreground" : "text-2xl",
+          "mt-1.5 font-semibold tabular-nums tracking-tight",
+          compact ? "text-xl text-foreground" : "text-3xl",
           accent ?? "text-foreground",
         )}
       >

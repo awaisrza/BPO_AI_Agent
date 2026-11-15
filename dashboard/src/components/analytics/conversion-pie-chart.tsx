@@ -9,11 +9,11 @@ export type PieSlice = {
   color: string;
 };
 
-const SIZE = 220;
+const SIZE = 320;
 const CX = SIZE / 2;
 const CY = SIZE / 2;
-const RADIUS = 78;
-const INNER = 46;
+const RADIUS = 118;
+const INNER = 68;
 
 function polar(cx: number, cy: number, r: number, angleDeg: number) {
   const rad = ((angleDeg - 90) * Math.PI) / 180;
@@ -87,13 +87,13 @@ export function ConversionPieChart({
   const centerPct = active ? `${active.pct.toFixed(1)}%` : "100%";
 
   return (
-    <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:justify-center sm:gap-10">
-      <div className="relative shrink-0">
+    <div className="flex w-full flex-col items-center justify-center gap-8 lg:flex-row lg:gap-14">
+      <div className="relative h-[320px] w-[320px] shrink-0">
         <svg
           width={SIZE}
           height={SIZE}
           viewBox={`0 0 ${SIZE} ${SIZE}`}
-          className="overflow-visible"
+          className="h-full w-full overflow-visible"
           role="img"
           aria-label={`${title} pie chart`}
         >
@@ -126,17 +126,17 @@ export function ConversionPieChart({
           })}
         </svg>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-          <p className="max-w-[6.5rem] truncate text-2xs font-semibold uppercase tracking-[0.12em] text-foreground-faint">
+          <p className="max-w-[8rem] truncate text-2xs font-semibold uppercase tracking-[0.12em] text-foreground-faint">
             {centerLabel}
           </p>
-          <p className="mt-1 text-xl font-semibold tabular-nums tracking-tight text-foreground">
+          <p className="mt-1 text-3xl font-semibold tabular-nums tracking-tight text-foreground">
             {centerValue}
           </p>
-          <p className="mt-0.5 text-caption tabular-nums text-foreground-muted">{centerPct}</p>
+          <p className="mt-1 text-body tabular-nums text-foreground-muted">{centerPct}</p>
         </div>
       </div>
 
-      <ul className="w-full max-w-xs space-y-1.5 sm:w-auto">
+      <ul className="w-full max-w-sm space-y-2">
         {arcs.map((arc) => {
           const isActive = hover === arc.index;
           return (
@@ -146,23 +146,23 @@ export function ConversionPieChart({
                 onMouseEnter={() => setHover(arc.index)}
                 onMouseLeave={() => setHover(null)}
                 className={cn(
-                  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors",
+                  "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
                   isActive
                     ? "bg-surface-overlay text-foreground shadow-[inset_2px_0_0_0_var(--brand)]"
                     : "text-foreground-secondary hover:bg-surface-overlay/60",
                 )}
               >
                 <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  className="h-3 w-3 shrink-0 rounded-full"
                   style={{ backgroundColor: arc.color }}
                 />
-                <span className="min-w-0 flex-1 truncate text-caption font-medium">
+                <span className="min-w-0 flex-1 truncate text-body font-medium">
                   {arc.label}
                 </span>
-                <span className="tabular-nums text-caption text-foreground-faint">
+                <span className="tabular-nums text-body text-foreground-faint">
                   {arc.value.toLocaleString()}
                 </span>
-                <span className="w-12 text-right tabular-nums text-2xs text-foreground-faint">
+                <span className="w-14 text-right tabular-nums text-caption text-foreground-faint">
                   {arc.pct.toFixed(0)}%
                 </span>
               </button>
