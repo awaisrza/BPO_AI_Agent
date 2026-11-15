@@ -103,7 +103,8 @@
 
 .leads-shell .leads-row,
 .calls-shell .calls-row,
-.bots-shell .bots-row {
+.bots-shell .bots-row,
+.campaigns-shell .campaigns-row {
   animation: directory-row-in 0.28s ease-out both;
 }
 
@@ -124,5 +125,11 @@
     width: var(--bots-rail, 224px);
     min-width: var(--bots-rail, 224px);
     max-width: var(--bots-rail, 224px);
+  }
+
+  .campaigns-shell .campaigns-rail {
+    width: var(--campaigns-rail, 224px);
+    min-width: var(--campaigns-rail, 224px);
+    max-width: var(--campaigns-rail, 224px);
   }
 }
