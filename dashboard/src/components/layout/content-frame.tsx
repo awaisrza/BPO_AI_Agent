@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-const FULL_BLEED = new Set(["/leads", "/calls"]);
+const FULL_BLEED = new Set(["/leads", "/calls", "/bots"]);
 
 export function ContentFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
