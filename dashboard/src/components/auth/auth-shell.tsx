@@ -12,51 +12,51 @@ export function AuthShell({
   description: string;
 }) {
   return (
-    <div className="auth-shell relative flex min-h-screen items-center justify-center overflow-hidden bg-surface px-4 py-10 text-foreground sm:justify-start sm:px-10 lg:px-16 xl:px-24">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_55%_at_35%_40%,rgba(59,130,246,0.2),transparent_60%)]"
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_90%,rgba(59,130,246,0.08),transparent_42%)]"
-      />
-      <div
-        aria-hidden
-        className="auth-shell-grid pointer-events-none absolute inset-0 opacity-[0.35]"
-      />
+    <div className="auth-shell relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10 text-white sm:justify-start sm:px-10 lg:px-16 xl:px-24">
+      {/* Discord-inspired deep indigo field */}
+      <div aria-hidden className="auth-shell-base pointer-events-none absolute inset-0" />
+      <div aria-hidden className="auth-shell-wash pointer-events-none absolute inset-0" />
+      <div aria-hidden className="auth-shell-stars pointer-events-none absolute inset-0" />
 
-      <div className="relative z-10 flex w-full max-w-md flex-col items-stretch sm:items-start">
-        <header className="auth-shell-brand mb-8 flex w-full flex-col items-center text-center sm:mb-10 sm:items-start sm:text-left">
+      {/* Soft floating orbs — Discord-style ambient motion */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+        <span className="auth-orb auth-orb-a" />
+        <span className="auth-orb auth-orb-b" />
+        <span className="auth-orb auth-orb-c" />
+        <span className="auth-orb auth-orb-d" />
+        <span className="auth-float auth-float-1" />
+        <span className="auth-float auth-float-2" />
+        <span className="auth-float auth-float-3" />
+      </div>
+
+      <div className="relative z-10 flex w-full max-w-[420px] flex-col items-stretch sm:items-start">
+        <header className="auth-shell-brand mb-7 flex w-full flex-col items-center text-center sm:mb-8 sm:items-start sm:text-left">
           <Image
             src="/parasite-mark.png"
             alt=""
             width={128}
             height={128}
-            className="h-28 w-28 object-contain drop-shadow-[0_16px_48px_rgba(59,130,246,0.3)] sm:h-32 sm:w-32"
+            className="h-28 w-28 object-contain drop-shadow-[0_18px_50px_rgba(88,101,242,0.45)] sm:h-32 sm:w-32"
             priority
           />
-          <p className="mt-6 font-[family-name:var(--font-auth-display)] text-4xl font-semibold tracking-[-0.04em] text-foreground sm:text-5xl">
+          <p className="mt-5 font-[family-name:var(--font-auth-display)] text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
             Parasite
           </p>
           {eyebrow ? (
-            <p className="mt-3 text-caption font-medium uppercase tracking-[0.18em] text-foreground-faint">
+            <p className="mt-3 text-caption font-medium uppercase tracking-[0.18em] text-white/55">
               {eyebrow}
             </p>
           ) : null}
           <h1 className="sr-only">{title}</h1>
-          <p className="mt-3 max-w-sm text-body text-foreground-muted sm:text-[0.9375rem] sm:leading-6">
-            {description}
-          </p>
         </header>
 
         <main className="auth-shell-panel w-full">
-          <div className="rounded-lg border border-surface-border/80 bg-surface-raised/80 px-5 py-6 backdrop-blur-sm sm:px-6 sm:py-7">
-            <div className="mb-5 flex items-baseline justify-between gap-3 border-b border-surface-border-subtle pb-4">
-              <p className="text-[15px] font-semibold tracking-tight text-foreground">
-                {title}
+          <div className="rounded-lg bg-[#313338] px-5 py-6 shadow-[0_8px_32px_rgba(0,0,0,0.35)] sm:px-7 sm:py-8">
+            <div className="mb-5">
+              <p className="text-xl font-semibold tracking-tight text-white">{title}</p>
+              <p className="mt-1.5 text-caption leading-5 text-[#b5bac1]">
+                {description}
               </p>
-              <p className="text-caption text-foreground-faint">Operations</p>
             </div>
             {children}
           </div>

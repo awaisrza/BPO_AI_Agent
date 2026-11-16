@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient, supabaseConfigHelp } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+
+const fieldClass =
+  "w-full rounded-[3px] border-0 bg-[#1e1f22] px-3 text-body text-[#dbdee1] outline-none ring-0 transition-[box-shadow,background-color] placeholder:text-[#6d6f78] focus:bg-[#1e1f22] focus:shadow-[0_0_0_1px_#5865f2] disabled:opacity-50";
 
 export function SignupForm() {
   const router = useRouter();
@@ -57,60 +59,76 @@ export function SignupForm() {
   return (
     <>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Field label="Company name">
-          <Input
+        <label className="block space-y-1.5">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-[#b5bac1]">
+            Company name
+          </span>
+          <input
             value={orgName}
             onChange={(e) => setOrgName(e.target.value)}
             placeholder="Your BPO"
             required
-            className="h-10"
+            className={cn(fieldClass, "h-10")}
           />
-        </Field>
+        </label>
 
-        <Field label="Your name">
-          <Input
+        <label className="block space-y-1.5">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-[#b5bac1]">
+            Your name
+          </span>
+          <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Ahmed"
             required
-            className="h-10"
+            className={cn(fieldClass, "h-10")}
           />
-        </Field>
+        </label>
 
-        <Field label="Email">
-          <Input
+        <label className="block space-y-1.5">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-[#b5bac1]">
+            Email
+          </span>
+          <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@company.com"
             required
             autoComplete="email"
-            className="h-10"
+            className={cn(fieldClass, "h-10")}
           />
-        </Field>
+        </label>
 
-        <Field label="Password">
-          <Input
+        <label className="block space-y-1.5">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-[#b5bac1]">
+            Password
+          </span>
+          <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             minLength={8}
             required
             autoComplete="new-password"
-            className="h-10"
+            className={cn(fieldClass, "h-10")}
           />
-        </Field>
+        </label>
 
-        {error ? <p className="text-caption text-status-danger">{error}</p> : null}
+        {error ? <p className="text-caption text-[#f23f43]">{error}</p> : null}
 
-        <Button type="submit" className="h-10 w-full" disabled={loading}>
+        <button
+          type="submit"
+          disabled={loading}
+          className="mt-2 flex h-11 w-full items-center justify-center rounded-[3px] bg-[#5865f2] text-[15px] font-medium text-white transition-colors hover:bg-[#4752c4] disabled:opacity-50"
+        >
           {loading ? "Creating account…" : "Create account"}
-        </Button>
+        </button>
       </form>
 
-      <p className="mt-5 text-center text-caption text-foreground-muted">
+      <p className="mt-5 text-caption text-[#949ba4]">
         Already have an account?{" "}
-        <Link href="/login" className="font-medium text-brand hover:text-brand-hover">
+        <Link href="/login" className="text-[#00a8fc] hover:underline">
           Sign in
         </Link>
       </p>
