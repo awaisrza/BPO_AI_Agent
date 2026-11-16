@@ -14,7 +14,7 @@ export type VicidialCredentials = {
   userGroups?: string;
 };
 
-function parseCsvLine(line: string): string[] {
+export function parseCsvLine(line: string): string[] {
   const values: string[] = [];
   let current = "";
   let inQuotes = false;
@@ -99,6 +99,7 @@ export function parseLoggedInAgentsCsv(text: string): VicidialCloser[] {
 export async function fetchVicidialApi(
   creds: VicidialCredentials,
   params: Record<string, string>,
+  options?: { timeoutMs?: number },
 ): Promise<string> {
   const query = new URLSearchParams({
     source: "ai-fronter",
@@ -107,10 +108,40 @@ export async function fetchVicidialApi(
     ...params,
   });
   const url = `${creds.baseUrl.replace(/\/$/, "")}/vicidial/non_agent_api.php?${query}`;
-  const res = await fetch(url, { cache: "no-store" });
+  const timeoutMs = options?.timeoutMs ?? 25_000;
+
+  let res: Response;
+  try {
+    res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "network error";
+    const host = creds.baseUrl.replace(/^https?:\/\//i, "").split("/")[0];
+    const timedOut = /timeout|aborted/i.test(reason);
+    const fn = params.function ?? "request";
+    throw new Error(
+      timedOut
+        ? fn === "add_lead"
+          ? `ViciDial add_lead timed out after ${Math.round(timeoutMs / 1000)}s. Earlier API steps may have succeeded — ` +
+              "the dialer is reachable but MySQL/Apache is slow or stuck. On the ViciDial server run: " +
+              "df -h; curl -m 5 'http://127.0.0.1/vicidial/non_agent_api.php?function=version'; " +
+              "check mysql processes; repair vicidial_hopper / vicidial_list if needed."
+          : `ViciDial API timed out reaching ${host} (${fn}). The dashboard server must reach port 80 on the dialer ` +
+              `(use http://169.58.105.180 — not https). From the ViciDial box, curl http://127.0.0.1/vicidial/non_agent_api.php should work; ` +
+              "if that works but this fails, open firewall + cloud security group for port 80 from your dashboard host."
+        : `ViciDial API unreachable at ${host} (${reason}). Use http:// with the dialer's public IP.`,
+    );
+  }
+
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`ViciDial returned ${res.status}`);
+    const host = creds.baseUrl.replace(/^https?:\/\//i, "").split("/")[0];
+    if (res.status === 504 || res.status === 502) {
+      throw new Error(
+        `ViciDial gateway timed out (${res.status}) for ${host}. ` +
+          "Update Integrations → Server URL to http://169.58.105.180 (or test with curl from your PC).",
+      );
+    }
+    throw new Error(`ViciDial returned ${res.status} for ${host}`);
   }
   return text;
 }

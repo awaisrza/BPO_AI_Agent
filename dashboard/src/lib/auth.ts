@@ -17,20 +17,26 @@ export async function getSessionUser() {
 }
 
 export async function getProfile(): Promise<ProfileRow | null> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+  if (!isSupabaseConfigured()) return null;
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("id, org_id, email, name, role")
-    .eq("id", user.id)
-    .maybeSingle();
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
 
-  if (error) return null;
-  return data;
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, org_id, email, name, role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (error) return null;
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 /** Create org + profile for accounts that exist in auth but not in profiles. */
@@ -190,23 +196,29 @@ export const DEFAULT_ORG_SUMMARY: OrgSummary = {
 };
 
 export async function getOrgSummary(): Promise<OrgSummary | null> {
-  let org = await getOrganization();
-  if (!org) {
-    await ensureUserProfile();
-    org = await getOrganization();
+  if (!isSupabaseConfigured()) return null;
+
+  try {
+    let org = await getOrganization();
+    if (!org) {
+      await ensureUserProfile();
+      org = await getOrganization();
+    }
+    if (!org) return null;
+
+    const supabase = await createClient();
+    const { count, error: botsError } = await supabase
+      .from("bots")
+      .select("*", { count: "exact", head: true });
+
+    return {
+      name: org.name,
+      plan: org.plan,
+      botsIncluded: org.bots_included ?? 10,
+      botsActive: botsError ? 0 : (count ?? 0),
+      pilot: org.plan === "pilot",
+    };
+  } catch {
+    return null;
   }
-  if (!org) return null;
-
-  const supabase = await createClient();
-  const { count, error: botsError } = await supabase
-    .from("bots")
-    .select("*", { count: "exact", head: true });
-
-  return {
-    name: org.name,
-    plan: org.plan,
-    botsIncluded: org.bots_included ?? 10,
-    botsActive: botsError ? 0 : (count ?? 0),
-    pilot: org.plan === "pilot",
-  };
 }

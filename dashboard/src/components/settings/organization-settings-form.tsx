@@ -13,7 +13,7 @@ import { getOrgId } from "@/lib/get-org-id";
 import { DEFAULT_ORG_SETTINGS, mergeOrgSettings } from "@/lib/org-settings";
 import { isMissingSettingsJsonColumn } from "@/lib/org-settings-migration";
 
-export function OrganizationSettingsForm() {
+export function OrganizationSettingsForm({ embedded = false }: { embedded?: boolean }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -162,7 +162,64 @@ export function OrganizationSettingsForm() {
     }
   }
 
+  const form = (
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <Field label="Company name">
+        <Input
+          value={companyName}
+          onChange={(e) => {
+            setCompanyName(e.target.value);
+            setSaved(false);
+          }}
+          required
+        />
+      </Field>
+
+      <Field label="Timezone">
+        <Input
+          value={timezone}
+          onChange={(e) => {
+            setTimezone(e.target.value);
+            setSaved(false);
+          }}
+          disabled={needsMigration}
+        />
+      </Field>
+
+      <Field label="Calling hours">
+        <Input
+          value={callingHours}
+          onChange={(e) => {
+            setCallingHours(e.target.value);
+            setSaved(false);
+          }}
+          disabled={needsMigration}
+        />
+      </Field>
+
+      <Checkbox
+        label="Enforce PTA telemarketing rules (consent and calling hours)"
+        checked={enforcePta}
+        onChange={(e) => {
+          setEnforcePta(e.target.checked);
+          setSaved(false);
+        }}
+        className={needsMigration ? "opacity-50" : undefined}
+      />
+
+      {error && <Alert variant={saved ? "warning" : "error"}>{error}</Alert>}
+      {saved && !error && <Alert variant="success">Organization settings saved.</Alert>}
+
+      <Button type="submit" className="mt-2" disabled={saving || !companyName.trim()}>
+        {saving ? "Saving…" : saved ? "Saved" : "Save changes"}
+      </Button>
+    </form>
+  );
+
   if (loading) {
+    if (embedded) {
+      return <p className="text-sm text-foreground-muted">Loading organization…</p>;
+    }
     return (
       <Card>
         <CardHeader title="Organization" />
@@ -176,67 +233,14 @@ export function OrganizationSettingsForm() {
   return (
     <div className="space-y-4">
       {needsMigration && <SettingsMigrationAlert />}
-
-      <Card>
-        <CardHeader title="Organization" />
-        <CardBody className="max-w-md space-y-5">
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <Field label="Company name">
-              <Input
-                value={companyName}
-                onChange={(e) => {
-                  setCompanyName(e.target.value);
-                  setSaved(false);
-                }}
-                required
-              />
-            </Field>
-
-            <Field label="Timezone">
-              <Input
-                value={timezone}
-                onChange={(e) => {
-                  setTimezone(e.target.value);
-                  setSaved(false);
-                }}
-                disabled={needsMigration}
-              />
-            </Field>
-
-            <Field label="Calling hours">
-              <Input
-                value={callingHours}
-                onChange={(e) => {
-                  setCallingHours(e.target.value);
-                  setSaved(false);
-                }}
-                disabled={needsMigration}
-              />
-            </Field>
-
-            <Checkbox
-              label="Enforce PTA telemarketing rules (consent and calling hours)"
-              checked={enforcePta}
-              onChange={(e) => {
-                setEnforcePta(e.target.checked);
-                setSaved(false);
-              }}
-              className={needsMigration ? "opacity-50" : undefined}
-            />
-
-            {error && (
-              <Alert variant={saved ? "warning" : "error"}>{error}</Alert>
-            )}
-            {saved && !error && (
-              <Alert variant="success">Organization settings saved.</Alert>
-            )}
-
-            <Button type="submit" className="mt-2" disabled={saving || !companyName.trim()}>
-              {saving ? "Saving…" : saved ? "Saved" : "Save changes"}
-            </Button>
-          </form>
-        </CardBody>
-      </Card>
+      {embedded ? (
+        form
+      ) : (
+        <Card>
+          <CardHeader title="Organization" />
+          <CardBody className="max-w-md space-y-5">{form}</CardBody>
+        </Card>
+      )}
     </div>
   );
 }

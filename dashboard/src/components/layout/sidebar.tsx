@@ -1,10 +1,14 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   Bot,
   Cable,
+  ChevronLeft,
+  ChevronRight,
   CreditCard,
   LayoutDashboard,
   Megaphone,
@@ -12,13 +16,14 @@ import {
   Settings,
   Users,
   BarChart3,
-  PhoneCall,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOrg } from "@/components/layout/org-provider";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
+
+const COLLAPSE_KEY = "sidebar.collapsed";
 
 const operationsNav: NavItem[] = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
@@ -38,32 +43,43 @@ const configNav: NavItem[] = [
   { href: "/billing", label: "Billing", icon: CreditCard },
 ];
 
-function NavSection({ title, items }: { title: string; items: NavItem[] }) {
+function NavSection({
+  title,
+  items,
+  collapsed,
+}: {
+  title: string;
+  items: NavItem[];
+  collapsed: boolean;
+}) {
   const pathname = usePathname();
 
   return (
-    <div className="mb-4">
-      <p className="mb-1.5 px-3 text-2xs font-medium uppercase tracking-wider text-foreground-faint">
-        {title}
-      </p>
+    <div className={cn(collapsed ? "mb-2" : "mb-3")}>
+      {!collapsed && (
+        <p className="mb-1 px-2.5 text-2xs font-semibold uppercase tracking-[0.14em] text-foreground-faint">
+          {title}
+        </p>
+      )}
+      {collapsed && (
+        <div className="mx-auto mb-1.5 h-px w-6 bg-surface-border-subtle" aria-hidden />
+      )}
       <div className="space-y-0.5">
         {items.map(({ href, label, icon: Icon }) => {
-          const active =
-            href === "/" ? pathname === "/" : pathname.startsWith(href);
+          const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
             <Link
               key={href}
               href={href}
+              title={collapsed ? label : undefined}
               className={cn(
-                "group relative flex items-center gap-2.5 rounded-md px-3 py-2 text-body font-medium transition-colors",
+                "group relative flex items-center rounded-md text-caption font-medium transition-[background-color,color,box-shadow] duration-150",
+                collapsed ? "justify-center px-2 py-2.5" : "gap-2.5 px-2.5 py-2",
                 active
-                  ? "bg-brand-muted text-foreground"
-                  : "text-foreground-muted hover:bg-surface-overlay hover:text-foreground-secondary",
+                  ? "bg-surface-overlay text-foreground shadow-[inset_2px_0_0_0_var(--brand)]"
+                  : "text-foreground-muted hover:bg-surface-overlay/70 hover:text-foreground-secondary",
               )}
             >
-              {active && (
-                <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-brand" />
-              )}
               <Icon
                 className={cn(
                   "h-4 w-4 shrink-0",
@@ -71,7 +87,7 @@ function NavSection({ title, items }: { title: string; items: NavItem[] }) {
                 )}
                 strokeWidth={1.75}
               />
-              {label}
+              {!collapsed && <span className="truncate">{label}</span>}
             </Link>
           );
         })}
@@ -82,30 +98,119 @@ function NavSection({ title, items }: { title: string; items: NavItem[] }) {
 
 export function Sidebar() {
   const org = useOrg();
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setCollapsed(window.localStorage.getItem(COLLAPSE_KEY) === "1");
+  }, []);
+
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      window.localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
 
   return (
-    <aside className="hidden h-full w-60 shrink-0 flex-col border-r border-surface-border bg-surface lg:flex">
-      <div className="flex h-14 items-center gap-2.5 border-b border-surface-border-subtle px-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-muted">
-          <PhoneCall className="h-4 w-4 text-brand" strokeWidth={1.75} />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-body font-semibold text-foreground">AI Fronter</p>
-          <p className="text-2xs text-foreground-faint">Call center platform</p>
-        </div>
+    <aside
+      className={cn(
+        "relative hidden h-full shrink-0 flex-col border-r border-surface-border bg-surface-raised transition-[width] duration-200 ease-out lg:flex",
+        collapsed ? "w-[4.25rem]" : "w-56",
+      )}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_40%_at_0%_0%,rgba(59,130,246,0.1),transparent_55%)]"
+      />
+
+      <div
+        className={cn(
+          "relative flex h-14 shrink-0 items-center border-b border-surface-border-subtle",
+          collapsed ? "justify-center px-2" : "gap-2 px-3",
+        )}
+      >
+        <Image
+          src="/parasite-mark.png"
+          alt="Parasite"
+          width={40}
+          height={40}
+          className="h-10 w-10 shrink-0 object-contain object-center"
+          priority
+        />
+        {!collapsed && (
+          <p className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-none tracking-tight text-foreground">
+            Parasite
+          </p>
+        )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 py-4 scrollbar-thin">
-        <NavSection title="Operations" items={operationsNav} />
-        <NavSection title="Management" items={managementNav} />
-        <NavSection title="Configuration" items={configNav} />
+      <nav
+        className={cn(
+          "relative min-h-0 flex-1 overflow-y-auto py-3 scrollbar-thin",
+          collapsed ? "px-1.5" : "px-2",
+        )}
+      >
+        <NavSection title="Operations" items={operationsNav} collapsed={collapsed} />
+        <NavSection title="Management" items={managementNav} collapsed={collapsed} />
+        <NavSection title="Configuration" items={configNav} collapsed={collapsed} />
       </nav>
 
-      <div className="border-t border-surface-border-subtle p-4">
-        <p className="truncate text-body font-medium text-foreground-secondary">{org.name}</p>
-        <p className="mt-0.5 text-caption text-foreground-faint">
-          {org.botsActive}/{org.botsIncluded} agents
-        </p>
+      <div
+        className={cn(
+          "relative shrink-0 border-t border-surface-border-subtle",
+          collapsed ? "p-1.5" : "p-2.5",
+        )}
+      >
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className={cn(
+            "mb-2 flex w-full items-center rounded-md border border-surface-border-subtle bg-surface-overlay/50 text-foreground-faint transition-colors hover:bg-surface-overlay hover:text-foreground-secondary",
+            collapsed ? "justify-center px-2 py-2" : "justify-between gap-2 px-2.5 py-2",
+          )}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {!collapsed && <span className="text-2xs font-medium">Collapse</span>}
+          {collapsed ? (
+            <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.75} />
+          ) : (
+            <ChevronLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
+          )}
+        </button>
+
+        <div
+          className={cn(
+            "rounded-md border border-surface-border-subtle bg-surface-overlay/40",
+            collapsed ? "px-1.5 py-2 text-center" : "px-2.5 py-2",
+          )}
+          title={collapsed ? `${org.name} · ${org.botsActive}/${org.botsIncluded} agents` : undefined}
+        >
+          {collapsed ? (
+            <p className="text-2xs font-semibold tabular-nums text-foreground">
+              {org.botsActive}
+              <span className="text-foreground-faint">/{org.botsIncluded}</span>
+            </p>
+          ) : (
+            <>
+              <p className="truncate text-caption font-medium text-foreground-secondary">
+                {org.name}
+              </p>
+              <p className="mt-0.5 text-2xs tabular-nums text-foreground-faint">
+                {org.botsActive}/{org.botsIncluded} agents
+              </p>
+              <div className="mt-2 h-1 overflow-hidden rounded-full bg-surface">
+                <div
+                  className="h-full rounded-full bg-brand transition-all"
+                  style={{
+                    width: `${Math.min(100, Math.round((org.botsActive / Math.max(org.botsIncluded, 1)) * 100))}%`,
+                  }}
+                />
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </aside>
   );

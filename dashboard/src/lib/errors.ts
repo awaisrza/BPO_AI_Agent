@@ -12,6 +12,9 @@ export function formatSupabaseError(err: unknown, fallback: string): string {
   const e = err as SupabaseLikeError;
   if (e.message) {
     if (e.code === "PGRST116") {
+      if (e.details?.includes("0 rows") || e.message.toLowerCase().includes("0 rows")) {
+        return "Not found for this account. You may be signed into a different organization, or the record was deleted.";
+      }
       return "Your account is missing a profile. Refresh the page and try again.";
     }
     if (e.message.includes("row-level security")) {
@@ -20,6 +23,9 @@ export function formatSupabaseError(err: unknown, fallback: string): string {
     if (e.message.includes("does not exist")) {
       if (e.message.includes("settings_json")) {
         return `${e.message} — Open Supabase → SQL Editor → run: dashboard/supabase/add-org-settings.sql (or click Copy SQL on Settings).`;
+      }
+      if (e.message.includes("vicidial_campaign_id")) {
+        return `${e.message} — Open Supabase → SQL Editor → run: dashboard/supabase/add-vicidial-mapping.sql`;
       }
       return `${e.message} — Open Supabase → SQL Editor → run the full file: dashboard/supabase/setup.sql`;
     }

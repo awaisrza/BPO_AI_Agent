@@ -10,7 +10,7 @@ import { Field, Input } from "@/components/ui/input";
 import { isSupabaseConfigured, supabaseConfigHelp } from "@/lib/supabase/client";
 import { normalizeVicidialUrl } from "@/lib/vicidial/connection";
 
-export function VicidialIntegrationForm() {
+export function VicidialIntegrationForm({ embedded = false }: { embedded?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -166,111 +166,114 @@ export function VicidialIntegrationForm() {
     }
   }
 
-  if (loading) {
-    return (
-      <Card>
-        <CardBody className="flex items-center gap-2 text-body text-foreground-muted">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading ViciDial settings…
-        </CardBody>
-      </Card>
-    );
-  }
+  const statusBadge = connected ? (
+    <Badge variant="success" className="gap-1.5">
+      <CheckCircle2 className="h-3 w-3" />
+      Configured
+    </Badge>
+  ) : (
+    <Badge variant="warning">Not connected</Badge>
+  );
+
+  const body = loading ? (
+    <div className="flex items-center gap-2 text-body text-foreground-muted">
+      <Loader2 className="h-4 w-4 animate-spin" />
+      Loading ViciDial settings…
+    </div>
+  ) : (
+    <div className="space-y-4">
+      {embedded && <div className="flex justify-end">{statusBadge}</div>}
+
+      <Field
+        label="Server URL"
+        description="Server root only — not the admin login page. Example: http://178.238.231.150"
+      >
+        <Input
+          value={serverUrl}
+          onChange={(e) => {
+            setServerUrl(e.target.value);
+            setSaved(false);
+          }}
+          placeholder="http://178.238.231.150"
+        />
+      </Field>
+
+      <Field
+        label="API user"
+        description="ViciDial API login created by your dialer admin (not a closer login)."
+      >
+        <Input
+          value={apiUser}
+          onChange={(e) => {
+            setApiUser(e.target.value);
+            setSaved(false);
+          }}
+          placeholder="api_fronter"
+        />
+      </Field>
+
+      <Field
+        label="API password"
+        description={
+          passwordSet
+            ? "Leave blank to keep the saved password, or enter a new one to replace it."
+            : "Password for the API user above."
+        }
+      >
+        <Input
+          type="password"
+          value={apiPassword}
+          onChange={(e) => {
+            setApiPassword(e.target.value);
+            setSaved(false);
+          }}
+          placeholder={passwordSet ? "••••••••••••" : "Enter API password"}
+          autoComplete="new-password"
+        />
+      </Field>
+
+      <p className="text-caption text-foreground-faint">
+        Production: use SIP remote agent URIs (no AGI script). Lab pilots may still use an on-dialer
+        AGI bridge — see agent/docs/bpo-sip-onboarding.md.
+      </p>
+
+      {error && <Alert variant="error">{error}</Alert>}
+      {success && <Alert variant="success">{success}</Alert>}
+      {testMessage && <Alert variant="success">{testMessage}</Alert>}
+
+      <div className="flex flex-wrap gap-2 pt-1">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => void handleTest()}
+          disabled={testing || saving}
+        >
+          {testing ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Testing…
+            </>
+          ) : (
+            "Test connection"
+          )}
+        </Button>
+        <Button type="button" onClick={() => void handleSave()} disabled={saving || testing}>
+          {saving ? "Saving…" : saved ? "Saved" : "Save"}
+        </Button>
+      </div>
+    </div>
+  );
+
+  if (embedded) return body;
 
   return (
     <Card>
       <CardHeader
         title="ViciDial"
         description="Connect your dialer for closers, warm transfer, and dispositions."
-        action={
-          connected ? (
-            <Badge variant="success" className="gap-1.5">
-              <CheckCircle2 className="h-3 w-3" />
-              Configured
-            </Badge>
-          ) : (
-            <Badge variant="warning">Not connected</Badge>
-          )
-        }
+        action={statusBadge}
       />
-      <CardBody className="space-y-4">
-        <Field
-          label="Server URL"
-          description="Server root only — not the admin login page. Example: http://178.238.231.150"
-        >
-          <Input
-            value={serverUrl}
-            onChange={(e) => {
-              setServerUrl(e.target.value);
-              setSaved(false);
-            }}
-            placeholder="http://178.238.231.150"
-          />
-        </Field>
-
-        <Field
-          label="API user"
-          description="ViciDial API login created by your dialer admin (not a closer login)."
-        >
-          <Input
-            value={apiUser}
-            onChange={(e) => {
-              setApiUser(e.target.value);
-              setSaved(false);
-            }}
-            placeholder="api_fronter"
-          />
-        </Field>
-
-        <Field
-          label="API password"
-          description={
-            passwordSet
-              ? "Leave blank to keep the saved password, or enter a new one to replace it."
-              : "Password for the API user above."
-          }
-        >
-          <Input
-            type="password"
-            value={apiPassword}
-            onChange={(e) => {
-              setApiPassword(e.target.value);
-              setSaved(false);
-            }}
-            placeholder={passwordSet ? "••••••••••••" : "Enter API password"}
-            autoComplete="new-password"
-          />
-        </Field>
-
-        <p className="text-caption text-foreground-faint">
-          AGI script and campaign mapping are configured on your dialer server during onboarding.
-        </p>
-
-        {error && <Alert variant="error">{error}</Alert>}
-        {success && <Alert variant="success">{success}</Alert>}
-        {testMessage && <Alert variant="success">{testMessage}</Alert>}
-
-        <div className="flex flex-wrap gap-2 pt-1">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => void handleTest()}
-            disabled={testing || saving}
-          >
-            {testing ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Testing…
-              </>
-            ) : (
-              "Test connection"
-            )}
-          </Button>
-          <Button type="button" onClick={() => void handleSave()} disabled={saving || testing}>
-            {saving ? "Saving…" : saved ? "Saved" : "Save"}
-          </Button>
-        </div>
-      </CardBody>
+      <CardBody>{body}</CardBody>
     </Card>
   );
 }

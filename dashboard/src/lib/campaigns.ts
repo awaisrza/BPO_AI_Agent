@@ -11,20 +11,26 @@ export async function setCampaignRunningStatus(
   supabase: SupabaseClient,
   campaignId: string,
   status: CampaignStatus,
-) {
+): Promise<{ ok: boolean; error?: string }> {
   const { error: campaignError } = await supabase
     .from("campaigns")
     .update({ status })
     .eq("id", campaignId);
 
-  if (campaignError) throw campaignError;
+  if (campaignError) {
+    return { ok: false, error: campaignError.message };
+  }
 
   const { error: botsError } = await supabase
     .from("bots")
     .update({ status: botStatusForCampaign(status) })
     .eq("campaign_id", campaignId);
 
-  if (botsError) throw botsError;
+  if (botsError) {
+    return { ok: false, error: botsError.message };
+  }
+
+  return { ok: true };
 }
 
 export type CampaignListItem = {

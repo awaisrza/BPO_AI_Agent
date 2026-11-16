@@ -1,0 +1,504 @@
+"""Telnyx bulk media — one PCMU WebSocket message per spoken line."""
+
+from __future__ import annotations
+
+import asyncio
+import audioop
+import base64
+import json
+import os
+from collections.abc import Awaitable, Callable
+
+from loguru import logger
+
+from .chatterbox_tts import TELEPHONY_PIPELINE_RATE
+from .speech_renderer import UtteranceFlushFrame
+
+try:
+    from pipecat.frames.frames import (
+        BotStartedSpeakingFrame,
+        BotStoppedSpeakingFrame,
+        Frame,
+        InterruptionFrame,
+        TTSAudioRawFrame,
+    )
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+    PIPECAT_AVAILABLE = True
+except Exception:  # pragma: no cover
+    PIPECAT_AVAILABLE = False
+    FrameProcessor = object  # type: ignore
+    FrameDirection = object  # type: ignore
+    Frame = object  # type: ignore
+    InterruptionFrame = object  # type: ignore
+    TTSAudioRawFrame = object  # type: ignore
+    BotStartedSpeakingFrame = object  # type: ignore
+    BotStoppedSpeakingFrame = object  # type: ignore
+
+TELNYX_WIRE_RATE = 8000
+# Batch RTP keepalive silence (~1 s) — not 20 ms per WS message.
+_KEEPALIVE_FLUSH_PCM_BYTES = TELNYX_WIRE_RATE * 2
+
+SendJson = Callable[[str], Awaitable[None]]
+
+
+def telephony_bulk_media_enabled() -> bool:
+    return os.getenv("TELNYX_BULK_MEDIA", "true").strip().lower() in ("1", "true", "yes")
+
+
+def normalize_telephony_pcm_level(pcm: bytes, *, target_peak: int = 26_000) -> bytes:
+    """Optional gain boost — off by default (normalization was muddying PSTN audio)."""
+    if os.getenv("TELEPHONY_PCM_NORMALIZE", "0").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return pcm
+    if not pcm:
+        return pcm
+    peak = audioop.max(pcm, 2)
+    if peak < 120 or peak >= int(target_peak * 0.88):
+        return pcm
+    factor = min(2.0, target_peak / peak)
+    return audioop.mul(pcm, 2, factor)
+
+
+def pcm_to_telnyx_media_json(
+    pcm: bytes,
+    *,
+    sample_rate: int,
+    encoding: str = "PCMU",
+    wire_rate: int = TELNYX_WIRE_RATE,
+) -> str | None:
+    if not pcm:
+        return None
+    pcm = normalize_telephony_pcm_level(pcm)
+    try:
+        if sample_rate != wire_rate:
+            pcm, _ = audioop.ratecv(pcm, 2, 1, sample_rate, wire_rate, None)
+        if encoding == "PCMU":
+            payload_bytes = audioop.lin2ulaw(pcm, 2)
+        elif encoding == "PCMA":
+            payload_bytes = audioop.lin2alaw(pcm, 2)
+        else:
+            logger.warning(f"Unsupported Telnyx encoding {encoding!r}")
+            return None
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Telnyx media encode failed: {exc}")
+        return None
+    if not payload_bytes:
+        return None
+    duration_ms = len(pcm) * 1000 // (wire_rate * 2)
+    log_fn = logger.debug if _is_silence_pcm(pcm) else logger.info
+    log_fn(
+        f"Telnyx bulk media: {len(payload_bytes)} bytes {encoding} (~{duration_ms} ms)"
+    )
+    payload = base64.b64encode(payload_bytes).decode("utf-8")
+    return json.dumps({"event": "media", "media": {"payload": payload}})
+
+
+def _is_silence_pcm(pcm: bytes) -> bool:
+    if not pcm:
+        return True
+    return audioop.max(pcm, 2) == 0
+
+
+def _playback_duration_ms(pcm: bytes, *, sample_rate: int, wire_rate: int) -> int:
+    if not pcm:
+        return 0
+    if sample_rate != wire_rate:
+        pcm, _ = audioop.ratecv(pcm, 2, 1, sample_rate, wire_rate, None)
+    return len(pcm) * 1000 // (wire_rate * 2)
+
+
+# Greeting ships as one WS message; match that for joined pitch (~8s @ 16 kHz ≈ 256 KB).
+_MAX_SINGLE_BULK_PCM_BYTES = 400_000
+
+
+def iter_bulk_pcm_segments(
+    pcm: bytes,
+    *,
+    sample_rate: int,
+    max_duration_ms: int = 3500,
+) -> list[bytes]:
+    """Split only very long utterances — small multi-segment bursts overflow the bridge queue."""
+    if not pcm:
+        return []
+    if len(pcm) <= _MAX_SINGLE_BULK_PCM_BYTES:
+        return [pcm]
+    bytes_per_ms = max(1, sample_rate * 2 // 1000)
+    max_bytes = max(32_000, bytes_per_ms * max_duration_ms)
+    return [pcm[i : i + max_bytes] for i in range(0, len(pcm), max_bytes)]
+
+
+
+def lookup_pcm_in_tts_cache(tts: object | None, line: str) -> bytes | None:
+    """Find pre-warmed PCM for a full bot line (joined pitch, greeting, etc.)."""
+    cache = getattr(tts, "_cache", None) if tts is not None else None
+    if not isinstance(cache, dict):
+        return None
+    from .speech_renderer import normalize_spoken_text, prepare_for_speech
+
+    prepared = prepare_for_speech(line)
+    candidates = (
+        line.strip(),
+        prepared,
+        normalize_spoken_text(prepared),
+        normalize_spoken_text(line),
+    )
+    for key in candidates:
+        key = (key or "").strip()
+        if key and key in cache:
+            return cache[key]
+    return None
+
+
+def _synthesize_line(line: str, tts: object | None = None) -> bytes | None:
+    """Synthesize one telephony line — inference pool first, then in-process Chatterbox."""
+    if not line.strip():
+        return None
+    text = line.strip()
+    try:
+        from .inference_client import inference_pool_enabled, get_inference_client
+
+        if inference_pool_enabled():
+            pcm = get_inference_client().synthesize_sync(
+                text,
+                sample_rate=TELEPHONY_PIPELINE_RATE,
+                telephony=True,
+            )
+            if pcm:
+                if tts is not None:
+                    cache = getattr(tts, "_cache", None)
+                    if isinstance(cache, dict):
+                        cache[text] = pcm
+                return pcm
+    except Exception as exc:
+        logger.warning(f"Pool synthesize failed ({text[:32]!r}): {exc}")
+
+    if tts is None:
+        return None
+    try:
+        from .chatterbox_tts import synthesize_pcm_sync
+
+        reference = getattr(tts, "_reference", None)
+        device = getattr(tts, "_device", None)
+        if reference is None or device is None:
+            return None
+        return synthesize_pcm_sync(
+            text=text,
+            reference_path=reference,
+            device=device,
+            exaggeration=float(getattr(tts, "_exaggeration", 0.35) or 0.35),
+            cfg_weight=float(getattr(tts, "_cfg_weight", 0.5) or 0.5),
+            sample_rate=int(getattr(tts, "sample_rate", TELEPHONY_PIPELINE_RATE) or TELEPHONY_PIPELINE_RATE),
+            telephony=True,
+        )
+    except Exception as exc:
+        logger.warning(f"In-process synthesize failed ({text[:32]!r}): {exc}")
+    return None
+
+
+def greeting_pcm_from_cache(
+    tts,
+    greeting_text: str,
+    *,
+    script_greeting: str = "",
+    telephony_max_words: int = 40,
+    greeting_single_chunk: bool = False,
+) -> bytes | None:
+    """Resolve pre-warmed Chatterbox PCM for the opening greeting."""
+    from .speech_renderer import (
+        normalize_spoken_text,
+        prepare_for_speech,
+        render_speech_telephony,
+    )
+
+    cache = getattr(tts, "_cache", None)
+    if cache is None:
+        cache = {}
+
+    prepared_script = prepare_for_speech(script_greeting) if script_greeting else ""
+    norm_script = normalize_spoken_text(prepared_script)
+    norm_greeting = normalize_spoken_text(greeting_text)
+
+    if greeting_single_chunk and norm_script and norm_greeting == norm_script:
+        for key in (norm_script.strip(), prepared_script.strip()):
+            pcm = cache.get(key)
+            if pcm:
+                return pcm
+
+    chunks = render_speech_telephony(greeting_text, max_words=telephony_max_words)
+    parts: list[bytes] = []
+    for chunk in chunks:
+        line = chunk.text.strip()
+        if not line:
+            continue
+        pcm = cache.get(line)
+        if pcm is None:
+            # Also try normalized / prepared keys from warm-cache.
+            prepared = prepare_for_speech(line)
+            for key in (prepared, normalize_spoken_text(prepared), normalize_spoken_text(line)):
+                key = (key or "").strip()
+                if key and key in cache:
+                    pcm = cache[key]
+                    break
+        if pcm is None:
+            pcm = _synthesize_line(line, tts=tts)
+            if pcm is not None and isinstance(cache, dict):
+                cache[line] = pcm
+        if pcm is None:
+            return None
+        parts.append(pcm)
+    return b"".join(parts) if parts else None
+
+
+def _synthesize_greeting_line(line: str) -> bytes | None:
+    """Backward-compatible wrapper — prefer greeting_pcm_from_cache / _synthesize_line."""
+    return _synthesize_line(line, tts=None)
+
+
+async def send_direct_silence_keepalive(
+    send_json: SendJson,
+    *,
+    duration_ms: int = 1200,
+    sample_rate: int = TELEPHONY_PIPELINE_RATE,
+    encoding: str = "PCMU",
+) -> None:
+    """One bulk silence message so the bridge does not drop the call after direct PCM."""
+    from .speech_renderer import silence_pcm
+
+    pcm = silence_pcm(max(200, duration_ms), sample_rate)
+    if not pcm:
+        return
+    await send_direct_bulk_pcm(
+        send_json,
+        pcm,
+        sample_rate=sample_rate,
+        encoding=encoding,
+        pace=False,
+    )
+
+
+# ~20 ms @ 16 kHz — matches AudioSocket bridge frame cadence.
+_DIRECT_STREAM_CHUNK_MS = 160
+
+
+async def send_direct_realtime_pcm(
+    send_json: SendJson,
+    pcm: bytes,
+    *,
+    sample_rate: int = TELEPHONY_PIPELINE_RATE,
+    encoding: str = "PCMU",
+    wire_rate: int = TELNYX_WIRE_RATE,
+    chunk_ms: int = _DIRECT_STREAM_CHUNK_MS,
+    cancel: asyncio.Event | None = None,
+) -> int:
+    """Stream bot audio in small WS messages paced to real time (ViciDial bridge).
+
+    One multi-second bulk message makes the bridge enqueue hundreds of 20 ms frames
+    at once; the queue drops speech and callers hear silence even though GPU logs OK.
+    """
+    if not pcm:
+        return 0
+    from .call_trace import trace_call
+
+    trace_call(
+        f"=== direct realtime stream begin ({len(pcm)} pcm bytes, "
+        f"{chunk_ms}ms chunks) ==="
+    )
+    bytes_per_ms = max(1, sample_rate * 2 // 1000)
+    step = max(bytes_per_ms, bytes_per_ms * chunk_ms)
+    total_ms = 0
+    chunks = 0
+    for offset in range(0, len(pcm), step):
+        if cancel is not None and cancel.is_set():
+            trace_call(
+                f"=== direct realtime stream cancelled (~{total_ms}ms, "
+                f"chunk {chunks}) ==="
+            )
+            return total_ms
+        chunk = pcm[offset : offset + step]
+        msg = pcm_to_telnyx_media_json(
+            chunk,
+            sample_rate=sample_rate,
+            encoding=encoding,
+            wire_rate=wire_rate,
+        )
+        if not msg:
+            continue
+        await send_json(msg)
+        chunks += 1
+        duration_ms = _playback_duration_ms(
+            chunk, sample_rate=sample_rate, wire_rate=wire_rate
+        )
+        total_ms += duration_ms
+        if duration_ms > 0:
+            await asyncio.sleep(duration_ms / 1000.0)
+        if chunks == 1 or chunks % 12 == 0:
+            trace_call(
+                f"=== direct realtime stream progress (~{total_ms}ms, "
+                f"chunk {chunks}) ==="
+            )
+    trace_call(
+        f"=== direct realtime stream done (~{total_ms}ms, {chunks} chunks) ==="
+    )
+    if chunks and not _is_silence_pcm(pcm):
+        logger.info(
+            f"Direct realtime PCM: {len(pcm)} bytes in {chunks} chunk(s) (~{total_ms} ms)"
+        )
+    return total_ms
+
+
+async def send_direct_bulk_pcm(
+    send_json: SendJson,
+    pcm: bytes,
+    *,
+    sample_rate: int = TELEPHONY_PIPELINE_RATE,
+    encoding: str = "PCMU",
+    wire_rate: int = TELNYX_WIRE_RATE,
+    pace: bool = True,
+) -> int:
+    """Send one bot utterance on the Telnyx media WebSocket (bypasses pipecat).
+
+    When pace=False, returns immediately after send so the caller can open the
+    listening turn while acoustic playback still finishes on the phone.
+    """
+    msg = pcm_to_telnyx_media_json(
+        pcm,
+        sample_rate=sample_rate,
+        encoding=encoding,
+        wire_rate=wire_rate,
+    )
+    if not msg:
+        from .call_trace import trace_call
+
+        trace_call(
+            f"=== WARNING: direct bulk PCM encode failed ({len(pcm)} bytes) ==="
+        )
+        return 0
+    try:
+        await send_json(msg)
+    except Exception as exc:  # noqa: BLE001
+        from .call_trace import trace_call
+
+        trace_call(
+            f"=== WARNING: direct bulk WS send failed ({len(pcm)} bytes): {exc!s} ==="
+        )
+        return 0
+    duration_ms = _playback_duration_ms(
+        pcm, sample_rate=sample_rate, wire_rate=wire_rate
+    )
+    if len(pcm) > 48_000:
+        from .call_trace import trace_call
+
+        trace_call(
+            f"=== direct bulk WS sent ({len(pcm)} pcm bytes, ~{duration_ms}ms) ==="
+        )
+    if pace and duration_ms > 0:
+        await asyncio.sleep(duration_ms / 1000.0)
+    return duration_ms
+
+
+
+if PIPECAT_AVAILABLE:
+
+    class TelnyxBulkMediaProcessor(FrameProcessor):  # type: ignore[misc]
+        """Send each bot utterance as one Telnyx media message (not 20 ms WS frames)."""
+
+        def __init__(
+            self,
+            *,
+            send_json: SendJson,
+            encoding: str = "PCMU",
+            wire_rate: int = TELNYX_WIRE_RATE,
+        ) -> None:
+            super().__init__()
+            self._send_json = send_json
+            self._encoding = encoding
+            self._wire_rate = wire_rate
+            self._pcm = bytearray()
+            self._rate = TELEPHONY_PIPELINE_RATE
+            self._bot_speaking = False
+
+        async def _ensure_bot_started(self) -> None:
+            if self._bot_speaking:
+                return
+            self._bot_speaking = True
+            await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+
+        async def _bot_finished_playback(self) -> None:
+            if not self._bot_speaking:
+                return
+            self._bot_speaking = False
+            logger.debug("Telnyx bulk media: bot playback finished — BotStoppedSpeaking")
+            await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+
+        async def _flush(self) -> tuple[int, bool]:
+            if not self._pcm:
+                return 0, True
+            pcm = bytes(self._pcm)
+            rate = self._rate
+            is_silence = _is_silence_pcm(pcm)
+            duration_ms = _playback_duration_ms(
+                pcm, sample_rate=rate, wire_rate=self._wire_rate
+            )
+            if not is_silence:
+                await self._ensure_bot_started()
+            msg = pcm_to_telnyx_media_json(
+                pcm,
+                sample_rate=rate,
+                encoding=self._encoding,
+                wire_rate=self._wire_rate,
+            )
+            self._pcm.clear()
+            if msg:
+                await self._send_json(msg)
+                if not is_silence:
+                    from .call_trace import trace_call
+
+                    trace_call(
+                        f"=== bulk media sent (~{duration_ms}ms, {len(pcm)} pcm bytes) ==="
+                    )
+            return duration_ms, is_silence
+
+        async def process_frame(self, frame, direction):  # type: ignore[no-untyped-def]
+            await super().process_frame(frame, direction)
+
+            if isinstance(frame, InterruptionFrame):
+                self._pcm.clear()
+                self._bot_speaking = False
+                await self._send_json(json.dumps({"event": "clear"}))
+                await self.push_frame(frame, direction)
+                return
+
+            if isinstance(frame, TTSAudioRawFrame):
+                if frame.audio:
+                    self._pcm.extend(frame.audio)
+                    if frame.sample_rate:
+                        self._rate = frame.sample_rate
+                # Batch keepalive silence (~1 s) — avoids 20 ms WS floods + pipeline sleep.
+                if (
+                    _is_silence_pcm(bytes(self._pcm))
+                    and len(self._pcm) >= _KEEPALIVE_FLUSH_PCM_BYTES
+                ):
+                    await self._flush()
+                return
+
+            if isinstance(frame, UtteranceFlushFrame):
+                duration_ms, is_silence = await self._flush()
+                if duration_ms > 0 and not is_silence:
+                    await asyncio.sleep(duration_ms / 1000.0)
+                if frame.final:
+                    await self._bot_finished_playback()
+                return
+
+            if isinstance(frame, BotStoppedSpeakingFrame):
+                if self._pcm and not _is_silence_pcm(bytes(self._pcm)):
+                    duration_ms, is_silence = await self._flush()
+                    if duration_ms > 0 and not is_silence:
+                        await asyncio.sleep(duration_ms / 1000.0)
+                await self.push_frame(frame, direction)
+                return
+
+            await self.push_frame(frame, direction)

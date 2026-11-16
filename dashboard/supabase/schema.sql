@@ -234,5 +234,7 @@ create policy "org contacts delete" on contacts for delete using (org_id = auth_
 create policy "org calls select" on calls for select using (org_id = auth_org_id());
 create policy "org calls insert" on calls for insert with check (org_id = auth_org_id());
 
+create policy "org calls update" on calls for update using (org_id = auth_org_id());
+
 create policy "org usage select" on usage_events for select using (org_id = auth_org_id());
 create policy "org usage insert" on usage_events for insert with check (org_id = auth_org_id());

@@ -112,6 +112,18 @@ def parse_knowledge_base(raw: object) -> list[KnowledgeEntry]:
     return entries
 
 
+def _telephony_worth_gemini(question: str) -> bool:
+    """Only call Gemini on PSTN for substantive questions — short asides must be instant."""
+    words = [w for w in re.findall(r"[a-z0-9']+", question.lower()) if w]
+    if len(words) < 5:
+        return False
+    # Clarifiers / asides while the bot is pitching — never wait on Gemini.
+    joined = " ".join(words)
+    if joined in {"thats what", "what is that", "what was that", "say that again", "come again"}:
+        return False
+    return True
+
+
 def answer_offscript(
     question: str,
     context: str = "",
@@ -127,6 +139,10 @@ def answer_offscript(
         return prepare_for_speech(match.answer)
 
     if telephony:
+        # Prefer instant cached line over Gemini wait (3s+ silence kills PSTN calls).
+        if not _telephony_worth_gemini(question):
+            logger.info("Off-script short/unclear miss -> telephony fallback (no Gemini)")
+            return ""
         if kb_entries and settings.google_api_key:
             logger.info("Off-script KB miss -> Gemini (telephony)")
             knowledge_text = format_knowledge_prompt(kb_entries)
@@ -135,7 +151,7 @@ def answer_offscript(
                     question,
                     context,
                     knowledge_text,
-                    timeout_secs=3.0,
+                    timeout_secs=2.0,
                 )
             )
             return reply or prepare_for_speech(TELEPHONY_KB_MISS_REPLY)

@@ -100,7 +100,7 @@ def test_kb_question_during_qualify_not_repeat():
     assert turn.reply != "Do you have Part A and B?"
 
 
-def test_thank_you_before_consent_reasks_eligibility():
+def test_thank_you_before_consent_advances_to_qualify():
     script = ScriptConfig(
         greeting="Hi.",
         pitch=(
@@ -113,8 +113,49 @@ def test_thank_you_before_consent_reasks_eligibility():
     e.open()
     e.handle("I'm good")
     turn = e.handle("thank you")
-    assert "eligibility check" in turn.reply.lower()
-    assert "Part A" not in turn.reply
+    assert "Part A" in turn.reply
+    assert "eligibility check" not in turn.reply.lower()
+
+
+def test_thank_you_during_pitch_playback_does_not_repeat_consent():
+    """Simulates caller saying thank you while bot is still playing the pitch."""
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "Great — I'll be quick. I'm calling about your Medicare plan. "
+            "Do you have a moment for a quick eligibility check?"
+        ),
+        qualifying_questions=["Do you have Part A and B?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    pitch_turn = e.handle("I'm good")
+    assert "Medicare plan" in pitch_turn.reply
+    follow = e.take_pending_followup()
+    assert "eligibility check" in follow.lower()
+    turn = e.handle("thank you")
+    assert "Part A" in turn.reply
+    assert turn.reply != "Do you have a moment for a quick eligibility check?"
+
+
+def test_unclear_after_pitch_uses_short_prompt_not_repeat():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "Great — I'll be quick. I'm calling about your Medicare plan. "
+            "Do you have a moment for a quick eligibility check?"
+        ),
+        qualifying_questions=["Do you have Part A and B?"],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: "",
+    )
+    e.open()
+    e.handle("I'm good")
+    turn = e.handle("huh")
+    assert "yes or no" in turn.reply.lower()
+    assert "eligibility check" not in turn.reply.lower()
 
 
 def test_offscript_miss_escalates_not_repeat():
@@ -131,7 +172,9 @@ def test_offscript_miss_escalates_not_repeat():
     e.handle("I'm good")
     t1 = e.handle("what is the weather")
     t2 = e.handle("tell me a joke")
-    assert t1.reply != t2.reply
+    # Pitch already asked consent — escalate skips the verbatim repeat.
+    assert "yes or no" in t1.reply.lower()
+    assert t1.reply == t2.reply
 
 
 def test_greeting_ack_does_not_advance_qualify():
@@ -141,6 +184,27 @@ def test_greeting_ack_does_not_advance_qualify():
     e.handle("yes")
     turn = e.handle("I'm fine")
     assert turn.reply == "Do you own your home?"
+
+
+def test_pitch_blocked_until_greeting_playback_done():
+    from app.conversation import ConversationEngine, State
+    from app.config import ScriptConfig
+
+    e = ConversationEngine(
+        script=ScriptConfig(
+            greeting="Hi, how are you?",
+            pitch="Medicare benefits review.",
+            qualifying_questions=["Do you have Part A and B?"],
+        )
+    )
+    e.begin_telephony_greeting()
+    e.open()
+    assert e.state == State.PITCH
+    held = e.handle("Okay.")
+    assert held.reply == ""
+    e.mark_greeting_playback_done()
+    pitch = e.handle("I'm fine.")
+    assert "Medicare" in pitch.reply or "Part A" in pitch.reply
 
 
 def test_loose_positive_does_not_skip_qualifiers():
@@ -203,6 +267,21 @@ def test_all_right_during_qualify_advances():
     e.handle("how did you get my number")
     turn = e.handle("all right")
     assert "100 dollars" in turn.reply or "bill" in turn.reply.lower()
+
+
+def test_soft_ack_during_consent_advances():
+    e = make_engine()
+    e.open()
+    e.handle("ok")
+    turn = e.handle("I think that's good")
+    assert turn.reply == "Do you own your home?"
+
+
+def test_unclear_question_during_pitch_delivers_pitch():
+    e = make_engine()
+    e.open()
+    turn = e.handle("That's what?")
+    assert "power bill" in turn.reply.lower() or "own your home" in turn.reply.lower()
 
 
 def test_kb_already_have_reanchors_qualify_question():
@@ -345,3 +424,280 @@ def test_third_kb_in_pitch_advances_to_pitch():
     e.handle("who is calling")
     turn = e.handle("why are you calling me")
     assert "Medicare review" in turn.reply
+
+def test_age_answer_advances_qualify():
+    from app.conversation import _extract_age_years, _age_qualify_result
+
+    assert _extract_age_years("I am 90 years old.") == 90
+    assert _extract_age_years("I am 75.") == 75
+    assert _extract_age_years("75") == 75
+    assert _age_qualify_result("I am 75.") == "yes"
+    assert _age_qualify_result("I am 40.") == "no"
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare benefits. Do you have a moment?",
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("ok")
+    e.take_pending_followup()  # consent
+    turn = e.handle("yes")  # -> Part A (auto-prepended for Medicare)
+    assert "Part A" in turn.reply
+    turn = e.handle("yes")  # Part A -> age
+    assert turn.reply == "How old are you?"
+    turn = e.handle("I am 75.")
+    assert turn.reply == "Do you make your own decisions?"
+    turn2 = e.handle("yes")
+    assert turn2.action == Action.TRANSFER
+
+
+def test_age_answer_not_hijacked_by_kb():
+    from app.knowledge import answer_offscript as kb_answer
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare benefits. Do you have a moment?",
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic="Age confirm",
+                triggers=["years old", "I am"],
+                answer="Just to confirm you qualify - what age are you?",
+            ),
+        ],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
+    )
+    e.open()
+    e.handle("ok")
+    e.take_pending_followup()
+    e.handle("yes")  # Part A
+    turn = e.handle("yes")  # -> age
+    assert turn.reply == "How old are you?"
+    turn = e.handle("I am 90 years old.")
+    assert "confirm you qualify" not in turn.reply.lower()
+    assert turn.reply == "Do you make your own decisions?"
+
+
+def test_pitch_queues_medicare_consent_followup():
+    script = ScriptConfig(
+        greeting="Hi, how are you?",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan. Do you have Medicare Part A and Part B?"
+        ),
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    turn = e.handle("I am good")
+    assert "Part A" in turn.reply
+    assert "qualify" in turn.reply.lower()
+    assert not e.take_pending_followup()
+    turn2 = e.handle("Yes.")
+    assert "old" in turn2.reply.lower()
+
+
+def test_pitch_then_part_a_then_age_order():
+    script = ScriptConfig(
+        greeting="Hi, how are you?",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=[
+            "Do you have Medicare Part A and Part B?",
+            "How old are you?",
+            "Do you make your own decisions?",
+        ],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    turn = e.handle("I'm fine")
+    # Joined: pitch + Part A in one turn; yes advances to age.
+    assert "Part A" in turn.reply
+    assert "qualify" in turn.reply.lower()
+    turn = e.handle("Yes")
+    assert turn.reply == "How old are you?"
+    turn = e.handle("I am 82.")
+    assert turn.reply == "Do you make your own decisions?"
+
+
+def test_medicare_prepends_part_a_when_script_starts_at_age():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    turn = e.handle("I'm fine")
+    assert "Part A" in turn.reply
+    turn = e.handle("Yes")
+    assert "old" in turn.reply.lower()
+
+
+def test_yeah_i_dont_know_is_not_qualify_yes():
+    from app.conversation import _is_qualify_yes
+
+    assert _is_qualify_yes("Yes.")
+    assert _is_qualify_yes("Yes, I do.")
+    assert _is_qualify_yes("Yes, I have.")
+    assert _is_qualify_yes("Yes, I make.")
+    assert not _is_qualify_yes("Yeah, I don't know.")
+    assert not _is_qualify_yes("Yes but I'm not sure.")
+    assert not _is_qualify_yes("No.")
+
+
+def test_i_dont_know_how_i_think_does_not_transfer():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        transfer_line="Perfect — transferring you now.",
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("I'm fine")
+    e.handle("Yes")  # Part A (joined with pitch) → age
+    e.handle("I am 90 years old.")
+    turn = e.handle("I don't know how I think.")
+    assert turn.action != Action.TRANSFER
+
+
+def test_stale_age_on_decisions_reasks_not_transfer():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare benefits.",
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        transfer_line="Perfect — transferring you now.",
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("yes")  # joined pitch+Part A
+    e.handle("I am 62")  # age → decisions
+    turn = e.handle("62 years old.")
+    assert turn.action != Action.TRANSFER
+    assert "decision" in turn.reply.lower() or "yes or no" in turn.reply.lower()
+
+
+def test_decisions_unclear_does_not_transfer():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        transfer_line="Perfect — transferring you now.",
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("I'm good")
+    e.handle("Yes")  # Part A → age
+    e.handle("I am 92")
+    turn = e.handle("Yeah, I don't know.")
+    assert turn.action != Action.TRANSFER
+    assert "yes or no" in turn.reply.lower() or "decisions" in turn.reply.lower()
+
+
+def test_yes_i_have_answers_part_a_not_already_have_kb():
+    from app.knowledge import answer_offscript as kb_answer
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan."
+        ),
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic="Already have benefits",
+                triggers=["already have", "already on medicare", "have insurance", "i have"],
+                answer=(
+                    "That's great - a lot of folks still qualify for extra benefits "
+                    "they didn't know about. Worth a quick check?"
+                ),
+            ),
+        ],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
+    )
+    e.open()
+    turn = e.handle("I'm good.")
+    assert "Part A" in turn.reply
+    turn = e.handle("Yes, I have.")
+    assert "old" in turn.reply.lower()
+    assert "extra benefits" not in turn.reply.lower()
+
+
+def test_schedule_kb_ignored_during_pitch():
+    from app.knowledge import answer_offscript as kb_answer
+
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare benefits. Do you have a moment?",
+        qualifying_questions=["Do you have Medicare Part A and Part B?"],
+        knowledge_base=[
+            KnowledgeEntry(
+                topic="Call me back later",
+                triggers=["call me back", "busy", "later", "book", "right now"],
+                answer="Sure — what time works best for you tomorrow?",
+            ),
+        ],
+    )
+    e = ConversationEngine(
+        script=script,
+        answer_offscript=lambda q, ctx: kb_answer(q, ctx, script.knowledge_base),
+    )
+    e.open()
+    turn = e.handle("come on a book right now")
+    assert "tomorrow" not in turn.reply.lower()
+    assert "medicare" in turn.reply.lower() or "moment" in turn.reply.lower() or "qualify" in turn.reply.lower()
+
+
+def test_okay_does_not_skip_age_question():
+    script = ScriptConfig(
+        greeting="Hi.",
+        pitch="Medicare. Ready?",
+        qualifying_questions=["How old are you?", "Do you make your own decisions?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("ok")
+    e.handle("yes")  # Part A → age
+    turn = e.handle("Oh, okay.")
+    assert "old" in turn.reply.lower() or "age" in turn.reply.lower()
+    assert turn.reply != "Do you make your own decisions?"
+
+
+def test_soft_no_requeues_consent_followup():
+    script = ScriptConfig(
+        greeting="Hi, how are you?",
+        pitch=(
+            "I'm calling because you qualify for some free Medicare benefits "
+            "with your current Medicare plan. Do you have Medicare Part A and Part B?"
+        ),
+        qualifying_questions=["How old are you?"],
+    )
+    e = ConversationEngine(script=script)
+    e.open()
+    e.handle("I'm fine")
+    # Part A already asked in joined pitch turn
+    turn = e.handle("No.")
+    assert "eligibility" in turn.reply.lower() or "thirty" in turn.reply.lower()
+    follow = e.take_pending_followup()
+    assert follow and "Part A" in follow

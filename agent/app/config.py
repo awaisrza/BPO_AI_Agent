@@ -12,14 +12,14 @@ from .models import KnowledgeEntry
 _AGENT_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _AGENT_ROOT.parent
 for _env_path in (
-    _AGENT_ROOT / ".env.example",
     _REPO_ROOT / ".env.local",
     _REPO_ROOT / "dashboard" / ".env.local",
     _AGENT_ROOT / ".env",
     _AGENT_ROOT / ".env.local",
 ):
     if _env_path.exists():
-        load_dotenv(_env_path, override=True)
+        # Keep env vars already set by the fleet supervisor (e.g. FLEET_WORKER_MEDIA_PORT).
+        load_dotenv(_env_path, override=False)
 
 
 class ScriptConfig(BaseModel):
@@ -153,6 +153,32 @@ class Settings(BaseModel):
     )
     telephony_utterance_max_words: int = Field(
         default_factory=lambda: int(os.getenv("TELEPHONY_UTTERANCE_MAX_WORDS", "40") or "40")
+    )
+    telephony_greeting_single_chunk: bool = Field(
+        default_factory=lambda: os.getenv("TELEPHONY_GREETING_SINGLE_CHUNK", "true").strip().lower()
+        in ("1", "true", "yes")
+    )
+    telephony_greeting_startup_timeout_s: float = Field(
+        default_factory=lambda: float(
+            os.getenv("TELEPHONY_GREETING_STARTUP_TIMEOUT_S", "30") or "30"
+        )
+    )
+    # Turn-taking latency (seconds) — lower = snappier; too low brings back echo/false STT.
+    telephony_post_playback_listen_s: float = Field(
+        default_factory=lambda: float(
+            os.getenv("TELEPHONY_POST_PLAYBACK_LISTEN_S", "0.22") or "0.22"
+        )
+    )
+    telephony_caller_flush_delay_s: float = Field(
+        default_factory=lambda: float(
+            os.getenv("TELEPHONY_CALLER_FLUSH_DELAY_S", "0.22") or "0.22"
+        )
+    )
+    telephony_vad_stop_secs: float = Field(
+        default_factory=lambda: float(os.getenv("TELEPHONY_VAD_STOP_SECS", "0.45") or "0.45")
+    )
+    telephony_echo_tail_s: float = Field(
+        default_factory=lambda: float(os.getenv("TELEPHONY_ECHO_TAIL_S", "0.42") or "0.42")
     )
 
     vicidial_base_url: str = Field(default_factory=lambda: os.getenv("VICIDIAL_BASE_URL", ""))

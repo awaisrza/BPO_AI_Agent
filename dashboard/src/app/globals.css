@@ -88,3 +88,48 @@
     scrollbar-color: var(--border-default) transparent;
   }
 }
+
+/* Directory pages (Leads / Calls) — soft enter + resizable rails */
+@keyframes directory-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.leads-shell .leads-row,
+.calls-shell .calls-row,
+.bots-shell .bots-row,
+.campaigns-shell .campaigns-row {
+  animation: directory-row-in 0.28s ease-out both;
+}
+
+@media (min-width: 1024px) {
+  .leads-shell .leads-rail {
+    width: var(--leads-rail, 224px);
+    min-width: var(--leads-rail, 224px);
+    max-width: var(--leads-rail, 224px);
+  }
+
+  .calls-shell .calls-rail {
+    width: var(--calls-rail, 220px);
+    min-width: var(--calls-rail, 220px);
+    max-width: var(--calls-rail, 220px);
+  }
+
+  .bots-shell .bots-rail {
+    width: var(--bots-rail, 224px);
+    min-width: var(--bots-rail, 224px);
+    max-width: var(--bots-rail, 224px);
+  }
+
+  .campaigns-shell .campaigns-rail {
+    width: var(--campaigns-rail, 224px);
+    min-width: var(--campaigns-rail, 224px);
+    max-width: var(--campaigns-rail, 224px);
+  }
+}
