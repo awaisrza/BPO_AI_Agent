@@ -488,3 +488,16 @@
     transform: rotateX(var(--auth-rx)) rotateZ(var(--auth-rz));
   }
 }
+
+/* Dashboard pages — let the shared 3D atmosphere show through */
+.app-shell .overview-shell,
+.app-shell .leads-shell,
+.app-shell .calls-shell,
+.app-shell .bots-shell,
+.app-shell .campaigns-shell,
+.app-shell .campaign-editor-shell,
+.app-shell .analytics-shell,
+.app-shell .integrations-shell,
+.app-shell .settings-shell {
+  background-color: transparent !important;
+}

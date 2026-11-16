@@ -46,7 +46,7 @@ export function TopBar({ title }: { title?: string }) {
   const pageTitle = title ?? meta.title;
 
   return (
-    <header className="relative flex h-14 shrink-0 items-center justify-between gap-4 border-b border-surface-border-subtle bg-surface-raised px-3 sm:px-4">
+    <header className="relative flex h-14 shrink-0 items-center justify-between gap-4 border-b border-surface-border-subtle bg-surface-raised/75 px-3 backdrop-blur-md sm:px-4">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_60%_120%_at_100%_0%,rgba(59,130,246,0.06),transparent_55%)]"

@@ -115,7 +115,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "relative hidden h-full shrink-0 flex-col border-r border-surface-border bg-surface-raised transition-[width] duration-200 ease-out lg:flex",
+        "relative hidden h-full shrink-0 flex-col border-r border-surface-border bg-surface-raised/80 backdrop-blur-md transition-[width] duration-200 ease-out lg:flex",
         collapsed ? "w-[4.25rem]" : "w-56",
       )}
     >
