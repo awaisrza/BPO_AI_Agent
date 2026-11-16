@@ -133,3 +133,56 @@
     max-width: var(--campaigns-rail, 224px);
   }
 }
+
+/* Auth — brand-first shell */
+@keyframes auth-brand-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes auth-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes auth-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.auth-shell-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 35%, black 20%, transparent 75%);
+}
+
+.auth-shell > div:first-child {
+  animation: auth-glow-pulse 8s ease-in-out infinite;
+}
+
+.auth-shell-brand {
+  animation: auth-brand-in 0.55s ease-out both;
+}
+
+.auth-shell-panel {
+  animation: auth-panel-in 0.6s ease-out 0.08s both;
+}

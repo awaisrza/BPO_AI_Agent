@@ -49,30 +49,21 @@ export function SignupForm() {
       setError("Check your email to confirm your account, then sign in.");
       setLoading(false);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : supabaseConfigHelp(),
-      );
+      setError(err instanceof Error ? err.message : supabaseConfigHelp());
       setLoading(false);
     }
   }
 
   return (
-    <div className="rounded-lg border border-surface-border bg-surface-raised p-6 sm:p-8">
-      <div className="mb-6 border-b border-surface-border-subtle pb-6">
-        <p className="data-label">Parasite</p>
-        <h1 className="mt-2 text-xl font-semibold text-foreground">Create account</h1>
-        <p className="mt-1.5 text-body text-foreground-muted">Set up your call center workspace.</p>
-      </div>
-
+    <>
       <form onSubmit={handleSubmit} className="space-y-4">
         <Field label="Company name">
           <Input
             value={orgName}
             onChange={(e) => setOrgName(e.target.value)}
-            placeholder="ABC Call Center"
+            placeholder="Your BPO"
             required
+            className="h-10"
           />
         </Field>
 
@@ -82,6 +73,7 @@ export function SignupForm() {
             onChange={(e) => setName(e.target.value)}
             placeholder="Ahmed"
             required
+            className="h-10"
           />
         </Field>
 
@@ -90,9 +82,10 @@ export function SignupForm() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="admin@yourbpo.com"
+            placeholder="you@company.com"
             required
             autoComplete="email"
+            className="h-10"
           />
         </Field>
 
@@ -104,22 +97,23 @@ export function SignupForm() {
             minLength={8}
             required
             autoComplete="new-password"
+            className="h-10"
           />
         </Field>
 
-        {error && <p className="text-caption text-status-danger">{error}</p>}
+        {error ? <p className="text-caption text-status-danger">{error}</p> : null}
 
-        <Button type="submit" className="w-full" disabled={loading}>
+        <Button type="submit" className="h-10 w-full" disabled={loading}>
           {loading ? "Creating account…" : "Create account"}
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-caption text-foreground-muted">
+      <p className="mt-5 text-center text-caption text-foreground-muted">
         Already have an account?{" "}
         <Link href="/login" className="font-medium text-brand hover:text-brand-hover">
           Sign in
         </Link>
       </p>
-    </div>
+    </>
   );
 }

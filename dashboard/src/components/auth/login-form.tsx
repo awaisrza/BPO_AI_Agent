@@ -28,7 +28,9 @@ export function LoginForm() {
       if (signInError) {
         const message = signInError.message.toLowerCase();
         if (message.includes("email not confirmed")) {
-          setError("Confirm your email first. In Supabase → Authentication → Users → confirm your user.");
+          setError(
+            "Confirm your email first. In Supabase → Authentication → Users → confirm your user.",
+          );
         } else if (message.includes("invalid login credentials")) {
           setError("Wrong email or password. Try again or create a new account.");
         } else {
@@ -43,7 +45,9 @@ export function LoginForm() {
       } = await supabase.auth.getSession();
 
       if (!session) {
-        setError("Sign-in succeeded but no session was created. Refresh the page and try again.");
+        setError(
+          "Sign-in succeeded but no session was created. Refresh the page and try again.",
+        );
         setLoading(false);
         return;
       }
@@ -56,32 +60,23 @@ export function LoginForm() {
 
       window.location.assign("/");
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : supabaseConfigHelp(),
-      );
+      setError(err instanceof Error ? err.message : supabaseConfigHelp());
       setLoading(false);
     }
   }
 
   return (
-    <div className="rounded-lg border border-surface-border bg-surface-raised p-6 sm:p-8">
-      <div className="mb-6 border-b border-surface-border-subtle pb-6">
-        <p className="data-label">Parasite</p>
-        <h1 className="mt-2 text-xl font-semibold text-foreground">Sign in</h1>
-        <p className="mt-1.5 text-body text-foreground-muted">Access your call center dashboard.</p>
-      </div>
-
+    <>
       <form onSubmit={handleSubmit} className="space-y-4">
         <Field label="Email">
           <Input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="admin@yourbpo.com"
+            placeholder="you@company.com"
             required
             autoComplete="email"
+            className="h-10"
           />
         </Field>
 
@@ -92,22 +87,23 @@ export function LoginForm() {
             onChange={(e) => setPassword(e.target.value)}
             required
             autoComplete="current-password"
+            className="h-10"
           />
         </Field>
 
-        {error && <p className="text-caption text-status-danger">{error}</p>}
+        {error ? <p className="text-caption text-status-danger">{error}</p> : null}
 
-        <Button type="submit" className="w-full" disabled={loading}>
+        <Button type="submit" className="h-10 w-full" disabled={loading}>
           {loading ? "Signing in…" : "Sign in"}
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-caption text-foreground-muted">
+      <p className="mt-5 text-center text-caption text-foreground-muted">
         No account?{" "}
         <Link href="/signup" className="font-medium text-brand hover:text-brand-hover">
           Create one
         </Link>
       </p>
-    </div>
+    </>
   );
 }

@@ -1,7 +1,11 @@
+import { Space_Grotesk } from "next/font/google";
+
+const authDisplay = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-auth-display",
+  weight: ["500", "600", "700"],
+});
+
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-surface px-4 py-8">
-      <div className="w-full max-w-lg">{children}</div>
-    </div>
-  );
+  return <div className={authDisplay.variable}>{children}</div>;
 }
