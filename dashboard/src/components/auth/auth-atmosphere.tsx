@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-/** Minimal 3D backdrop — perspective plane + a few quiet depth pieces. */
+/** Minimal CSS 3D backdrop — one orb, two slabs, quiet floor. */
 export function AuthAtmosphere() {
   const stageRef = useRef<HTMLDivElement>(null);
 
