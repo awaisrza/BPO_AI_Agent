@@ -134,11 +134,11 @@
   }
 }
 
-/* Auth — responsive CSS 3D atmosphere (Parasite tokens) */
+/* Auth — minimal */
 @keyframes auth-brand-in {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -149,7 +149,7 @@
 @keyframes auth-panel-in {
   from {
     opacity: 0;
-    transform: translateY(16px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -157,381 +157,49 @@
   }
 }
 
-@keyframes auth-world-drift {
+@keyframes auth-glow-soft {
   0%,
   100% {
-    transform:
-      rotateX(62deg)
-      rotateZ(-10deg)
-      translate3d(calc(var(--auth-px, 0) * -22px), calc(var(--auth-py, 0) * -12px), 0);
+    opacity: 0.55;
   }
   50% {
-    transform:
-      rotateX(59deg)
-      rotateZ(-5deg)
-      translate3d(calc(var(--auth-px, 0) * -22px), calc(var(--auth-py, 0) * -12px), 12px);
+    opacity: 0.85;
   }
 }
 
-@keyframes auth-orb-core {
-  0%,
-  100% {
-    transform: translate3d(-50%, -18%, 80px) rotateX(-62deg) scale(1);
-  }
-  50% {
-    transform: translate3d(-50%, -28%, 110px) rotateX(-62deg) scale(1.08);
-  }
+.auth-shell-base {
+  background: var(--bg-base);
 }
 
-@keyframes auth-orb-sat-a {
-  0%,
-  100% {
-    transform: translate3d(-160%, 8%, 140px) rotateX(-62deg) scale(1);
-  }
-  50% {
-    transform: translate3d(-145%, -8%, 170px) rotateX(-62deg) scale(1.1);
-  }
-}
-
-@keyframes auth-orb-sat-b {
-  0%,
-  100% {
-    transform: translate3d(78%, 16%, 120px) rotateX(-62deg) scale(1);
-  }
-  50% {
-    transform: translate3d(58%, -2%, 155px) rotateX(-62deg) scale(1.07);
-  }
-}
-
-@keyframes auth-panel-float-a {
-  0%,
-  100% {
-    transform: translate3d(-95%, 10%, 180px) rotateY(32deg) rotateX(18deg) rotateZ(-8deg);
-  }
-  50% {
-    transform: translate3d(-82%, -8%, 220px) rotateY(20deg) rotateX(10deg) rotateZ(-2deg);
-  }
-}
-
-@keyframes auth-panel-float-b {
-  0%,
-  100% {
-    transform: translate3d(55%, 22%, 150px) rotateY(-30deg) rotateX(20deg) rotateZ(6deg);
-  }
-  50% {
-    transform: translate3d(38%, 4%, 195px) rotateY(-18deg) rotateX(12deg) rotateZ(2deg);
-  }
-}
-
-@keyframes auth-panel-float-c {
-  0%,
-  100% {
-    transform: translate3d(-36%, 48%, 90px) rotateY(16deg) rotateX(28deg);
-  }
-  50% {
-    transform: translate3d(-18%, 30%, 130px) rotateY(6deg) rotateX(18deg);
-  }
-}
-
-@keyframes auth-panel-float-d {
-  0%,
-  100% {
-    transform: translate3d(72%, 52%, 70px) rotateY(-22deg) rotateX(26deg);
-  }
-  50% {
-    transform: translate3d(52%, 34%, 110px) rotateY(-12deg) rotateX(16deg);
-  }
-}
-
-@keyframes auth-beam-spin {
-  from {
-    transform: translate3d(-50%, -50%, 20px) rotateZ(0deg);
-  }
-  to {
-    transform: translate3d(-50%, -50%, 20px) rotateZ(360deg);
-  }
-}
-
-@keyframes auth-floor-scroll {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: 0 120px;
-  }
-}
-
-.auth-3d {
-  --auth-px: 0;
-  --auth-py: 0;
-}
-
-.auth-3d-base {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(ellipse 90% 50% at 50% -10%, rgba(59, 130, 246, 0.28), transparent 55%),
-    radial-gradient(ellipse 80% 55% at 50% 110%, rgba(37, 99, 235, 0.16), transparent 50%),
-    linear-gradient(180deg, #0b0d14 0%, var(--bg-base) 42%, #03040a 100%);
-}
-
-.auth-3d-vignette {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  background:
-    radial-gradient(ellipse 55% 48% at 50% 42%, rgba(9, 9, 11, 0.82) 0%, rgba(9, 9, 11, 0.35) 42%, transparent 68%),
-    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 30%, rgba(0, 0, 0, 0.62) 100%);
-}
-
-.auth-3d-stage {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  place-content: end center;
-  padding-bottom: 4vh;
-  perspective: min(160vw, 1200px);
-  perspective-origin: 50% 18%;
-  transform-style: preserve-3d;
-  mask-image: radial-gradient(ellipse 85% 75% at 50% 58%, black 20%, transparent 78%);
-}
-
-.auth-3d-world {
-  position: relative;
-  width: min(190vw, 1100px);
-  height: min(140vw, 820px);
-  margin-bottom: -8vh;
-  transform-style: preserve-3d;
-  transform: rotateX(62deg) rotateZ(-10deg);
-  animation: auth-world-drift 18s ease-in-out infinite;
-  will-change: transform;
-}
-
-.auth-3d-floor {
-  position: absolute;
-  inset: 8% 0 0;
-  transform: translateZ(0);
-  background-image:
-    linear-gradient(rgba(59, 130, 246, 0.22) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(59, 130, 246, 0.18) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: radial-gradient(ellipse 70% 60% at 50% 35%, black 15%, transparent 75%);
-  opacity: 0.55;
-  animation: auth-floor-scroll 20s linear infinite;
-}
-
-.auth-3d-horizon {
-  position: absolute;
-  left: 10%;
-  right: 10%;
-  top: 18%;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(96, 165, 250, 0.55),
-    transparent
+.auth-shell-glow {
+  background: radial-gradient(
+    ellipse 70% 45% at 50% 18%,
+    rgba(59, 130, 246, 0.14),
+    transparent 70%
   );
-  box-shadow: 0 0 24px rgba(59, 130, 246, 0.45);
-  transform: translateZ(12px);
-}
-
-.auth-3d-orb {
-  position: absolute;
-  left: 50%;
-  top: 42%;
-  border-radius: 9999px;
-  transform-style: preserve-3d;
-  will-change: transform;
-}
-
-.auth-3d-orb-core {
-  width: clamp(72px, 22vw, 150px);
-  height: clamp(72px, 22vw, 150px);
-  background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.95), transparent 28%),
-    radial-gradient(circle at 50% 55%, #60a5fa 0%, #2563eb 42%, #0f172a 78%);
-  box-shadow:
-    0 30px 60px rgba(0, 0, 0, 0.45),
-    0 0 50px rgba(59, 130, 246, 0.45),
-    inset 0 -18px 28px rgba(0, 0, 0, 0.35);
-  animation: auth-orb-core 9s ease-in-out infinite;
-}
-
-.auth-3d-orb-sat-a {
-  width: clamp(34px, 10vw, 68px);
-  height: clamp(34px, 10vw, 68px);
-  background:
-    radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.9), transparent 32%),
-    radial-gradient(circle at 50% 60%, #93c5fd 0%, #3b82f6 55%, #1e3a8a 100%);
-  box-shadow:
-    0 16px 36px rgba(0, 0, 0, 0.4),
-    0 0 28px rgba(59, 130, 246, 0.35);
-  animation: auth-orb-sat-a 11s ease-in-out infinite;
-}
-
-.auth-3d-orb-sat-b {
-  width: clamp(28px, 8vw, 54px);
-  height: clamp(28px, 8vw, 54px);
-  background:
-    radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.85), transparent 30%),
-    radial-gradient(circle at 50% 58%, #bfdbfe 0%, #60a5fa 50%, #1d4ed8 100%);
-  box-shadow:
-    0 14px 30px rgba(0, 0, 0, 0.38),
-    0 0 22px rgba(96, 165, 250, 0.35);
-  animation: auth-orb-sat-b 10s ease-in-out infinite 0.4s;
-}
-
-.auth-3d-orb-shine {
-  position: absolute;
-  inset: 12% 18% auto;
-  height: 28%;
-  border-radius: 9999px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.75), transparent);
-  filter: blur(1px);
-  opacity: 0.75;
-}
-
-.auth-3d-orb-rim {
-  position: absolute;
-  inset: -18%;
-  border-radius: 9999px;
-  border: 1px solid rgba(147, 197, 253, 0.35);
-  box-shadow: 0 0 40px rgba(59, 130, 246, 0.25);
-  animation: auth-ring-spin 16s linear infinite;
-}
-
-@keyframes auth-ring-spin {
-  from {
-    transform: rotateZ(0deg) scale(1);
-  }
-  to {
-    transform: rotateZ(360deg) scale(1);
-  }
-}
-
-.auth-3d-panel {
-  position: absolute;
-  left: 50%;
-  top: 48%;
-  border-radius: clamp(10px, 2.4vw, 16px);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.28), rgba(59, 130, 246, 0.18) 40%, rgba(15, 23, 42, 0.72));
-  box-shadow:
-    0 28px 60px rgba(0, 0, 0, 0.55),
-    0 0 24px rgba(59, 130, 246, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  transform-style: preserve-3d;
-  will-change: transform;
-}
-
-.auth-3d-panel-a {
-  width: clamp(86px, 28vw, 180px);
-  height: clamp(56px, 18vw, 112px);
-  animation: auth-panel-float-a 12s ease-in-out infinite;
-}
-
-.auth-3d-panel-b {
-  width: clamp(70px, 22vw, 140px);
-  height: clamp(96px, 30vw, 190px);
-  animation: auth-panel-float-b 14s ease-in-out infinite 0.3s;
-}
-
-.auth-3d-panel-c {
-  width: clamp(64px, 20vw, 128px);
-  height: clamp(42px, 13vw, 84px);
-  animation: auth-panel-float-c 11s ease-in-out infinite 0.6s;
-}
-
-.auth-3d-panel-d {
-  width: clamp(52px, 16vw, 104px);
-  height: clamp(52px, 16vw, 104px);
-  border-radius: 9999px;
-  animation: auth-panel-float-d 13s ease-in-out infinite 0.9s;
-}
-
-.auth-3d-beam {
-  position: absolute;
-  left: 50%;
-  top: 42%;
-  width: min(90vw, 520px);
-  height: min(90vw, 520px);
-  border-radius: 9999px;
-  border: 1px solid transparent;
-  background:
-    conic-gradient(
-      from 90deg,
-      transparent 0deg,
-      rgba(59, 130, 246, 0.0) 40deg,
-      rgba(96, 165, 250, 0.35) 90deg,
-      transparent 140deg,
-      transparent 360deg
-    );
-  mask-image: radial-gradient(circle, transparent 42%, black 46%, black 58%, transparent 62%);
-  opacity: 0.55;
-  animation: auth-beam-spin 22s linear infinite;
-  will-change: transform;
-}
-
-.auth-3d-beam-b {
-  width: min(62vw, 360px);
-  height: min(62vw, 360px);
-  opacity: 0.35;
-  animation-duration: 28s;
-  animation-direction: reverse;
+  animation: auth-glow-soft 10s ease-in-out infinite;
 }
 
 .auth-shell-brand {
-  animation: auth-brand-in 0.55s ease-out both;
+  animation: auth-brand-in 0.45s ease-out both;
 }
 
-/* Parasite mark reads optically right-heavy; nudge so it sits on the wordmark axis. */
 .auth-shell-mark {
   transform: translateX(-12px);
 }
 
 .auth-shell-panel {
-  animation: auth-panel-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.06s both;
-}
-
-@media (max-width: 639px) {
-  .auth-3d-stage {
-    padding-bottom: 0;
-    perspective: 180vw;
-  }
-
-  .auth-3d-world {
-    width: 220vw;
-    height: 170vw;
-    margin-bottom: -2vh;
-  }
-
-  .auth-3d-beam {
-    opacity: 0.45;
-  }
-
-  .auth-3d-panel-a,
-  .auth-3d-panel-b {
-    opacity: 0.9;
-  }
+  animation: auth-panel-in 0.5s ease-out 0.05s both;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .auth-3d-world,
-  .auth-3d-orb,
-  .auth-3d-panel,
-  .auth-3d-beam,
-  .auth-3d-orb-rim,
-  .auth-3d-floor,
+  .auth-shell-glow,
   .auth-shell-brand,
   .auth-shell-panel {
     animation: none !important;
   }
 
-  .auth-3d-world {
-    transform: rotateX(62deg) rotateZ(-8deg);
+  .auth-shell-glow {
+    opacity: 0.65;
   }
 }
