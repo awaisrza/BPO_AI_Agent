@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { AuthAtmosphere } from "@/components/auth/auth-atmosphere";
 
 export function AuthShell({
   children,
@@ -13,19 +14,7 @@ export function AuthShell({
 }) {
   return (
     <div className="auth-shell relative flex min-h-[100dvh] items-center justify-center overflow-hidden px-4 py-10 text-foreground">
-      <div aria-hidden className="auth-shell-base pointer-events-none absolute inset-0" />
-      <div aria-hidden className="auth-shell-grid pointer-events-none absolute inset-0" />
-      <div aria-hidden className="auth-shell-glow pointer-events-none absolute inset-0" />
-      <div aria-hidden className="auth-shell-sweep pointer-events-none absolute inset-0" />
-      <div aria-hidden className="auth-shell-dots pointer-events-none absolute inset-0" />
-
-      <div aria-hidden className="auth-ambient pointer-events-none absolute inset-0 overflow-hidden">
-        <span className="auth-bloom auth-bloom-a" />
-        <span className="auth-bloom auth-bloom-b" />
-        <span className="auth-bloom auth-bloom-c" />
-        <span className="auth-ring auth-ring-a" />
-        <span className="auth-ring auth-ring-b" />
-      </div>
+      <AuthAtmosphere />
 
       <div className="relative z-10 mx-auto flex w-full max-w-[420px] flex-col items-center">
         <header className="auth-shell-brand mb-7 flex w-full flex-col items-center justify-center text-center sm:mb-8">
