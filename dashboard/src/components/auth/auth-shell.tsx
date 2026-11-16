@@ -12,10 +12,10 @@ export function AuthShell({
   description: string;
 }) {
   return (
-    <div className="auth-shell relative flex min-h-screen items-center justify-center overflow-hidden bg-surface px-4 py-10 text-foreground sm:px-6">
+    <div className="auth-shell relative flex min-h-screen items-center justify-center overflow-hidden bg-surface px-4 py-10 text-foreground sm:justify-start sm:px-10 lg:px-16 xl:px-24">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_55%_at_50%_40%,rgba(59,130,246,0.2),transparent_60%)]"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_55%_at_35%_40%,rgba(59,130,246,0.2),transparent_60%)]"
       />
       <div
         aria-hidden
@@ -26,14 +26,14 @@ export function AuthShell({
         className="auth-shell-grid pointer-events-none absolute inset-0 opacity-[0.35]"
       />
 
-      <div className="relative z-10 flex w-full max-w-md flex-col items-center">
-        <header className="auth-shell-brand mb-8 flex w-full flex-col items-center text-center sm:mb-10">
+      <div className="relative z-10 flex w-full max-w-md flex-col items-stretch sm:items-start">
+        <header className="auth-shell-brand mb-8 flex w-full flex-col items-center text-center sm:mb-10 sm:items-start sm:text-left">
           <Image
             src="/parasite-mark.png"
             alt=""
             width={128}
             height={128}
-            className="mx-auto h-28 w-28 object-contain drop-shadow-[0_16px_48px_rgba(59,130,246,0.3)] sm:h-32 sm:w-32"
+            className="h-28 w-28 object-contain drop-shadow-[0_16px_48px_rgba(59,130,246,0.3)] sm:h-32 sm:w-32"
             priority
           />
           <p className="mt-6 font-[family-name:var(--font-auth-display)] text-4xl font-semibold tracking-[-0.04em] text-foreground sm:text-5xl">
