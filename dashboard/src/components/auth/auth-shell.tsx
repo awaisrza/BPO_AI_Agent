@@ -27,17 +27,20 @@ export function AuthShell({
         <span className="auth-float auth-float-3" />
       </div>
 
-      <div className="relative z-10 flex w-full max-w-[420px] flex-col items-center">
-        <header className="auth-shell-brand mb-7 flex w-full flex-col items-center text-center sm:mb-8">
-          <Image
-            src="/parasite-mark.png"
-            alt=""
-            width={128}
-            height={128}
-            className="h-28 w-28 object-contain drop-shadow-[0_16px_48px_rgba(59,130,246,0.35)] sm:h-32 sm:w-32"
-            priority
-          />
-          <p className="mt-5 font-[family-name:var(--font-auth-display)] text-4xl font-semibold tracking-[-0.04em] text-foreground sm:text-5xl">
+      <div className="relative z-10 mx-auto flex w-full max-w-[420px] flex-col items-center">
+        <header className="auth-shell-brand mb-7 flex w-full flex-col items-center justify-center text-center sm:mb-8">
+          {/* Mark is a tall PNG; keep natural aspect and nudge left for optical center over the wordmark. */}
+          <div className="flex w-full items-center justify-center">
+            <Image
+              src="/parasite-mark.png"
+              alt=""
+              width={230}
+              height={330}
+              className="auth-shell-mark mx-auto h-28 w-auto object-contain object-center drop-shadow-[0_16px_48px_rgba(59,130,246,0.35)] sm:h-32"
+              priority
+            />
+          </div>
+          <p className="mt-5 w-full text-center font-[family-name:var(--font-auth-display)] text-4xl font-semibold tracking-[-0.04em] text-foreground sm:text-5xl">
             Parasite
           </p>
           {eyebrow ? (

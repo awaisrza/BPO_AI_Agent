@@ -325,6 +325,11 @@
   animation: auth-brand-in 0.55s ease-out both;
 }
 
+/* Parasite mark reads optically right-heavy; nudge so it sits on the wordmark axis. */
+.auth-shell-mark {
+  transform: translateX(-6px);
+}
+
 .auth-shell-panel {
   animation: auth-panel-in 0.65s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
 }
