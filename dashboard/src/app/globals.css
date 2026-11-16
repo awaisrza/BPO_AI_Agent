@@ -327,7 +327,7 @@
 
 /* Parasite mark reads optically right-heavy; nudge so it sits on the wordmark axis. */
 .auth-shell-mark {
-  transform: translateX(-6px);
+  transform: translateX(-12px);
 }
 
 .auth-shell-panel {
