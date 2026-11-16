@@ -134,7 +134,7 @@
   }
 }
 
-/* Auth — minimal 3D (few pieces, quiet motion) */
+/* Auth — minimal 3D, viewport-scaled motion */
 @keyframes auth-brand-in {
   from {
     opacity: 0;
@@ -161,47 +161,81 @@
   0%,
   100% {
     transform:
-      rotateX(64deg)
-      rotateZ(-6deg)
-      translate3d(calc(var(--auth-px, 0) * -14px), calc(var(--auth-py, 0) * -8px), 0);
+      rotateX(var(--auth-rx))
+      rotateZ(var(--auth-rz))
+      translate3d(
+        calc(var(--auth-px, 0) * var(--auth-parallax-x) * -1),
+        calc(var(--auth-py, 0) * var(--auth-parallax-y) * -1),
+        0
+      );
   }
   50% {
     transform:
-      rotateX(62deg)
-      rotateZ(-3deg)
-      translate3d(calc(var(--auth-px, 0) * -14px), calc(var(--auth-py, 0) * -8px), 6px);
+      rotateX(calc(var(--auth-rx) - 2deg))
+      rotateZ(calc(var(--auth-rz) + 3deg))
+      translate3d(
+        calc(var(--auth-px, 0) * var(--auth-parallax-x) * -1),
+        calc(var(--auth-py, 0) * var(--auth-parallax-y) * -1),
+        var(--auth-drift-z)
+      );
   }
 }
 
 @keyframes auth-orb-float {
   0%,
   100% {
-    transform: translate3d(-50%, -10%, 70px) rotateX(-64deg) scale(1);
-    opacity: 0.7;
+    transform:
+      translate3d(-50%, var(--auth-orb-y), var(--auth-orb-z))
+      rotateX(calc(var(--auth-rx) * -1))
+      scale(1);
+    opacity: 0.72;
   }
   50% {
-    transform: translate3d(-50%, -18%, 90px) rotateX(-64deg) scale(1.04);
-    opacity: 0.9;
+    transform:
+      translate3d(-50%, calc(var(--auth-orb-y) - 8%), calc(var(--auth-orb-z) + var(--auth-orb-lift)))
+      rotateX(calc(var(--auth-rx) * -1))
+      scale(1.04);
+    opacity: 0.92;
   }
 }
 
 @keyframes auth-slab-a {
   0%,
   100% {
-    transform: translate3d(-88%, 18%, 110px) rotateY(24deg) rotateX(14deg);
+    transform:
+      translate3d(var(--auth-slab-a-x), var(--auth-slab-a-y), var(--auth-slab-z))
+      rotateY(24deg)
+      rotateX(14deg);
   }
   50% {
-    transform: translate3d(-78%, 6%, 130px) rotateY(16deg) rotateX(10deg);
+    transform:
+      translate3d(
+        calc(var(--auth-slab-a-x) + 8%),
+        calc(var(--auth-slab-a-y) - 10%),
+        calc(var(--auth-slab-z) + var(--auth-slab-lift))
+      )
+      rotateY(16deg)
+      rotateX(10deg);
   }
 }
 
 @keyframes auth-slab-b {
   0%,
   100% {
-    transform: translate3d(48%, 28%, 90px) rotateY(-20deg) rotateX(16deg);
+    transform:
+      translate3d(var(--auth-slab-b-x), var(--auth-slab-b-y), calc(var(--auth-slab-z) * 0.85))
+      rotateY(-20deg)
+      rotateX(16deg);
   }
   50% {
-    transform: translate3d(36%, 14%, 115px) rotateY(-12deg) rotateX(10deg);
+    transform:
+      translate3d(
+        calc(var(--auth-slab-b-x) - 10%),
+        calc(var(--auth-slab-b-y) - 12%),
+        calc(var(--auth-slab-z) * 0.85 + var(--auth-slab-lift))
+      )
+      rotateY(-12deg)
+      rotateX(10deg);
   }
 }
 
@@ -210,13 +244,41 @@
     background-position: 0 0;
   }
   to {
-    background-position: 0 80px;
+    background-position: 0 var(--auth-floor-scroll);
   }
 }
 
 .auth-3d {
+  /* Mobile-first tokens — scale up at larger breakpoints */
   --auth-px: 0;
   --auth-py: 0;
+  --auth-rx: 68deg;
+  --auth-rz: -5deg;
+  --auth-parallax-x: 8px;
+  --auth-parallax-y: 5px;
+  --auth-drift-z: 4px;
+  --auth-orb-y: -6%;
+  --auth-orb-z: 42px;
+  --auth-orb-lift: 14px;
+  --auth-slab-z: 70px;
+  --auth-slab-lift: 16px;
+  --auth-slab-a-x: -78%;
+  --auth-slab-a-y: 22%;
+  --auth-slab-b-x: 42%;
+  --auth-slab-b-y: 32%;
+  --auth-world-w: 210vw;
+  --auth-world-h: 155vw;
+  --auth-perspective: 190vw;
+  --auth-floor-cell: 34px;
+  --auth-floor-opacity: 0.28;
+  --auth-floor-scroll: 56px;
+  --auth-orb-size: clamp(44px, 18vw, 72px);
+  --auth-slab-a-w: clamp(52px, 22vw, 96px);
+  --auth-slab-a-h: clamp(34px, 14vw, 60px);
+  --auth-slab-b-w: clamp(40px, 16vw, 72px);
+  --auth-slab-b-h: clamp(54px, 22vw, 96px);
+  --auth-stage-pad: 0vh;
+  --auth-world-nudge: -2vh;
 }
 
 .auth-3d-base {
@@ -232,8 +294,8 @@
   inset: 0;
   z-index: 2;
   background: radial-gradient(
-    ellipse 50% 42% at 50% 40%,
-    rgba(9, 9, 11, 0.88) 0%,
+    ellipse 52% 44% at 50% 40%,
+    rgba(9, 9, 11, 0.9) 0%,
     rgba(9, 9, 11, 0.45) 48%,
     transparent 72%
   );
@@ -245,19 +307,19 @@
   z-index: 1;
   display: grid;
   place-items: end center;
-  padding-bottom: 2vh;
-  perspective: min(150vw, 1000px);
-  perspective-origin: 50% 12%;
-  mask-image: radial-gradient(ellipse 90% 70% at 50% 70%, black 25%, transparent 80%);
+  padding-bottom: var(--auth-stage-pad);
+  perspective: min(var(--auth-perspective), 1200px);
+  perspective-origin: 50% 10%;
+  mask-image: radial-gradient(ellipse 92% 72% at 50% 72%, black 22%, transparent 82%);
 }
 
 .auth-3d-world {
   position: relative;
-  width: min(170vw, 900px);
-  height: min(110vw, 620px);
-  margin-bottom: -6vh;
+  width: min(var(--auth-world-w), 1100px);
+  height: min(var(--auth-world-h), 760px);
+  margin-bottom: var(--auth-world-nudge);
   transform-style: preserve-3d;
-  transform: rotateX(64deg) rotateZ(-6deg);
+  transform: rotateX(var(--auth-rx)) rotateZ(var(--auth-rz));
   animation: auth-world-drift 20s ease-in-out infinite;
   will-change: transform;
 }
@@ -268,22 +330,27 @@
   background-image:
     linear-gradient(rgba(59, 130, 246, 0.14) 1px, transparent 1px),
     linear-gradient(90deg, rgba(59, 130, 246, 0.1) 1px, transparent 1px);
-  background-size: 56px 56px;
+  background-size: var(--auth-floor-cell) var(--auth-floor-cell);
   mask-image: radial-gradient(ellipse 65% 55% at 50% 30%, black 10%, transparent 70%);
-  opacity: 0.4;
+  opacity: var(--auth-floor-opacity);
   animation: auth-floor-scroll 28s linear infinite;
 }
 
 .auth-3d-orb {
   position: absolute;
   left: 50%;
-  top: 40%;
-  width: clamp(56px, 16vw, 96px);
-  height: clamp(56px, 16vw, 96px);
+  top: 42%;
+  width: var(--auth-orb-size);
+  height: var(--auth-orb-size);
   border-radius: 9999px;
   background:
     radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.75), transparent 30%),
-    radial-gradient(circle at 50% 58%, rgba(96, 165, 250, 0.9) 0%, rgba(37, 99, 235, 0.75) 48%, rgba(15, 23, 42, 0.95) 100%);
+    radial-gradient(
+      circle at 50% 58%,
+      rgba(96, 165, 250, 0.9) 0%,
+      rgba(37, 99, 235, 0.75) 48%,
+      rgba(15, 23, 42, 0.95) 100%
+    );
   box-shadow:
     0 20px 40px rgba(0, 0, 0, 0.4),
     0 0 36px rgba(59, 130, 246, 0.28);
@@ -294,8 +361,8 @@
 .auth-3d-slab {
   position: absolute;
   left: 50%;
-  top: 46%;
-  border-radius: 12px;
+  top: 48%;
+  border-radius: clamp(8px, 2vw, 12px);
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: linear-gradient(
     145deg,
@@ -308,14 +375,14 @@
 }
 
 .auth-3d-slab-a {
-  width: clamp(70px, 22vw, 130px);
-  height: clamp(44px, 14vw, 82px);
+  width: var(--auth-slab-a-w);
+  height: var(--auth-slab-a-h);
   animation: auth-slab-a 14s ease-in-out infinite;
 }
 
 .auth-3d-slab-b {
-  width: clamp(52px, 16vw, 96px);
-  height: clamp(70px, 22vw, 120px);
+  width: var(--auth-slab-b-w);
+  height: var(--auth-slab-b-h);
   animation: auth-slab-b 16s ease-in-out infinite 0.5s;
 }
 
@@ -331,14 +398,79 @@
   animation: auth-panel-in 0.5s ease-out 0.05s both;
 }
 
-@media (max-width: 639px) {
-  .auth-3d-world {
-    width: 200vw;
-    height: 140vw;
+/* Tablet */
+@media (min-width: 640px) {
+  .auth-3d {
+    --auth-rx: 64deg;
+    --auth-rz: -6deg;
+    --auth-parallax-x: 14px;
+    --auth-parallax-y: 8px;
+    --auth-drift-z: 6px;
+    --auth-orb-y: -10%;
+    --auth-orb-z: 70px;
+    --auth-orb-lift: 20px;
+    --auth-slab-z: 110px;
+    --auth-slab-lift: 22px;
+    --auth-slab-a-x: -88%;
+    --auth-slab-a-y: 18%;
+    --auth-slab-b-x: 48%;
+    --auth-slab-b-y: 28%;
+    --auth-world-w: 170vw;
+    --auth-world-h: 115vw;
+    --auth-perspective: 150vw;
+    --auth-floor-cell: 48px;
+    --auth-floor-opacity: 0.36;
+    --auth-floor-scroll: 72px;
+    --auth-orb-size: clamp(56px, 14vw, 88px);
+    --auth-slab-a-w: clamp(70px, 18vw, 120px);
+    --auth-slab-a-h: clamp(44px, 12vw, 78px);
+    --auth-slab-b-w: clamp(52px, 14vw, 92px);
+    --auth-slab-b-h: clamp(70px, 18vw, 118px);
+    --auth-stage-pad: 2vh;
+    --auth-world-nudge: -5vh;
   }
+}
 
-  .auth-3d-floor {
-    opacity: 0.32;
+/* Desktop */
+@media (min-width: 1024px) {
+  .auth-3d {
+    --auth-rx: 62deg;
+    --auth-rz: -7deg;
+    --auth-parallax-x: 22px;
+    --auth-parallax-y: 12px;
+    --auth-drift-z: 10px;
+    --auth-orb-y: -12%;
+    --auth-orb-z: 96px;
+    --auth-orb-lift: 28px;
+    --auth-slab-z: 150px;
+    --auth-slab-lift: 30px;
+    --auth-slab-a-x: -92%;
+    --auth-slab-a-y: 14%;
+    --auth-slab-b-x: 52%;
+    --auth-slab-b-y: 24%;
+    --auth-world-w: 140vw;
+    --auth-world-h: 95vw;
+    --auth-perspective: 1200px;
+    --auth-floor-cell: 56px;
+    --auth-floor-opacity: 0.42;
+    --auth-floor-scroll: 88px;
+    --auth-orb-size: clamp(72px, 8vw, 110px);
+    --auth-slab-a-w: clamp(90px, 10vw, 140px);
+    --auth-slab-a-h: clamp(56px, 6.5vw, 90px);
+    --auth-slab-b-w: clamp(68px, 7.5vw, 108px);
+    --auth-slab-b-h: clamp(92px, 10vw, 140px);
+    --auth-stage-pad: 3vh;
+    --auth-world-nudge: -7vh;
+  }
+}
+
+/* Short phones — keep scene in frame */
+@media (max-width: 639px) and (max-height: 700px) {
+  .auth-3d {
+    --auth-world-h: 130vw;
+    --auth-orb-size: clamp(40px, 15vw, 60px);
+    --auth-floor-opacity: 0.22;
+    --auth-world-nudge: 0;
   }
 }
 
@@ -353,6 +485,6 @@
   }
 
   .auth-3d-world {
-    transform: rotateX(64deg) rotateZ(-5deg);
+    transform: rotateX(var(--auth-rx)) rotateZ(var(--auth-rz));
   }
 }
