@@ -72,9 +72,9 @@ export default function BillingPage() {
         <CardHeader title="Payment methods" description="Local rails during pilot" />
         <CardBody>
           <div className="grid gap-3 sm:grid-cols-3">
-            <PaymentMethod title="Bank transfer (IBFT)" desc="PKR · Pakistan BPOs" active />
+            <PaymentMethod title="Bank transfer (IBFT)" desc="USD · BPO" active />
             <PaymentMethod title="Wise" desc="USD · International BPOs" />
-            <PaymentMethod title="Safepay" desc="Coming soon · automated PKR" />
+            <PaymentMethod title="Safepay" desc="Coming soon · automated USD" />
           </div>
           <p className="mt-6 text-xs text-zinc-600">
             Paid plan after pilot: ~$18–25/bot/month + overage ~$0.05/min
