@@ -4,10 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { createClient, supabaseConfigHelp } from "@/lib/supabase/client";
 import { getOrgId } from "@/lib/get-org-id";
-import { cn } from "@/lib/utils";
-
-const fieldClass =
-  "w-full rounded-[3px] border-0 bg-[#1e1f22] px-3 text-body text-[#dbdee1] outline-none ring-0 transition-[box-shadow,background-color] placeholder:text-[#6d6f78] focus:bg-[#1e1f22] focus:shadow-[0_0_0_1px_#5865f2] disabled:opacity-50";
+import { Button } from "@/components/ui/button";
+import { Field, Input } from "@/components/ui/input";
 
 export function LoginForm() {
   const [email, setEmail] = useState("");
@@ -70,49 +68,39 @@ export function LoginForm() {
   return (
     <>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <label className="block space-y-1.5">
-          <span className="text-[11px] font-bold uppercase tracking-wide text-[#b5bac1]">
-            Email
-          </span>
-          <input
+        <Field label="Email">
+          <Input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@company.com"
             required
             autoComplete="email"
-            className={cn(fieldClass, "h-10")}
+            className="h-10"
           />
-        </label>
+        </Field>
 
-        <label className="block space-y-1.5">
-          <span className="text-[11px] font-bold uppercase tracking-wide text-[#b5bac1]">
-            Password
-          </span>
-          <input
+        <Field label="Password">
+          <Input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
             autoComplete="current-password"
-            className={cn(fieldClass, "h-10")}
+            className="h-10"
           />
-        </label>
+        </Field>
 
-        {error ? <p className="text-caption text-[#f23f43]">{error}</p> : null}
+        {error ? <p className="text-caption text-status-danger">{error}</p> : null}
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="mt-2 flex h-11 w-full items-center justify-center rounded-[3px] bg-[#5865f2] text-[15px] font-medium text-white transition-colors hover:bg-[#4752c4] disabled:opacity-50"
-        >
+        <Button type="submit" className="h-10 w-full" disabled={loading}>
           {loading ? "Signing in…" : "Sign in"}
-        </button>
+        </Button>
       </form>
 
-      <p className="mt-5 text-caption text-[#949ba4]">
+      <p className="mt-5 text-center text-caption text-foreground-muted">
         No account?{" "}
-        <Link href="/signup" className="text-[#00a8fc] hover:underline">
+        <Link href="/signup" className="font-medium text-brand hover:text-brand-hover">
           Create one
         </Link>
       </p>

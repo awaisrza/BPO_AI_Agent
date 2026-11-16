@@ -134,7 +134,7 @@
   }
 }
 
-/* Auth — Discord-inspired indigo field + floating motion */
+/* Auth — motion inspired by Discord; colors from Parasite tokens */
 @keyframes auth-brand-in {
   from {
     opacity: 0;
@@ -200,92 +200,91 @@
 @keyframes auth-stars-twinkle {
   0%,
   100% {
-    opacity: 0.45;
+    opacity: 0.35;
   }
   50% {
-    opacity: 0.85;
+    opacity: 0.7;
   }
 }
 
 .auth-shell-base {
-  /* Discord homepage body: rgb(22, 28, 187) */
   background:
-    radial-gradient(ellipse 90% 70% at 20% 30%, rgba(88, 101, 242, 0.55), transparent 55%),
-    radial-gradient(ellipse 70% 60% at 80% 70%, rgba(59, 130, 246, 0.35), transparent 50%),
-    linear-gradient(160deg, #1218a8 0%, #161cbb 42%, #1a237e 100%);
+    radial-gradient(ellipse 85% 60% at 50% 20%, rgba(59, 130, 246, 0.18), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 80% 85%, rgba(59, 130, 246, 0.1), transparent 50%),
+    linear-gradient(180deg, var(--bg-raised) 0%, var(--bg-base) 55%, #050508 100%);
 }
 
 .auth-shell-wash {
   background:
-    radial-gradient(circle at 70% 20%, rgba(255, 255, 255, 0.08), transparent 35%),
-    radial-gradient(circle at 10% 80%, rgba(0, 0, 0, 0.2), transparent 40%);
+    radial-gradient(circle at 50% 45%, rgba(59, 130, 246, 0.06), transparent 42%),
+    radial-gradient(circle at 15% 80%, rgba(0, 0, 0, 0.35), transparent 45%);
 }
 
 .auth-shell-stars {
   background-image:
-    radial-gradient(1.5px 1.5px at 12% 18%, rgba(255, 255, 255, 0.7), transparent),
-    radial-gradient(1px 1px at 28% 42%, rgba(255, 255, 255, 0.55), transparent),
-    radial-gradient(1.5px 1.5px at 48% 12%, rgba(255, 255, 255, 0.45), transparent),
-    radial-gradient(1px 1px at 66% 36%, rgba(255, 255, 255, 0.6), transparent),
-    radial-gradient(1.5px 1.5px at 82% 22%, rgba(255, 255, 255, 0.5), transparent),
-    radial-gradient(1px 1px at 90% 58%, rgba(255, 255, 255, 0.4), transparent),
-    radial-gradient(1px 1px at 18% 72%, rgba(255, 255, 255, 0.5), transparent),
-    radial-gradient(1.5px 1.5px at 40% 84%, rgba(255, 255, 255, 0.35), transparent),
-    radial-gradient(1px 1px at 58% 68%, rgba(255, 255, 255, 0.55), transparent),
-    radial-gradient(1px 1px at 74% 88%, rgba(255, 255, 255, 0.4), transparent);
+    radial-gradient(1.5px 1.5px at 12% 18%, rgba(250, 250, 250, 0.45), transparent),
+    radial-gradient(1px 1px at 28% 42%, rgba(250, 250, 250, 0.3), transparent),
+    radial-gradient(1.5px 1.5px at 48% 12%, rgba(250, 250, 250, 0.35), transparent),
+    radial-gradient(1px 1px at 66% 36%, rgba(250, 250, 250, 0.28), transparent),
+    radial-gradient(1.5px 1.5px at 82% 22%, rgba(250, 250, 250, 0.32), transparent),
+    radial-gradient(1px 1px at 90% 58%, rgba(250, 250, 250, 0.25), transparent),
+    radial-gradient(1px 1px at 18% 72%, rgba(250, 250, 250, 0.3), transparent),
+    radial-gradient(1.5px 1.5px at 40% 84%, rgba(250, 250, 250, 0.22), transparent),
+    radial-gradient(1px 1px at 58% 68%, rgba(250, 250, 250, 0.28), transparent),
+    radial-gradient(1px 1px at 74% 88%, rgba(250, 250, 250, 0.24), transparent);
   animation: auth-stars-twinkle 7s ease-in-out infinite;
 }
 
 .auth-orb {
   position: absolute;
   border-radius: 9999px;
-  filter: blur(40px);
-  opacity: 0.55;
+  filter: blur(48px);
+  opacity: 0.45;
   will-change: transform;
 }
 
 .auth-orb-a {
   top: 8%;
-  right: 12%;
+  right: 14%;
   width: 220px;
   height: 220px;
-  background: rgba(88, 101, 242, 0.65);
+  background: rgba(59, 130, 246, 0.35);
   animation: auth-orb-drift-a 14s ease-in-out infinite;
 }
 
 .auth-orb-b {
   bottom: 10%;
-  left: 8%;
-  width: 280px;
-  height: 280px;
-  background: rgba(59, 130, 246, 0.4);
+  left: 10%;
+  width: 260px;
+  height: 260px;
+  background: rgba(37, 99, 235, 0.22);
   animation: auth-orb-drift-b 18s ease-in-out infinite;
 }
 
 .auth-orb-c {
   top: 42%;
   left: 42%;
-  width: 160px;
-  height: 160px;
-  background: rgba(255, 255, 255, 0.12);
+  width: 150px;
+  height: 150px;
+  background: rgba(250, 250, 250, 0.05);
   animation: auth-orb-drift-c 12s ease-in-out infinite;
 }
 
 .auth-orb-d {
   top: 18%;
-  left: 22%;
-  width: 120px;
-  height: 120px;
-  background: rgba(0, 168, 252, 0.25);
+  left: 24%;
+  width: 110px;
+  height: 110px;
+  background: rgba(96, 165, 250, 0.18);
   animation: auth-orb-drift-a 16s ease-in-out infinite reverse;
 }
 
 .auth-float {
   position: absolute;
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.16), rgba(88, 101, 242, 0.22));
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(145deg, rgba(24, 24, 28, 0.85), rgba(59, 130, 246, 0.14));
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(6px);
   will-change: transform;
 }
@@ -293,16 +292,16 @@
 .auth-float-1 {
   top: 16%;
   right: 18%;
-  width: 54px;
-  height: 54px;
+  width: 52px;
+  height: 52px;
   animation: auth-float-bob 9s ease-in-out infinite;
 }
 
 .auth-float-2 {
   bottom: 22%;
-  right: 10%;
-  width: 40px;
-  height: 40px;
+  right: 12%;
+  width: 38px;
+  height: 38px;
   border-radius: 9999px;
   animation: auth-float-bob 11s ease-in-out infinite 0.6s;
 }
@@ -310,8 +309,8 @@
 .auth-float-3 {
   top: 58%;
   right: 28%;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 8px;
   animation: auth-float-bob 8s ease-in-out infinite 1.1s;
 }
