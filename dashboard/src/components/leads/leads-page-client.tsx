@@ -5,8 +5,15 @@ import { Download, Phone, RefreshCw, RotateCcw, Search, Users } from "lucide-rea
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { readJsonResponse } from "@/lib/fetch-json";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { VicidialLead, VicidialLeadSummary } from "@/lib/vicidial/leads";
+
+type CampaignOption = {
+  id: string;
+  name: string;
+  vicidialCampaignId: string;
+};
 
 const emptySummary: VicidialLeadSummary = {
   total: 0,
@@ -19,6 +26,7 @@ const emptySummary: VicidialLeadSummary = {
 
 const RAIL_KEY = "leads.railWidth";
 const DETAIL_KEY = "leads.detailWidth";
+const CAMPAIGN_KEY = "leads.vicidialCampaignId";
 const RAIL_MIN = 180;
 const RAIL_MAX = 320;
 const DETAIL_MIN = 240;
@@ -128,7 +136,9 @@ function readStoredWidth(key: string, fallback: number, min: number, max: number
 export function LeadsPageClient() {
   const [leads, setLeads] = useState<VicidialLead[]>([]);
   const [summary, setSummary] = useState<VicidialLeadSummary>(emptySummary);
-  const [campaignId, setCampaignId] = useState("test_cam");
+  const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
+  const [campaignId, setCampaignId] = useState("");
+  const [campaignsReady, setCampaignsReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
@@ -152,6 +162,60 @@ export function LeadsPageClient() {
     detailWidthRef.current = detail;
     setRailWidth(rail);
     setDetailWidth(detail);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCampaigns() {
+      if (!isSupabaseConfigured()) {
+        setCampaignsReady(true);
+        setLoading(false);
+        setError("Supabase is not configured.");
+        return;
+      }
+      try {
+        const supabase = createClient();
+        const { data, error: qErr } = await supabase
+          .from("campaigns")
+          .select("id, name, vicidial_campaign_id, updated_at")
+          .not("vicidial_campaign_id", "is", null)
+          .order("updated_at", { ascending: false });
+        if (qErr) throw qErr;
+        if (cancelled) return;
+        const options = (data ?? [])
+          .map((row) => ({
+            id: row.id as string,
+            name: (row.name as string) || "Untitled",
+            vicidialCampaignId: String(row.vicidial_campaign_id ?? "").trim(),
+          }))
+          .filter((row) => row.vicidialCampaignId);
+        setCampaigns(options);
+        const stored =
+          typeof window !== "undefined"
+            ? window.localStorage.getItem(CAMPAIGN_KEY)?.trim() || ""
+            : "";
+        const pick =
+          options.find((c) => c.vicidialCampaignId === stored)?.vicidialCampaignId ||
+          options[0]?.vicidialCampaignId ||
+          "";
+        setCampaignId(pick);
+        if (!options.length) {
+          setLoading(false);
+          setHint("No campaigns with a ViciDial campaign ID yet. Set one in Campaigns.");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not load campaigns.");
+          setLoading(false);
+        }
+      } finally {
+        if (!cancelled) setCampaignsReady(true);
+      }
+    }
+    void loadCampaigns();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -201,6 +265,12 @@ export function LeadsPageClient() {
   }
 
   const sync = useCallback(async () => {
+    if (!campaignId) {
+      setLeads([]);
+      setSummary(emptySummary);
+      setLoading(false);
+      return;
+    }
     setSyncing(true);
     setError("");
     try {
@@ -234,8 +304,21 @@ export function LeadsPageClient() {
   }, [campaignId]);
 
   useEffect(() => {
+    if (!campaignsReady || !campaignId) return;
     void sync();
-  }, [sync]);
+  }, [campaignsReady, campaignId, sync]);
+
+  function selectCampaign(vicidialCampaignId: string) {
+    setCampaignId(vicidialCampaignId);
+    setStatusFilter("ALL");
+    setSelectedId(null);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(CAMPAIGN_KEY, vicidialCampaignId);
+    }
+  }
+
+  const selectedCampaignName =
+    campaigns.find((c) => c.vicidialCampaignId === campaignId)?.name || campaignId || "—";
 
   async function resetToNew(lead: VicidialLead) {
     setError("");
@@ -367,10 +450,37 @@ export function LeadsPageClient() {
               Directory
             </p>
             <h1 className="mt-1 text-lg font-semibold tracking-tight text-foreground">Leads</h1>
-            <p className="mt-1 truncate text-caption text-foreground-muted">{campaignId}</p>
+            <p className="mt-1 truncate text-caption text-foreground-muted">
+              {selectedCampaignName}
+            </p>
           </div>
 
           <nav className="flex gap-1 overflow-x-auto p-2 scrollbar-thin lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto">
+            {campaigns.length > 0 ? (
+              <div className="mb-2 w-full space-y-1 border-b border-surface-border-subtle pb-2">
+                <p className="px-2 text-2xs font-semibold uppercase tracking-[0.12em] text-foreground-faint">
+                  Campaigns
+                </p>
+                {campaigns.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => selectCampaign(c.vicidialCampaignId)}
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                      c.vicidialCampaignId === campaignId
+                        ? "bg-surface-overlay text-foreground"
+                        : "text-foreground-muted hover:bg-surface-overlay/60 hover:text-foreground",
+                    )}
+                  >
+                    <span className="truncate">{c.name}</span>
+                    <span className="ml-2 shrink-0 font-mono text-2xs text-foreground-faint">
+                      {c.vicidialCampaignId}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <FilterChip
               active={statusFilter === "ALL"}
               label="Everyone"
